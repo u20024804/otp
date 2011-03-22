@@ -4,7 +4,32 @@
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 -include("../rtl/hipe_rtl.hrl").
 
--export([translate/0]).
+-export([translate/1]).
 
-translate() ->
-  io:format("Geia sou llvm!~n").
+translate(RTL) ->
+    io:format("Geia sou llvm!~n"),
+    {ok, File_llvm} = file:open("out.ll", [read, write]),
+    %%{ok, File_rtl} = file:open("out.rtl", [write, raw]),
+    %%hipe_rtl:pp(File_rtl, RTL),
+    %%file:close(File_rtl).
+    Data = hipe_rtl:rtl_data(RTL),
+    Code = hipe_rtl:rtl_code(RTL),
+    translate_instrs(File_llvm, Code),
+    file:close(File_llvm).
+
+%%-----------------------------------------------------------------------------
+
+translate_instrs(Dev, []) -> 
+    ok;
+translate_instrs(Dev, [I|Is]) ->
+    translate_instr(Dev, I),
+    translate_instrs(Dev, Is).
+
+
+translate_instr(Dev, I) ->
+    case I of
+        #alu{} -> io:fwrite(Dev, "~s~n", ["Found an alu"]);
+        _ -> ok
+    end.
+
+

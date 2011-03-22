@@ -117,6 +117,7 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   ?opt_stop_timer("Icode"),
   LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
 			   "RTL", Options),
+  hipe_rtl2llvm:translate(LinearRTL),  % Stub Function to try RTL parsing
   case proplists:get_bool(to_rtl, Options) of
     false ->
       rtl_to_native(MFA, LinearRTL, Options, DebugState);
