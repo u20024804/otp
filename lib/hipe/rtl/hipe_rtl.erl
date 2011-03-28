@@ -350,7 +350,10 @@
 	 %% move_dst_update/2,
 	 fixnumop_dst_update/2,
 	 pp_instr/2,
-         %% pp_arg/2,
+	 %% Uber hack!
+	 pp_var/2,
+	 pp_reg/2,
+     pp_arg/2,
          phi_arglist_update/2,
          phi_redirect_pred/3]).
 
@@ -1460,31 +1463,31 @@ pp_instr(Dev, I) ->
       pp_args(Dev, call_dstlist(I)),
       io:format(Dev, " <- ", []),
       case call_is_known(I) of
-	true ->
-	  case call_fun(I) of
-	    F when is_atom(F) ->
-	      io:format(Dev, "~w(", [F]);
-	    {M,F,A} when is_atom(M), is_atom(F), is_integer(A), A >= 0 ->
-	      io:format(Dev, "~w:~w(", [M, F]);
-	    {F,A} when is_atom(F), is_integer(A), A >=0 ->
-	      io:format(Dev, "~w(", [F])
-	  end;
-	false ->
-	  io:format(Dev, "(",[]),
-	  pp_arg(Dev, call_fun(I)),
-	  io:format(Dev, ")(",[])
+          true ->
+              case call_fun(I) of
+                  F when is_atom(F) ->
+                      io:format(Dev, "~w(", [F]);
+                  {M,F,A} when is_atom(M), is_atom(F), is_integer(A), A >= 0 ->
+                      io:format(Dev, "~w:~w(", [M, F]);
+                  {F,A} when is_atom(F), is_integer(A), A >=0 ->
+                      io:format(Dev, "~w(", [F])
+              end;
+          false ->
+              io:format(Dev, "(",[]),
+              pp_arg(Dev, call_fun(I)),
+              io:format(Dev, ")(",[])
       end,
       pp_args(Dev, call_arglist(I)),
       io:format(Dev, ")", []),
       case call_continuation(I) of
-	[] -> true;
-	CC ->
-	  io:format(Dev, " then L~w", [CC])
+          [] -> true;
+          CC ->
+              io:format(Dev, " then L~w", [CC])
       end,
       case call_fail(I) of
-	[] -> true;
-	L ->
-	  io:format(Dev, " fail to L~w", [L])
+          [] -> true;
+          L ->
+              io:format(Dev, " fail to L~w", [L])
       end,
       io:format(Dev, "~n", []);
     #enter{} ->
