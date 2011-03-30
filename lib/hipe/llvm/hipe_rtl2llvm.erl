@@ -19,7 +19,7 @@ translate(RTL) ->
     Params = hipe_rtl:rtl_params(RTL),
     create_header(File_llvm, Fun, Params),
     translate_instrs(File_llvm, Code),
-    create_main(File_llvm, Fun),
+    create_main(File_llvm, Fun, Params),
     file:close(File_llvm).
 
 %%-----------------------------------------------------------------------------
@@ -56,6 +56,9 @@ trans_call(Dev, I) ->
   case hipe_rtl:call_fun(I) of
     '+' -> io:format(Dev, "add ", []);
     '-' -> io:format(Dev, "sub ", []);
+    '*' -> io:format(Dev, "mul ", []);
+    'div' -> io:format(Dev, "sdiv ", []);
+    'rem' -> io:format(Dev, "srem ", []);
     _ -> ok
   end,
   [H|T] =  hipe_rtl:call_arglist(I),
@@ -235,12 +238,28 @@ create_header(Dev, Name, Params) ->
     io:format(Dev, ") {~n",[]).
 
 
+%%-----------------------------------------------------------------------------
+%%
+%% Only For Testing
+%%
+
+
 %% Create Main Fuction (Only for testing reasons)
 
-create_main(Dev, Name) ->
+create_main(Dev, Name, Params) ->
     {_,N,_} = Name,
+    io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
     io:format(Dev, "~n~ndefine i32 @main() {~n", []),
     io:format(Dev, "Entry:~n", []),
-    io:format(Dev, "%return = call i32 @~w(i32 10)~n", [N]),
-    io:format(Dev, "ret i32 %return~n}~n",[]).
+    io:format(Dev, "%result = call i32 @~w(", [N]),
+    init_params(Dev, erlang:length(Params)),
+    io:format(Dev, ")~n", []),
+ 
+    io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0), i32 %result) nounwind~n", []),
+    io:format(Dev, "ret i32 %result~n}~n",[]),
+    io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind",[]).
 
+%% Print random parameters in main function
+init_params(Dev, 1) -> io:format(Dev,"i32 ~w",[random:uniform(10)]);
+    init_params(Dev, N) -> io:format(Dev,"i32 ~w,",[random:uniform(10)]),
+                    init_params(Dev, N-1).
