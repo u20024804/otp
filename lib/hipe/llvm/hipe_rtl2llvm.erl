@@ -41,7 +41,6 @@ translate_instr(Dev, I) ->
     #label{} -> trans_label(Dev, I);
     #branch{} -> trans_branch(Dev, I);
     #goto{} -> trans_goto(Dev, I);
-    _ -> ok
   end.
 
 %%-----------------------------------------------------------------------------
@@ -59,7 +58,6 @@ trans_call(Dev, I) ->
     '*' -> io:format(Dev, "mul ", []);
     'div' -> io:format(Dev, "sdiv ", []);
     'rem' -> io:format(Dev, "srem ", []);
-    _ -> ok
   end,
   [H|T] =  hipe_rtl:call_arglist(I),
   trans_arg(Dev, H),
@@ -133,28 +131,28 @@ trans_branch(Dev, I) ->
 %% alu
 %% 
 trans_alu(Dev, I) ->
-    io:format(Dev,"  ", []),
-    trans_arg(Dev, hipe_rtl:alu_dst(I), dst),
-    io:format(Dev, " = ", []),
-    case hipe_rtl:alu_op(I) of
-        add -> io:format(Dev, "add ", []);
-        sub -> io:format(Dev, "sub ", []);
-        'or'-> io:format(Dev, "or ", []);
-        'and' -> io:format(Dev, "and ", []);
-        'xor' -> io:format(Dev, "xor ", []);
-        %%'xornot' -> io:format(Dev, " ", []);
-        %%andnot -> io:format(Dev, " ", []);
-        sll -> io:format(Dev, "shl ", []);
-        %%sllx -> io:format(Dev, " ", []);
-        srl -> io:format(Dev, "lshr ", []);
-        %%srlx -> io:format(Dev, " ", []);
-        sra -> io:format(Dev, "ashr ", [])
-        %%srax -> io:format(Dev, " ", [])
-    end,
-    trans_arg(Dev, hipe_rtl:alu_src1(I)),
-    io:format(Dev,", ",[]),
-    trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
-    io:format(Dev,"~n",[]).
+  io:format(Dev,"  ", []),
+  trans_arg(Dev, hipe_rtl:alu_dst(I), dst),
+  io:format(Dev, " = ", []),
+  case hipe_rtl:alu_op(I) of
+    add -> io:format(Dev, "add ", []);
+    sub -> io:format(Dev, "sub ", []);
+    'or'-> io:format(Dev, "or ", []);
+    'and' -> io:format(Dev, "and ", []);
+    'xor' -> io:format(Dev, "xor ", []);
+    %%'xornot' -> io:format(Dev, " ", []);
+    %%andnot -> io:format(Dev, " ", []);
+    sll -> io:format(Dev, "shl ", []);
+    %%sllx -> io:format(Dev, " ", []);
+    srl -> io:format(Dev, "lshr ", []);
+    %%srlx -> io:format(Dev, " ", []);
+    sra -> io:format(Dev, "ashr ", [])
+    %%srax -> io:format(Dev, " ", [])
+  end,
+  trans_arg(Dev, hipe_rtl:alu_src1(I)),
+  io:format(Dev,", ",[]),
+  trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
+  io:format(Dev,"~n",[]).
 
 %%
 %% goto
@@ -166,7 +164,7 @@ trans_goto(Dev, I) ->
 %%-----------------------------------------------------------------------------
 
 %% 
-%% Prety print arg(s).
+%% Pretty print arg(s).
 %%
 trans_args(Dev, A) ->
   trans_args(Dev, A, src).
@@ -188,7 +186,6 @@ trans_arg(Dev, A, Type) ->
   case Type of 
     src -> io:format(Dev, "~w ", [arg_type(A)]);
     dst -> ok;
-    _ ->   ok %% fail (not so ok!)
   end,
   case hipe_rtl:is_var(A) of
     true ->
@@ -232,10 +229,10 @@ arg_type(A) ->
 %% Create Header for Function 
 
 create_header(Dev, Name, Params) ->
-    {_,N,_} = Name,
-    io:format(Dev, "~n~ndefine i32 @~w(", [N]),
-    trans_args(Dev, Params),
-    io:format(Dev, ") {~n",[]).
+  {_,N,_} = Name,
+  io:format(Dev, "~n~ndefine i32 @~w(", [N]),
+  trans_args(Dev, Params),
+  io:format(Dev, ") {~n",[]).
 
 
 %%-----------------------------------------------------------------------------
@@ -244,22 +241,24 @@ create_header(Dev, Name, Params) ->
 %%
 
 
-%% Create Main Fuction (Only for testing reasons)
+%% Create Main Function (Only for testing reasons)
 
 create_main(Dev, Name, Params) ->
-    {_,N,_} = Name,
-    io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
-    io:format(Dev, "~n~ndefine i32 @main() {~n", []),
-    io:format(Dev, "Entry:~n", []),
-    io:format(Dev, "%result = call i32 @~w(", [N]),
-    init_params(Dev, erlang:length(Params)),
-    io:format(Dev, ")~n", []),
- 
-    io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0), i32 %result) nounwind~n", []),
-    io:format(Dev, "ret i32 %result~n}~n",[]),
-    io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind",[]).
+  {_,N,_} = Name,
+  io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
+  io:format(Dev, "~n~ndefine i32 @main() {~n", []),
+  io:format(Dev, "Entry:~n", []),
+  io:format(Dev, "%result = call i32 @~w(", [N]),
+  init_params(Dev, erlang:length(Params)),
+  io:format(Dev, ")~n", []),
+
+  io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0), i32 %result) nounwind~n", []),
+  io:format(Dev, "ret i32 %result~n}~n",[]),
+  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind",[]).
 
 %% Print random parameters in main function
-init_params(Dev, 1) -> io:format(Dev,"i32 ~w",[random:uniform(10)]);
-    init_params(Dev, N) -> io:format(Dev,"i32 ~w,",[random:uniform(10)]),
-                    init_params(Dev, N-1).
+init_params(Dev, 1) -> 
+  io:format(Dev,"i32 ~w",[random:uniform(10)]);
+init_params(Dev, N) -> 
+  io:format(Dev,"i32 ~w,",[random:uniform(10)]),
+  init_params(Dev, N-1).
