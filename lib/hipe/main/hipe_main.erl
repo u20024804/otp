@@ -394,6 +394,7 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
   LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
+  rtl_llvm(RtlCfg1, Options),   %STUB: parse RTL in SSA form
   LinearRTL2.
 
 translate_to_rtl(Icode, Options) ->
@@ -408,6 +409,30 @@ rtl_symbolic(RtlCfg, Options) ->
   ?option_time(hipe_rtl_symbolic:expand(RtlCfg),
 	       "Expansion of symbolic instructions", Options).
 
+
+%%----------------------------------------------------------------------
+%%
+%% Perform translation to LLVM assembly code when in rtl_ssa form.
+%%
+%% We want naive (no-optimized) code to check LLVM optimizations.
+%%
+%%----------------------------------------------------------------------
+rtl_llvm(RtlCfg0, Options) ->
+  case proplists:get_bool(to_llvm, Options) of
+    true ->
+      RtlSSA0 = rtl_ssa_convert(RtlCfg0, Options),
+      hipe_rtl2llvm:translate(RtlSSA0);
+      %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
+      %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
+      %% RtlSSA2 = rtl_ssa_dead_code_elimination(RtlSSA1, Options),
+      %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
+      %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
+      %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
+    false ->
+      ok
+  end.
+
+      
 %%----------------------------------------------------------------------
 %%
 %% RTL passes on SSA form. The following constraints are applicable:
