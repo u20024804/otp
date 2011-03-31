@@ -7,43 +7,113 @@
 -export([translate/1]).
 
 translate(RTL) ->
-    io:format("Geia sou llvm!~n"),
-    {ok, File_rtl} = file:open("out.rtl", [append]),
-    hipe_rtl:pp(File_rtl, RTL),
-    file:close(File_rtl),
+  % Data = hipe_rtl:rtl_data(RTL),
+  Code = hipe_rtl:rtl_code(RTL),
+  Fun =  hipe_rtl:rtl_fun(RTL),
+  Params = hipe_rtl:rtl_params(RTL),
+  io:format("Geia sou llvm!~n"),
+  {_, Fun_Name, _} = Fun,
 
-    {ok, File_llvm} = file:open("out.ll", [append]),
-    Data = hipe_rtl:rtl_data(RTL),
-    Code = hipe_rtl:rtl_code(RTL),
-    Fun =  hipe_rtl:rtl_fun(RTL),
-    Params = hipe_rtl:rtl_params(RTL),
-    create_header(File_llvm, Fun, Params),
-    translate_instrs(File_llvm, Code),
-    create_main(File_llvm, Fun, Params),
-    file:close(File_llvm).
+  {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
+  hipe_rtl:pp(File_rtl, RTL),
+  file:close(File_rtl),
+
+  {ok, File_llvm} = file:open(atom_to_list(Fun_Name) ++ ".ll", [write]),
+  create_header(File_llvm, Fun, Params),
+  translate_instrs(File_llvm, Code),
+  create_main(File_llvm, Fun, Params),
+  file:close(File_llvm).
 
 %%-----------------------------------------------------------------------------
 
 translate_instrs(Dev, []) -> 
-    io:format(Dev,"~n}~n",[]),
-    ok;
+  io:format(Dev,"~n}~n",[]),
+  ok;
 translate_instrs(Dev, [I|Is]) ->
-    translate_instr(Dev, I),
-    translate_instrs(Dev, Is).
+  translate_instr(Dev, I),
+  translate_instrs(Dev, Is).
 
 
 translate_instr(Dev, I) ->
   case I of
     #alu{} -> trans_alu(Dev, I);
-    #call{} -> trans_call(Dev, I);
-    #return{} -> trans_return(Dev, I);
-    #move{} -> trans_move(Dev, I);
-    #label{} -> trans_label(Dev, I);
+    #alub{} -> ok;
     #branch{} -> trans_branch(Dev, I);
+    #call{} -> trans_call(Dev, I);
+    #comment{} -> ok;
+    #enter{} -> ok;
+    #fconv{} -> ok;
+    #fixnumop{} -> ok;
+    #fload{} -> ok;
+    #fmove{} -> ok;
+    #fp{} -> ok;
+    #fp_unop{} -> ok;
+    #fstore{} -> ok;
+    #gctest{} -> ok;
     #goto{} -> trans_goto(Dev, I);
+    #goto_index{} -> ok;
+    #label{} -> trans_label(Dev, I);
+    #load{} -> ok;
+    #load_address{} -> ok;
+    #load_atom{} -> ok;
+    #load_word_index{} -> ok;
+    #move{} -> trans_move(Dev, I);
+    #multimove{} -> ok;
+    #phi{} -> ok;
+    #return{} -> trans_return(Dev, I);
+    #store{} -> ok;
+    #switch{} -> ok;
+    Other -> 
+      exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
 
 %%-----------------------------------------------------------------------------
+
+%%
+%% alu
+%% 
+trans_alu(Dev, I) ->
+  io:format(Dev,"  ", []),
+  trans_arg(Dev, hipe_rtl:alu_dst(I), dst),
+  io:format(Dev, " = ", []),
+  case hipe_rtl:alu_op(I) of
+    add -> io:format(Dev, "add ", []);
+    sub -> io:format(Dev, "sub ", []);
+    'or'-> io:format(Dev, "or ", []);
+    'and' -> io:format(Dev, "and ", []);
+    'xor' -> io:format(Dev, "xor ", []);
+    'xornot' -> ok;
+    andnot -> ok;
+    sll -> io:format(Dev, "shl ", []);
+    sllx -> ok;
+    srl -> io:format(Dev, "lshr ", []);
+    srlx -> ok;
+    sra -> io:format(Dev, "ashr ", []);
+    srax -> ok;
+    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
+  end,
+  trans_arg(Dev, hipe_rtl:alu_src1(I)),
+  io:format(Dev,", ",[]),
+  trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
+  io:format(Dev,"~n",[]).
+
+%%
+%% branch
+%%
+trans_branch(Dev, I) ->
+  %icmp 
+  io:format(Dev, "  ", []),
+  io:format(Dev, "%cond = ", []), %%TODO
+  io:format(Dev, " icmp ~w ", [hipe_rtl:branch_cond(I)]),
+  trans_arg(Dev, hipe_rtl:branch_src1(I)),
+  io:format(Dev, ", ", []),
+  trans_arg(Dev, hipe_rtl:branch_src2(I), dst),
+  io:format(Dev, "~n", []),
+  %br
+  io:format(Dev, "  ", []),
+  io:format(Dev, "br i1 %cond, ", []),
+  io:format(Dev, "label %L~w, label %L~w~n", [hipe_rtl:branch_true_label(I),
+      hipe_rtl:branch_false_label(I)]).
 
 %%
 %% call
@@ -58,6 +128,7 @@ trans_call(Dev, I) ->
     '*' -> io:format(Dev, "mul ", []);
     'div' -> io:format(Dev, "sdiv ", []);
     'rem' -> io:format(Dev, "srem ", []);
+    Other -> exit({?MODULE, trans_call, {"unknown call", Other}})
   end,
   [H|T] =  hipe_rtl:call_arglist(I),
   trans_arg(Dev, H),
@@ -66,13 +137,17 @@ trans_call(Dev, I) ->
   io:format(Dev, "~n", []).      
 
 %%
-%% return 
+%% goto
 %%
-trans_return(Dev, I) ->
-  io:format(Dev, "  ",  []),
-  io:format(Dev, "ret ", []),
-  trans_args(Dev, hipe_rtl:return_varlist(I)),
-  io:format(Dev, "~n", []).
+trans_goto(Dev, I) ->
+  io:format(Dev, "  ", []),
+  io:format(Dev, "br label %L~w~n", [hipe_rtl:goto_label(I)]).
+
+%%
+%% label
+%%
+trans_label(Dev, I) ->
+  io:format(Dev, "~nL~w:~n", [hipe_rtl:label_name(I)]).
 
 %%
 %% move
@@ -103,63 +178,13 @@ trans_move(Dev, I) ->
   io:format(Dev, "_addr~n", []).
 
 %%
-%% label
+%% return 
 %%
-trans_label(Dev, I) ->
-  io:format(Dev, "~nL~w:~n", [hipe_rtl:label_name(I)]).
-
-
-%%
-%% branch
-%%
-trans_branch(Dev, I) ->
-  %icmp 
-  io:format(Dev, "  ", []),
-  io:format(Dev, "%cond = ", []), %%TODO
-  io:format(Dev, " icmp ~w ", [hipe_rtl:branch_cond(I)]),
-  trans_arg(Dev, hipe_rtl:branch_src1(I)),
-  io:format(Dev, ", ", []),
-  trans_arg(Dev, hipe_rtl:branch_src2(I), dst),
-  io:format(Dev, "~n", []),
-  %br
-  io:format(Dev, "  ", []),
-  io:format(Dev, "br i1 %cond, ", []),
-  io:format(Dev, "label %L~w, label %L~w~n", [hipe_rtl:branch_true_label(I),
-                                    hipe_rtl:branch_false_label(I)]).
-
-%%
-%% alu
-%% 
-trans_alu(Dev, I) ->
-  io:format(Dev,"  ", []),
-  trans_arg(Dev, hipe_rtl:alu_dst(I), dst),
-  io:format(Dev, " = ", []),
-  case hipe_rtl:alu_op(I) of
-    add -> io:format(Dev, "add ", []);
-    sub -> io:format(Dev, "sub ", []);
-    'or'-> io:format(Dev, "or ", []);
-    'and' -> io:format(Dev, "and ", []);
-    'xor' -> io:format(Dev, "xor ", []);
-    %%'xornot' -> io:format(Dev, " ", []);
-    %%andnot -> io:format(Dev, " ", []);
-    sll -> io:format(Dev, "shl ", []);
-    %%sllx -> io:format(Dev, " ", []);
-    srl -> io:format(Dev, "lshr ", []);
-    %%srlx -> io:format(Dev, " ", []);
-    sra -> io:format(Dev, "ashr ", [])
-    %%srax -> io:format(Dev, " ", [])
-  end,
-  trans_arg(Dev, hipe_rtl:alu_src1(I)),
-  io:format(Dev,", ",[]),
-  trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
-  io:format(Dev,"~n",[]).
-
-%%
-%% goto
-%%
-trans_goto(Dev, I) ->
-  io:format(Dev, "  ", []),
-  io:format(Dev, "br label %L~w~n", [hipe_rtl:goto_label(I)]).
+trans_return(Dev, I) ->
+  io:format(Dev, "  ",  []),
+  io:format(Dev, "ret ", []),
+  trans_args(Dev, hipe_rtl:return_varlist(I)),
+  io:format(Dev, "~n", []).
 
 %%-----------------------------------------------------------------------------
 
@@ -169,7 +194,7 @@ trans_goto(Dev, I) ->
 trans_args(Dev, A) ->
   trans_args(Dev, A, src).
 %%
-trans_args(Dev, [], Type) ->
+trans_args(_, [], _) ->
   ok;
 trans_args(Dev, [A], Type) ->
   trans_arg(Dev, A, Type);
@@ -185,7 +210,7 @@ trans_arg(Dev, A) ->
 trans_arg(Dev, A, Type) ->
   case Type of 
     src -> io:format(Dev, "~w ", [arg_type(A)]);
-    dst -> ok;
+    dst -> ok
   end,
   case hipe_rtl:is_var(A) of
     true ->
@@ -193,22 +218,22 @@ trans_arg(Dev, A, Type) ->
       hipe_rtl:pp_var(Dev, A);
     false ->
       case hipe_rtl:is_reg(A) of
-	true ->
-	  io:format(Dev, "%", []),
-	  hipe_rtl:pp_reg(Dev, A);
-	false ->
-	  case hipe_rtl:is_imm(A) of
-	    true ->
-	      Val = hipe_tagscheme:fixnum_val(hipe_rtl:imm_value(A)),
-	      io:format(Dev, "~w", [Val]);
-	    false ->
-	      case hipe_rtl:is_fpreg(A) of
-		true ->
-		  io:format(Dev, "f~w", [hipe_rtl:fpreg_index(A)]);
-		false ->
-		  ok
-	      end
-	  end
+        true ->
+          io:format(Dev, "%", []),
+          hipe_rtl:pp_reg(Dev, A);
+        false ->
+          case hipe_rtl:is_imm(A) of
+            true ->
+              Val = hipe_tagscheme:fixnum_val(hipe_rtl:imm_value(A)),
+              io:format(Dev, "~w", [Val]);
+            false ->
+              case hipe_rtl:is_fpreg(A) of
+                true ->
+                  io:format(Dev, "f~w", [hipe_rtl:fpreg_index(A)]);
+                false ->
+                  ok
+              end
+          end
       end
   end.
 
@@ -219,8 +244,8 @@ arg_type(A) ->
     true -> i32;
     false ->
       case hipe_rtl:is_reg(A) of
-	true -> i32;
-	false -> i32
+        true -> i32;
+        false -> i32
       end
   end.
 
@@ -254,7 +279,7 @@ create_main(Dev, Name, Params) ->
 
   io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0), i32 %result) nounwind~n", []),
   io:format(Dev, "ret i32 %result~n}~n",[]),
-  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind",[]).
+  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind~n",[]).
 
 %% Print random parameters in main function
 init_params(Dev, 1) -> 
