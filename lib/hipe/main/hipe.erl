@@ -1369,6 +1369,7 @@ opt_keys() ->
      timeregalloc,
      timers,
      to_rtl,
+     to_llvm, % STUB: new flag for llvm!
      use_indexing,
      use_inline_atom_search,
      use_callgraph,
