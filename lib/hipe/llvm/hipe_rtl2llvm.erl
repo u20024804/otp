@@ -37,32 +37,32 @@ translate_instrs(Dev, [I|Is]) ->
 translate_instr(Dev, I) ->
   case I of
     #alu{} -> trans_alu(Dev, I);
-    #alub{} -> ok;
+    #alub{} -> trans_alub(Dev, I);
     #branch{} -> trans_branch(Dev, I);
     #call{} -> trans_call(Dev, I);
-    #comment{} -> ok;
-    #enter{} -> ok;
-    #fconv{} -> ok;
-    #fixnumop{} -> ok;
-    #fload{} -> ok;
-    #fmove{} -> ok;
-    #fp{} -> ok;
-    #fp_unop{} -> ok;
-    #fstore{} -> ok;
-    #gctest{} -> ok;
+    %#comment{} -> ok;
+    %#enter{} -> ok;
+    %#fconv{} -> ok;
+    %#fixnumop{} -> ok;
+    %#fload{} -> ok;
+    %#fmove{} -> ok;
+    %#fp{} -> ok;
+    %#fp_unop{} -> ok;
+    %#fstore{} -> ok;
+    %#gctest{} -> ok;
     #goto{} -> trans_goto(Dev, I);
-    #goto_index{} -> ok;
+    %#goto_index{} -> ok;
     #label{} -> trans_label(Dev, I);
-    #load{} -> ok;
-    #load_address{} -> ok;
-    #load_atom{} -> ok;
-    #load_word_index{} -> ok;
+    %#load{} -> ok;
+    %#load_address{} -> ok;
+    %#load_atom{} -> ok;
+    %#load_word_index{} -> ok;
     #move{} -> trans_move(Dev, I);
-    #multimove{} -> ok;
-    #phi{} -> ok;
+    %#multimove{} -> ok;
+    #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
-    #store{} -> ok;
-    #switch{} -> ok;
+    %#store{} -> ok;
+    %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
@@ -96,6 +96,71 @@ trans_alu(Dev, I) ->
   io:format(Dev,", ",[]),
   trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
   io:format(Dev,"~n",[]).
+
+%%
+%% alub
+%%
+trans_alub(Dev, I) ->
+  case hipe_rtl:alub_cond(I) of
+    overflow -> trans_alub_overflow(Dev, I);
+    not_overflow -> trans_alub_overflow(Dev, I);
+    _ -> trans_alub_no_overflow(Dev, I)
+  end.
+
+
+trans_alub_overflow(Dev, I) ->
+  io:format(Dev,"  ", []),
+  io:format(Dev, "%res = ", []),
+  io:format(Dev, "call {i32, i1} @llvm.sadd.with.overflow.i32(", []),
+  trans_arg(Dev, hipe_rtl:alub_src1(I)),
+  io:format(Dev,", ", []),
+  trans_arg(Dev, hipe_rtl:alub_src2(I)),
+  io:format(Dev,")~n", []),
+  io:format(Dev,"  ", []),
+  trans_arg(Dev, hipe_rtl:alub_dst(I), dst),
+  io:format(Dev, " = ", []),
+  io:format(Dev, "extractvalue {i32, i1} %res, 0~n", []),
+  io:format(Dev,"  ", []),
+  io:format(Dev, "%obit = extractvalue {i32, i1} %res, 1~n", []),
+  io:format(Dev,"  ", []),
+  io:format(Dev, "br i1 %obit, label %L~w, label %L~w~n",
+    [hipe_rtl:alub_true_label(I), hipe_rtl:alub_false_label(I)]).
+
+trans_alub_no_overflow(Dev, I) ->
+  io:format(Dev,"  ", []),
+  trans_arg(Dev, hipe_rtl:alub_dst(I), dst),
+  io:format(Dev, " = ", []),
+  case hipe_rtl:alub_op(I) of
+    'or'-> io:format(Dev, "or ", []);
+    'and' -> io:format(Dev, "and ", []);
+    'xor' -> io:format(Dev, "xor ", []);
+    'xornot' -> ok;
+    andnot -> ok;
+    sll -> io:format(Dev, "shl ", []);
+    sllx -> ok;
+    srl -> io:format(Dev, "lshr ", []);
+    srlx -> ok;
+    sra -> io:format(Dev, "ashr ", []);
+    srax -> ok;
+    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
+  end,
+  trans_arg(Dev, hipe_rtl:alub_src1(I)),
+  io:format(Dev,", ",[]),
+  trans_arg(Dev, hipe_rtl:alub_src2(I), dst),
+  io:format(Dev,"~n",[]),
+  %icmp 
+  io:format(Dev, "  ", []),
+  io:format(Dev, "%cond = ", []), %%TODO
+  io:format(Dev, " icmp ~w ", [hipe_rtl:alub_cond(I)]),
+  trans_arg(Dev, hipe_rtl:alub_src1(I)),
+  io:format(Dev, ", ", []),
+  trans_arg(Dev, hipe_rtl:alub_src2(I), dst),
+  io:format(Dev, "~n", []),
+  %br
+  io:format(Dev, "  ", []),
+  io:format(Dev, "br i1 %cond, ", []),
+  io:format(Dev, "label %L~w, label %L~w~n", [hipe_rtl:alub_true_label(I),
+      hipe_rtl:alub_false_label(I)]).
 
 %%
 %% branch
@@ -134,7 +199,11 @@ trans_call(Dev, I) ->
   trans_arg(Dev, H),
   io:format(Dev,", ",[]),
   trans_args(Dev, T, dst),
-  io:format(Dev, "~n", []).      
+  io:format(Dev, "~n", []),
+  case hipe_rtl:call_continuation(I) of
+    [] -> true;
+    CC -> trans_goto(Dev, hipe_rtl:mk_goto(CC))
+  end.
 
 %%
 %% goto
@@ -176,6 +245,18 @@ trans_move(Dev, I) ->
   io:format(Dev, "load ~w* ", [Src_type]),
   trans_arg(Dev, Src, dst),
   io:format(Dev, "_addr~n", []).
+
+
+%% 
+%% phi
+%%
+trans_phi(Dev, I) ->
+  io:format(Dev, "    ", []),
+  trans_arg(Dev, hipe_rtl:phi_dst(I), dst),
+  io:format(Dev, " = ", []),
+  io:format(Dev, "phi ~w ", [arg_type(hipe_rtl:phi_dst(I))]),
+  trans_phi_args(Dev, hipe_rtl:phi_arglist(I)),
+  io:format(Dev, "~n", []).
 
 %%
 %% return 
@@ -224,7 +305,7 @@ trans_arg(Dev, A, Type) ->
         false ->
           case hipe_rtl:is_imm(A) of
             true ->
-              Val = hipe_tagscheme:fixnum_val(hipe_rtl:imm_value(A)),
+              Val = hipe_rtl:imm_value(A),
               io:format(Dev, "~w", [Val]);
             false ->
               case hipe_rtl:is_fpreg(A) of
@@ -236,6 +317,17 @@ trans_arg(Dev, A, Type) ->
           end
       end
   end.
+
+trans_phi_args(_Dev, []) -> ok;
+trans_phi_args(Dev, [{Pred, A}]) ->
+  io:format(Dev, "[ ", []),
+  trans_arg(Dev, A, dst),
+  io:format(Dev, ", %L~w]", [Pred]);
+trans_phi_args(Dev, [{Pred, A} | Args]) ->
+  io:format(Dev, "[ ", []),
+  trans_arg(Dev, A, dst),
+  io:format(Dev, ", %L~w] , ", [Pred]),
+  trans_phi_args(Dev, Args).
 
 
 %% Return the type of arg A (only integers of 32 bits supported).
@@ -277,9 +369,13 @@ create_main(Dev, Name, Params) ->
   init_params(Dev, erlang:length(Params)),
   io:format(Dev, ")~n", []),
 
-  io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0), i32 %result) nounwind~n", []),
+  io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias " ++ 
+    "getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0)," ++ 
+    " i32 %result) nounwind~n", []),
   io:format(Dev, "ret i32 %result~n}~n",[]),
-  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind~n",[]).
+  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind~n",[]),
+  io:format(Dev, "declare {i32, i1} @llvm.sadd.with.overflow.i32(i32 %a, "++
+    "i32%b)~n", []).
 
 %% Print random parameters in main function
 init_params(Dev, 1) -> 
