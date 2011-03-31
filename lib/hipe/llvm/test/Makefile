@@ -13,8 +13,8 @@ Mods = math_test
 
 ErlSrc          = $(Mods:%=%.erl)
 ErlTargets      = $(Mods:%=$(EBIN)/%.beam) 
-RtlFiles        = $(Mods:%=%.rtl)
-LlvmFiles       = $(Mods:%=%.ll)
+RtlFiles        = *.rtl
+LlvmFiles       = *.ll
 
 # Targets
 opt debug: $(ErlTargets)
