@@ -251,7 +251,7 @@ trans_move(Dev, I) ->
 %% phi
 %%
 trans_phi(Dev, I) ->
-  io:format(Dev, "    ", []),
+  io:format(Dev, "  ", []),
   trans_arg(Dev, hipe_rtl:phi_dst(I), dst),
   io:format(Dev, " = ", []),
   io:format(Dev, "phi ~w ", [arg_type(hipe_rtl:phi_dst(I))]),
@@ -322,11 +322,11 @@ trans_phi_args(_Dev, []) -> ok;
 trans_phi_args(Dev, [{Pred, A}]) ->
   io:format(Dev, "[ ", []),
   trans_arg(Dev, A, dst),
-  io:format(Dev, ", %L~w]", [Pred]);
+  io:format(Dev, ", %L~w ]", [Pred]);
 trans_phi_args(Dev, [{Pred, A} | Args]) ->
   io:format(Dev, "[ ", []),
   trans_arg(Dev, A, dst),
-  io:format(Dev, ", %L~w] , ", [Pred]),
+  io:format(Dev, ", %L~w ] , ", [Pred]),
   trans_phi_args(Dev, Args).
 
 

@@ -421,13 +421,14 @@ rtl_llvm(RtlCfg0, Options) ->
   case proplists:get_bool(to_llvm, Options) of
     true ->
       RtlSSA0 = rtl_ssa_convert(RtlCfg0, Options),
+      LinearRtl = hipe_rtl_cfg:linearize(RtlSSA0),
       %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
       %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
       %% RtlSSA2 = rtl_ssa_dead_code_elimination(RtlSSA1, Options),
       %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
       %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
       %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
-      hipe_rtl2llvm:translate(RtlSSA0);
+      hipe_rtl2llvm:translate(LinearRtl);
     false ->
       ok
   end.
