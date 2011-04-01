@@ -61,7 +61,7 @@ translate_instr(Dev, I) ->
     %#multimove{} -> ok;
     #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
-    #store{} -> trans_store(Dev, I);
+    #store{} -> ok;
     %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
@@ -294,11 +294,6 @@ trans_return(Dev, I) ->
   trans_args(Dev, hipe_rtl:return_varlist(I)),
   io:format(Dev, "~n", []).
 
-%%
-%% store 
-%%
-trans_store(Dev, I) ->
-  io:format(Dev, "  %t999 = alloca i32~n"
 
 %%-----------------------------------------------------------------------------
 
