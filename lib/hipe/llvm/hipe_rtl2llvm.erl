@@ -40,16 +40,16 @@ translate_instr(Dev, I) ->
     #alub{} -> trans_alub(Dev, I);
     #branch{} -> trans_branch(Dev, I);
     #call{} -> trans_call(Dev, I);
-    %#comment{} -> ok;
+    #comment{} -> trans_comment(Dev, I);
     %#enter{} -> ok;
     %#fconv{} -> ok;
-    %#fixnumop{} -> ok;
+    #fixnumop{} -> trans_fixnum(Dev, I);
     %#fload{} -> ok;
     %#fmove{} -> ok;
     %#fp{} -> ok;
     %#fp_unop{} -> ok;
     %#fstore{} -> ok;
-    %#gctest{} -> ok;
+    #gctest{} -> trans_gctest(Dev, I);
     #goto{} -> trans_goto(Dev, I);
     %#goto_index{} -> ok;
     #label{} -> trans_label(Dev, I);
@@ -61,7 +61,7 @@ translate_instr(Dev, I) ->
     %#multimove{} -> ok;
     #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
-    %#store{} -> ok;
+    #store{} -> trans_store(Dev, I);
     %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
@@ -206,6 +206,33 @@ trans_call(Dev, I) ->
   end.
 
 %%
+%% trans_comment
+%%
+trans_comment(Dev, I) ->
+  io:format(Dev,"  ;;~p~n", [hipe_rtl:comment_text(I)]).
+
+%%
+%% fixnumop
+%%
+trans_fixnum(Dev, I) ->
+  Dst = hipe_rtl:fixnumop_dst(I),
+  Src = hipe_rtl:fixnumop_src(I),
+  case hipe_rtl:fixnumop_type(I) of
+    tag ->
+      trans_alu(Dev, hipe_tagscheme:realtag_fixnum(Dst, Src));
+    untag ->
+      trans_alu(Dev, hipe_tagscheme:realuntag_fixnum(Dst, Src))
+  end.
+
+%%
+%% gctest
+%%
+trans_gctest(Dev, I) ->
+  io:format(Dev,"  ; gtest(",[]),
+  trans_arg(Dev, hipe_rtl:gctest_words(I), dst),
+  io:format(Dev,")~n",[]).
+
+%%
 %% goto
 %%
 trans_goto(Dev, I) ->
@@ -266,6 +293,12 @@ trans_return(Dev, I) ->
   io:format(Dev, "ret ", []),
   trans_args(Dev, hipe_rtl:return_varlist(I)),
   io:format(Dev, "~n", []).
+
+%%
+%% store 
+%%
+trans_store(Dev, I) ->
+  io:format(Dev, "  %t999 = alloca i32~n"
 
 %%-----------------------------------------------------------------------------
 
