@@ -372,3 +372,7 @@ JAVADOC-GENERATED
 /lib/xmerl/test/xmerl_test.erl
 /lib/erl_interface/config.h.in
 /lib/configure.in
+
+# llvm - RTL and LLVM assembly files
+/lib/hipe/llvm/test/*.rtl
+/lib/hipe/llvm/test/*.ll
