@@ -36,15 +36,16 @@
 	 set_label/1, get_label/0, get_next_label/0]).
 -export([init/1, new_var/1, new_label/1,
 	 update_vrange/2, update_lblrange/2, var_range/1, label_range/1,
-	 set_var_range/3, set_label_range/3,
-	 set_var/2, get_var/1, get_next_var/1,
+	 set_var_range/3, set_label_range/3, 
+	 set_var/2, get_var/1, get_next_var/1, 
 	 set_label/2, get_label/1, get_next_label/1]).
 
 %%-----------------------------------------------------------------------
 %% Types of allowable entities to set global variables for
 %%-----------------------------------------------------------------------
 
--type gvarname() :: 'icode' | 'rtl' | 'arm' | 'ppc' | 'sparc' | 'x86'.
+-type gvarname() :: 'icode' | 'rtl' | 'arm' | 'ppc' | 'sparc' | 'x86' 
+		  | 'llvm'.
 
 %%-----------------------------------------------------------------------
 
