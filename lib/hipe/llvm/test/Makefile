@@ -9,7 +9,8 @@ PWD = $(shell pwd)
 APPDIR = $(shell dirname $(PWD))
 ERL_COMPILE_FLAGS = -pa $(APPDIR)/ebin
 
-Mods = math_test 
+Mods = math_test \
+	   tuple_test
 
 ErlSrc          = $(Mods:%=%.erl)
 ErlTargets      = $(Mods:%=$(EBIN)/%.beam) 
