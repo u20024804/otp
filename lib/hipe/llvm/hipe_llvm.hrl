@@ -44,4 +44,7 @@
 -record(llvm_icmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_fcmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_phi, {dst, type, value_label_list}). 
+%TODO: llvm_call instruction has more options
+-record(llvm_call, {dst, type, fnptrval, arglist}).
 %%---------------------------------------------------------------------
+-record(llvm_comment, {text}).
