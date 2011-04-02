@@ -427,7 +427,9 @@ xor_type(#llvm_xor{type=Type}) -> Type.
 xor_src1(#llvm_xor{src1=Src1}) -> Src1.
 xor_src2(#llvm_xor{src2=Src2}) -> Src2.
 
-
+%%
+%% extractvalue
+%%
 mk_extractvalue(Dst, Type, Val, Idx, Idxs) ->
   #llvm_extractvalue{dst=Dst,type=Type,val=Val,idx=Idx,idxs=Idxs}.
 extractvalue_dst(#llvm_extractvalue{dst=Dst})-> Dst.
@@ -436,6 +438,9 @@ extractvalue_val(#llvm_extractvalue{val=Val})-> Val.
 extractvalue_idx(#llvm_extractvalue{idx=Idx})-> Idx.
 extractvalue_idxs(#llvm_extractvalue{idxs=Idxs})-> Idxs.
 
+%%
+%% alloca
+%%
 mk_alloca(Dst, Type, Num, Align) ->
   #llvm_alloca{dst=Dst, type=Type, num=Num, align=Align}.
 alloca_dst(#llvm_alloca{dst=Dst}) -> Dst.
@@ -443,6 +448,9 @@ alloca_type(#llvm_alloca{type=Type})-> Type.
 alloca_num(#llvm_alloca{num=Num})-> Num.
 alloca_align(#llvm_alloca{align=Align})-> Align.
 
+%%
+%% load
+%%
 mk_load(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_load{dst=Dst, type=Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
@@ -453,6 +461,9 @@ load_alignment(#llvm_load{alignment=Alignment})-> Alignment.
 load_nontemporal(#llvm_load{nontemporal=Nontemporal})-> Nontemporal.
 load_volatile(#llvm_load{volatile=Volatile})-> Volatile.
 
+%%
+%% store
+%%
 mk_store(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_store{dst=Dst, type=Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
@@ -463,6 +474,9 @@ store_alignment(#llvm_store{alignment=Alignment})-> Alignment.
 store_nontemporal(#llvm_store{nontemporal=Nontemporal})-> Nontemporal.
 store_volatile(#llvm_store{volatile=Volatile})-> Volatile.
 
+%%
+%% icmp
+%%
 mk_icmp(Dst, Cond, Type, Src1, Src2) ->
   #llvm_icmp{dst=Dst,'cond'=Cond,type=Type,src1=Src1,src2=Src2}.
 icmp_dst(#llvm_icmp{dst=Dst}) -> Dst.
@@ -471,6 +485,9 @@ icmp_type(#llvm_icmp{type=Type}) -> Type.
 icmp_src1(#llvm_icmp{src1=Src1}) -> Src1.
 icmp_src2(#llvm_icmp{src2=Src2}) -> Src2.
 
+%%
+%% fcmp
+%%
 mk_fcmp(Dst, Cond, Type, Src1, Src2) ->
   #llvm_fcmp{dst=Dst,'cond'=Cond,type=Type,src1=Src1,src2=Src2}.
 fcmp_dst(#llvm_fcmp{dst=Dst}) -> Dst.
@@ -479,6 +496,9 @@ fcmp_type(#llvm_fcmp{type=Type}) -> Type.
 fcmp_src1(#llvm_fcmp{src1=Src1}) -> Src1.
 fcmp_src2(#llvm_fcmp{src2=Src2}) -> Src2.
 
+%%
+%% phi
+%%
 mk_phi(Dst, Type, Value_label_list) ->
   #llvm_phi{dst=Dst, type=Type,value_label_list=Value_label_list}.
 phi_dst(#llvm_phi{dst=Dst}) -> Dst.
@@ -486,6 +506,9 @@ phi_type(#llvm_phi{type=Type}) -> Type.
 phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
   Value_label_list.
 
+%%
+%% call
+%%
 mk_call(Dst, Type, Fnptrval, Arglist) ->
   #llvm_call{dst=Dst, type=Type, fnptrval=Fnptrval, arglist=Arglist}.
 call_dst(#llvm_call{dst=Dst}) -> Dst.
@@ -493,6 +516,9 @@ call_type(#llvm_call{type=Type}) -> Type.
 call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
 call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
 
+%%
+%% comment
+%%
 mk_comment(Text) -> #llvm_comment{text=Text}.
 comment_text(#llvm_comment{text=Text}) -> Text.
 
