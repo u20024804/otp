@@ -475,8 +475,8 @@ mk_phi(Dst, Type, Value_label_list) ->
   #llvm_phi{dst=Dst, type=Type,value_label_list=Value_label_list}.
 phi_dst(#llvm_phi{dst=Dst}) ->
   Dst.
-phi_type(#llvm_phi{type=type}) ->
-  type.
+phi_type(#llvm_phi{type=Type}) ->
+  Type.
 phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
   Value_label_list.
 
@@ -485,152 +485,152 @@ pp_ins(Dev, I) ->
   io:format(Dev, "  ", []),
   case I of
     #llvm_ret{} ->
-      io:format(Dev, "ret ~w ~w~n", [ret_type(I), ret_value(I)]);
+      io:format(Dev, "ret ~s ~s~n", [ret_type(I), ret_value(I)]);
     #llvm_br{} ->
-      io:format(Dev, "br label %~w~n", [br_dst(I)]);
+      io:format(Dev, "br label ~s~n", [br_dst(I)]);
     #llvm_br_cond{} ->
-      io:format(Dev, "br i1 ~w, label %~w, label %~w~n", 
+      io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
     #llvm_add{} ->
-      io:format(Dev, "~w = add ", [add_dst(I)]),
+      io:format(Dev, "~s = add ", [add_dst(I)]),
       pp_options(Dev, add_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [add_type(I), add_src1(I), add_src2(I)]);
     #llvm_fadd{} ->
-      io:format(Dev, "~w = fadd ", [fadd_dst(I)]),
+      io:format(Dev, "~s = fadd ", [fadd_dst(I)]),
       pp_options(Dev, fadd_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [fadd_type(I), fadd_src1(I), fadd_src2(I)]);
     #llvm_sub{} ->
-      io:format(Dev, "~w = sub ", [sub_dst(I)]),
+      io:format(Dev, "~s = sub ", [sub_dst(I)]),
       pp_options(Dev, sub_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [sub_type(I), sub_src1(I), sub_src2(I)]);
     #llvm_fsub{} ->
-      io:format(Dev, "~w = fsub ", [fsub_dst(I)]),
+      io:format(Dev, "~s = fsub ", [fsub_dst(I)]),
       pp_options(Dev, fsub_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [fsub_type(I), fsub_src1(I), fsub_src2(I)]);
     #llvm_mul{} ->
-      io:format(Dev, "~w = mul ", [mul_dst(I)]),
+      io:format(Dev, "~s = mul ", [mul_dst(I)]),
       pp_options(Dev, mul_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [mul_type(I), mul_src1(I), mul_src2(I)]);
     #llvm_fmul{} ->
-      io:format(Dev, "~w = fmul ", [fmul_dst(I)]),
+      io:format(Dev, "~s = fmul ", [fmul_dst(I)]),
       pp_options(Dev, fmul_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [fmul_type(I), fmul_src1(I), fmul_src2(I)]);
     #llvm_udiv{} ->
-      io:format(Dev, "~w = udiv ", [udiv_dst(I)]),
+      io:format(Dev, "~s = udiv ", [udiv_dst(I)]),
       pp_options(Dev, udiv_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [udiv_type(I), udiv_src1(I), udiv_src2(I)]);
     #llvm_sdiv{} ->
-      io:format(Dev, "~w = sdiv ", [sdiv_dst(I)]),
+      io:format(Dev, "~s = sdiv ", [sdiv_dst(I)]),
       pp_options(Dev, sdiv_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [sdiv_type(I), sdiv_src1(I), sdiv_src2(I)]);
     #llvm_fdiv{} ->
-      io:format(Dev, "~w = fdiv ", [fdiv_dst(I)]),
+      io:format(Dev, "~s = fdiv ", [fdiv_dst(I)]),
       pp_options(Dev, fdiv_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [fdiv_type(I), fdiv_src1(I), fdiv_src2(I)]);
     #llvm_urem{} ->
-      io:format(Dev, "~w = urem ", [urem_dst(I)]),
+      io:format(Dev, "~s = urem ", [urem_dst(I)]),
       pp_options(Dev, urem_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [urem_type(I), urem_src1(I), urem_src2(I)]);
     #llvm_srem{} ->
-      io:format(Dev, "~w = srem ", [srem_dst(I)]),
+      io:format(Dev, "~s = srem ", [srem_dst(I)]),
       pp_options(Dev, srem_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [srem_type(I), srem_src1(I), srem_src2(I)]);
     #llvm_frem{} ->
-      io:format(Dev, "~w = frem ", [frem_dst(I)]),
+      io:format(Dev, "~s = frem ", [frem_dst(I)]),
       pp_options(Dev, frem_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [frem_type(I), frem_src1(I), frem_src2(I)]);
     #llvm_shl{} ->
-      io:format(Dev, "~w = shl ", [shl_dst(I)]),
+      io:format(Dev, "~s = shl ", [shl_dst(I)]),
       pp_options(Dev, shl_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [shl_type(I), shl_src1(I), shl_src2(I)]);
     #llvm_lshr{} ->
-      io:format(Dev, "~w = lshr ", [lshr_dst(I)]),
+      io:format(Dev, "~s = lshr ", [lshr_dst(I)]),
       pp_options(Dev, lshr_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [lshr_type(I), lshr_src1(I), lshr_src2(I)]);
     #llvm_ashr{} ->
-      io:format(Dev, "~w = ashr ", [ashr_dst(I)]),
+      io:format(Dev, "~s = ashr ", [ashr_dst(I)]),
       pp_options(Dev, ashr_options(I)),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s ~s, ~s~n",
         [ashr_type(I), ashr_src1(I), ashr_src2(I)]);
     #llvm_and{} ->
-      io:format(Dev, "~w = and ", [and_dst(I)]),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s = and ", [and_dst(I)]),
+      io:format(Dev, "~s ~s, ~s~n",
         [and_type(I), and_src1(I), and_src2(I)]);
     #llvm_or{} ->
-      io:format(Dev, "~w = or ", [or_dst(I)]),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s = or ", [or_dst(I)]),
+      io:format(Dev, "~s ~s, ~s~n",
         [or_type(I), or_src1(I), or_src2(I)]);
     #llvm_xor{} ->
-      io:format(Dev, "~w = xor ", [xor_dst(I)]),
-      io:format(Dev, "~w ~w, ~w~n",
+      io:format(Dev, "~s = xor ", [xor_dst(I)]),
+      io:format(Dev, "~s ~s, ~s~n",
         [xor_type(I), xor_src1(I), xor_src2(I)]);
     #llvm_alloca{} ->
-      io:format(Dev, "~w = alloca ~w ", [alloca_dst(I), alloca_type(I)]),
+      io:format(Dev, "~s = alloca ~s ", [alloca_dst(I), alloca_type(I)]),
       case alloca_num(I) of
         [] -> ok;
-        Num -> io:format(Dev, ",~w ~w ", [alloca_type(I), Num])
+        Num -> io:format(Dev, ",~s ~s ", [alloca_type(I), Num])
       end,
       case alloca_align(I) of
         [] ->ok;
-        Align -> io:format(Dev, ",align ~w", [Align])
+        Align -> io:format(Dev, ",align ~s", [Align])
       end,
       io:format(Dev, "~n", []);
     #llvm_load{} ->
-      io:format(Dev, "~w = ",[load_dst(I)]),
+      io:format(Dev, "~s = ",[load_dst(I)]),
       case load_volatile(I) of
         true -> io:format(Dev, "volatile ", []);
         false -> ok
     end,
-      io:format(Dev, "load ~w* ~w ", 
+      io:format(Dev, "load ~s* ~s ", 
         [load_type(I), load_pointer(I)]),
       case load_alignment(I) of 
         [] -> ok;
-        Al -> io:format(Dev, ", align ~w ", [Al])
+        Al -> io:format(Dev, ", align ~s ", [Al])
       end,
       case load_nontemporal(I) of
         [] -> ok;
-        In -> io:format(Dev, ", !nontemporal !~w", [In])
+        In -> io:format(Dev, ", !nontemporal !~s", [In])
       end,
       io:format(Dev, "~n", []);
     #llvm_store{} ->
-      io:format(Dev, "~w = ",[store_dst(I)]),
+      io:format(Dev, "~s = ",[store_dst(I)]),
       case store_volatile(I) of
         true -> io:format(Dev, "volatile ", []);
         false -> ok
     end,
-      io:format(Dev, "store ~w* ~w ", 
+      io:format(Dev, "store ~s* ~s ", 
         [store_type(I), store_pointer(I)]),
       case store_alignment(I) of 
         [] -> ok;
-        Al -> io:format(Dev, ", align ~w ", [Al])
+        Al -> io:format(Dev, ", align ~s ", [Al])
       end,
       case store_nontemporal(I) of
         [] -> ok;
-        In -> io:format(Dev, ", !nontemporal !~w", [In])
+        In -> io:format(Dev, ", !nontemporal !~s", [In])
       end,
       io:format(Dev, "~n", []);
     #llvm_icmp{} ->
-      io:format(Dev, "~w = icmp ~w ~w ~w, ~w~n",
+      io:format(Dev, "~s = icmp ~s ~s ~s, ~s~n",
         [icmp_dst(I), icmp_cond(I), icmp_type(I), icmp_src1(I), icmp_src2(I)]);
     #llvm_fcmp{} ->
-      io:format(Dev, "~w = fcmp ~w ~w ~w, ~w~n",
+      io:format(Dev, "~s = fcmp ~s ~s ~s, ~s~n",
         [fcmp_dst(I), fcmp_cond(I), fcmp_type(I), fcmp_src1(I), fcmp_src2(I)]);
     #llvm_phi{} ->
-      io:format(Dev, "~w = phi ~w ", [phi_dst(I), phi_type(I)]),
+      io:format(Dev, "~s = phi ~s ", [phi_dst(I), phi_type(I)]),
       pp_phi_value_labels(Dev, I),
       io:format(Dev, "~n", []);
 
@@ -638,13 +638,13 @@ pp_ins(Dev, I) ->
     end.
 
   pp_options(_Dev, []) -> ok;
-  pp_options(Dev, [O|Os])-> io:format(Dev,"~w ", [erlang:atom_to_list(O)]),
+  pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
     pp_options(Dev, Os).
 
   pp_phi_value_labels(_Dev, []) -> ok;
   pp_phi_value_labels(Dev, { Value, Label}) ->
-    io:format(Dev, "[ ~w, ~w ]", [Value, Label]);
+    io:format(Dev, "[ ~s, ~s ]", [Value, Label]);
   pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
-    io:format(Dev, "[ ~w, ~w ], ", [Value, Label]),
+    io:format(Dev, "[ ~s, ~s ], ", [Value, Label]),
     pp_phi_value_labels(Dev, VL).
 
