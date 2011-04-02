@@ -1,5 +1,4 @@
 %% -*- erlang-indent-level: 2 -*-
-
 -module(hipe_llvm).
 
 -export([
@@ -184,7 +183,16 @@
     mk_phi/3,
     phi_dst/1,
     phi_type/1,
-    phi_value_label_list/1
+    phi_value_label_list/1,
+
+    mk_call/4,
+    call_dst/1,
+    call_type/1,
+    call_fnptrval/1,
+    call_arglist/1,
+
+    mk_comment/1,
+    comment_text/1
   ]).
 
 -export([pp_ins/2]).
@@ -473,12 +481,20 @@ fcmp_src2(#llvm_fcmp{src2=Src2}) -> Src2.
 
 mk_phi(Dst, Type, Value_label_list) ->
   #llvm_phi{dst=Dst, type=Type,value_label_list=Value_label_list}.
-phi_dst(#llvm_phi{dst=Dst}) ->
-  Dst.
-phi_type(#llvm_phi{type=Type}) ->
-  Type.
+phi_dst(#llvm_phi{dst=Dst}) -> Dst.
+phi_type(#llvm_phi{type=Type}) -> Type.
 phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
   Value_label_list.
+
+mk_call(Dst, Type, Fnptrval, Arglist) ->
+  #llvm_call{dst=Dst, type=Type, fnptrval=Fnptrval, arglist=Arglist}.
+call_dst(#llvm_call{dst=Dst}) -> Dst.
+call_type(#llvm_call{type=Type}) -> Type.
+call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
+call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
+
+mk_comment(Text) -> #llvm_comment{text=Text}.
+comment_text(#llvm_comment{text=Text}) -> Text.
 
 
 pp_ins(Dev, I) ->
@@ -487,9 +503,9 @@ pp_ins(Dev, I) ->
     #llvm_ret{} ->
       io:format(Dev, "ret ~s ~s~n", [ret_type(I), ret_value(I)]);
     #llvm_br{} ->
-      io:format(Dev, "br label ~s~n", [br_dst(I)]);
+      io:format(Dev, "br label %~s~n", [br_dst(I)]);
     #llvm_br_cond{} ->
-      io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
+      io:format(Dev, "br i1 ~s, label %~s, label %~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
     #llvm_add{} ->
       io:format(Dev, "~s = add ", [add_dst(I)]),
@@ -578,6 +594,11 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~s = xor ", [xor_dst(I)]),
       io:format(Dev, "~s ~s, ~s~n",
         [xor_type(I), xor_src1(I), xor_src2(I)]);
+    #llvm_extractvalue{} ->
+      io:format(Dev, "~s = extractvalue ~s ~s, ~s~n", 
+        %%TODO Print idxs
+        [extractvalue_dst(I), extractvalue_type(I), extractvalue_val(I),
+          extractvalue_idx(I)]);
     #llvm_alloca{} ->
       io:format(Dev, "~s = alloca ~s ", [alloca_dst(I), alloca_type(I)]),
       case alloca_num(I) of
@@ -631,8 +652,10 @@ pp_ins(Dev, I) ->
         [fcmp_dst(I), fcmp_cond(I), fcmp_type(I), fcmp_src1(I), fcmp_src2(I)]);
     #llvm_phi{} ->
       io:format(Dev, "~s = phi ~s ", [phi_dst(I), phi_type(I)]),
-      pp_phi_value_labels(Dev, I),
+      pp_phi_value_labels(Dev, phi_value_label_list(I)),
       io:format(Dev, "~n", []);
+    #llvm_comment{} ->
+      io:format(Dev, "; ~s", [comment_text(I)]);
 
       Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
     end.
@@ -642,7 +665,7 @@ pp_ins(Dev, I) ->
     pp_options(Dev, Os).
 
   pp_phi_value_labels(_Dev, []) -> ok;
-  pp_phi_value_labels(Dev, { Value, Label}) ->
+  pp_phi_value_labels(Dev, [{Value, Label}|[]]) ->
     io:format(Dev, "[ ~s, ~s ]", [Value, Label]);
   pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
     io:format(Dev, "[ ~s, ~s ], ", [Value, Label]),
