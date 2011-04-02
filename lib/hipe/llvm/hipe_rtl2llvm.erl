@@ -57,7 +57,7 @@ translate_instr(Dev, I) ->
     %#load_address{} -> ok;
     %#load_atom{} -> ok;
     %#load_word_index{} -> ok;
-    #move{} -> trans_move(Dev, I);
+    %#move{} -> trans_move(Dev, I);
     %#multimove{} -> ok;
     #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
@@ -69,33 +69,32 @@ translate_instr(Dev, I) ->
 
 %%-----------------------------------------------------------------------------
 
+
 %%
 %% alu
 %% 
 trans_alu(Dev, I) ->
-  io:format(Dev,"  ", []),
-  trans_arg(Dev, hipe_rtl:alu_dst(I), dst),
-  io:format(Dev, " = ", []),
-  case hipe_rtl:alu_op(I) of
-    add -> io:format(Dev, "add ", []);
-    sub -> io:format(Dev, "sub ", []);
-    'or'-> io:format(Dev, "or ", []);
-    'and' -> io:format(Dev, "and ", []);
-    'xor' -> io:format(Dev, "xor ", []);
-    'xornot' -> ok;
-    andnot -> ok;
-    sll -> io:format(Dev, "shl ", []);
-    sllx -> ok;
-    srl -> io:format(Dev, "lshr ", []);
-    srlx -> ok;
-    sra -> io:format(Dev, "ashr ", []);
-    srax -> ok;
+  Dst = arg_to_var(hipe_rtl:alu_dst(I)),
+  Src1 = arg_to_var(hipe_rtl:alu_src1(I)),
+  Src2 = arg_to_var(hipe_rtl:alu_src2(I)),
+  Type = arg_type(hipe_rtl:alu_src1(I)),
+  I1 = case hipe_rtl:alu_op(I) of
+    add -> hipe_llvm:mk_add(Dst, Type, Src1, Src2, []);
+    sub -> hipe_llvm:mk_sub(Dst, Type, Src1, Src2, []);
+    'or' -> hipe_llvm:mk_or(Dst, Type, Src1, Src2, []);
+    'and' -> hipe_llvm:mk_and(Dst, Type, Src1, Src2);
+    'xor' -> hipe_llvm:mk_xor(Dst, Type, Src1, Src2);
+    sll -> hipe_llvm:mk_shl(Dst, Type, Src1, Src2, []);
+    srl -> hipe_llvm:mk_lshr(Dst, Type, Src1, Src2, []);
+    sra -> hipe_llvm:mk_ashr(Dst, Type, Src1, Src2, []);
+    %TODO: Following cases should be removed when call is fixed
+    mul -> hipe_llvm:mk_mul(Dst, Type, Src1, Src2, []);
+    'fdiv' -> hipe_llvm:mk_fdiv(Dst, Type, Src1, Src2, []);
+    'sdiv' -> hipe_llvm:mk_sdiv(Dst, Type, Src1, Src2, []);
+    'srem' -> hipe_llvm:mk_srem(Dst, Type, Src1, Src2, []);
     Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
   end,
-  trans_arg(Dev, hipe_rtl:alu_src1(I)),
-  io:format(Dev,", ",[]),
-  trans_arg(Dev, hipe_rtl:alu_src2(I), dst),
-  io:format(Dev,"~n",[]).
+  hipe_llvm:pp_ins(Dev, I1).
 
 %%
 %% alub
@@ -109,97 +108,75 @@ trans_alub(Dev, I) ->
 
 
 trans_alub_overflow(Dev, I) ->
-  io:format(Dev,"  ", []),
+  io:format(Dev, "  ", []),
   io:format(Dev, "%res = ", []),
   io:format(Dev, "call {i32, i1} @llvm.sadd.with.overflow.i32(", []),
   trans_arg(Dev, hipe_rtl:alub_src1(I)),
-  io:format(Dev,", ", []),
+  io:format(Dev, ", ", []),
   trans_arg(Dev, hipe_rtl:alub_src2(I)),
-  io:format(Dev,")~n", []),
-  io:format(Dev,"  ", []),
-  trans_arg(Dev, hipe_rtl:alub_dst(I), dst),
-  io:format(Dev, " = ", []),
-  io:format(Dev, "extractvalue {i32, i1} %res, 0~n", []),
-  io:format(Dev,"  ", []),
-  io:format(Dev, "%obit = extractvalue {i32, i1} %res, 1~n", []),
-  io:format(Dev,"  ", []),
-  io:format(Dev, "br i1 %obit, label %L~w, label %L~w~n",
-    [hipe_rtl:alub_true_label(I), hipe_rtl:alub_false_label(I)]).
+  io:format(Dev, ")~n", []),
+  Dst = arg_to_var(hipe_rtl:alub_dst(I)),
+  I2 = hipe_llvm:mk_extractvalue(Dst, "{i32, i1}", "%res", "0", []),
+  hipe_llvm:pp_ins(Dev, I2),
+  I3 = hipe_llvm:mk_extractvalue("%obit", "{i32, i1}", "%res", "1", []),
+  hipe_llvm:pp_ins(Dev, I3),
+  True_label = mk_label(hipe_rtl:alub_true_label(I)),
+  False_label = mk_label(hipe_rtl:alub_false_label(I)),
+  I4 = hipe_llvm:mk_br_cond("%obit", True_label, False_label),
+  hipe_llvm:pp_ins(Dev, I4).
 
 trans_alub_no_overflow(Dev, I) ->
-  io:format(Dev,"  ", []),
-  trans_arg(Dev, hipe_rtl:alub_dst(I), dst),
-  io:format(Dev, " = ", []),
-  case hipe_rtl:alub_op(I) of
-    'or'-> io:format(Dev, "or ", []);
-    'and' -> io:format(Dev, "and ", []);
-    'xor' -> io:format(Dev, "xor ", []);
-    'xornot' -> ok;
-    andnot -> ok;
-    sll -> io:format(Dev, "shl ", []);
-    sllx -> ok;
-    srl -> io:format(Dev, "lshr ", []);
-    srlx -> ok;
-    sra -> io:format(Dev, "ashr ", []);
-    srax -> ok;
-    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
-  end,
-  trans_arg(Dev, hipe_rtl:alub_src1(I)),
-  io:format(Dev,", ",[]),
-  trans_arg(Dev, hipe_rtl:alub_src2(I), dst),
-  io:format(Dev,"~n",[]),
-  %icmp 
-  io:format(Dev, "  ", []),
-  io:format(Dev, "%cond = ", []), %%TODO
-  io:format(Dev, " icmp ~w ", [hipe_rtl:alub_cond(I)]),
-  trans_arg(Dev, hipe_rtl:alub_src1(I)),
-  io:format(Dev, ", ", []),
-  trans_arg(Dev, hipe_rtl:alub_src2(I), dst),
-  io:format(Dev, "~n", []),
+  %alu
+  I1 = hipe_rtl:mk_alu(hipe_rtl:alub_dst(I), hipe_rtl:alub_src1(I),
+    hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
+  trans_alu(Dev, I1),
+  %icmp
+  Type = arg_type(hipe_rtl:alub_src1(I)),
+  Src1 = arg_to_var(hipe_rtl:alub_src1(I)),
+  Src2 = arg_to_var(hipe_rtl:alub_src2(I)),
+  Cond = hipe_rtl:alub_cond(I),
+  I2 = hipe_llvm:mk_icmp("%cond", Cond, Type, Src1, Src2),
+  hipe_llvm:pp_ins(Dev, I2),
   %br
-  io:format(Dev, "  ", []),
-  io:format(Dev, "br i1 %cond, ", []),
-  io:format(Dev, "label %L~w, label %L~w~n", [hipe_rtl:alub_true_label(I),
-      hipe_rtl:alub_false_label(I)]).
+  True_label = mk_label(hipe_rtl:alub_true_label(I)),
+  False_label = mk_label(hipe_rtl:alub_false_label(I)),
+  I3 = hipe_llvm:mk_br_cond("%cond", True_label, False_label),
+  hipe_llvm:pp_ins(Dev, I3).
 
 %%
 %% branch
 %%
 trans_branch(Dev, I) ->
-  %icmp 
-  io:format(Dev, "  ", []),
-  io:format(Dev, "%cond = ", []), %%TODO
-  io:format(Dev, " icmp ~w ", [hipe_rtl:branch_cond(I)]),
-  trans_arg(Dev, hipe_rtl:branch_src1(I)),
-  io:format(Dev, ", ", []),
-  trans_arg(Dev, hipe_rtl:branch_src2(I), dst),
-  io:format(Dev, "~n", []),
+  Type = arg_type(hipe_rtl:branch_src1(I)),
+  Src1 = arg_to_var(hipe_rtl:branch_src1(I)),
+  Src2 = arg_to_var(hipe_rtl:branch_src2(I)),
+  Cond = hipe_rtl:branch_cond(I),
+  %icmp
+  I1 = hipe_llvm:mk_icmp("%cond", Cond, Type, Src1, Src2),
+  hipe_llvm:pp_ins(Dev, I1),
   %br
-  io:format(Dev, "  ", []),
-  io:format(Dev, "br i1 %cond, ", []),
-  io:format(Dev, "label %L~w, label %L~w~n", [hipe_rtl:branch_true_label(I),
-      hipe_rtl:branch_false_label(I)]).
+  True_label = mk_label(hipe_rtl:branch_true_label(I)),
+  False_label = mk_label(hipe_rtl:branch_false_label(I)),
+  I2 = hipe_llvm:mk_br_cond("%cond", True_label, False_label),
+  hipe_llvm:pp_ins(Dev, I2).
 
 %%
 %% call
 %%
 trans_call(Dev, I) ->
-  io:format(Dev, "  ", []),
-  trans_args(Dev, hipe_rtl:call_dstlist(I), dst),
-  io:format(Dev, " = ", []),
-  case hipe_rtl:call_fun(I) of
-    '+' -> io:format(Dev, "add ", []);
-    '-' -> io:format(Dev, "sub ", []);
-    '*' -> io:format(Dev, "mul ", []);
-    'div' -> io:format(Dev, "sdiv ", []);
-    'rem' -> io:format(Dev, "srem ", []);
+  [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
+  Op = case hipe_rtl:call_fun(I) of
+    '+' -> add;
+    '-' -> sub;
+    '*' -> mul;
+    'div' -> 'sdiv';
+    '/' -> 'fdiv';
+    'rem' -> 'srem';
     Other -> exit({?MODULE, trans_call, {"unknown call", Other}})
   end,
-  [H|T] =  hipe_rtl:call_arglist(I),
-  trans_arg(Dev, H),
-  io:format(Dev,", ",[]),
-  trans_args(Dev, T, dst),
-  io:format(Dev, "~n", []),
+  [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
+  I1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
+  trans_alu(Dev, I1),
   case hipe_rtl:call_continuation(I) of
     [] -> true;
     CC -> trans_goto(Dev, hipe_rtl:mk_goto(CC))
@@ -209,7 +186,7 @@ trans_call(Dev, I) ->
 %% trans_comment
 %%
 trans_comment(Dev, I) ->
-  io:format(Dev,"  ;;~p~n", [hipe_rtl:comment_text(I)]).
+  hipe_llvm:pp_ins(Dev, hipe_rtl:comment_text(I)).
 
 %%
 %% fixnumop
@@ -228,16 +205,16 @@ trans_fixnum(Dev, I) ->
 %% gctest
 %%
 trans_gctest(Dev, I) ->
-  io:format(Dev,"  ; gtest(",[]),
-  trans_arg(Dev, hipe_rtl:gctest_words(I), dst),
-  io:format(Dev,")~n",[]).
+  Words = integer_to_list(hipe_rtl:gctest_words(I)),
+  hipe_llvm:pp_ins(Dev,
+    hipe_llvm:mk_comment("gc_test"++Words)).
 
 %%
 %% goto
 %%
 trans_goto(Dev, I) ->
-  io:format(Dev, "  ", []),
-  io:format(Dev, "br label %L~w~n", [hipe_rtl:goto_label(I)]).
+  hipe_llvm:pp_ins(Dev, hipe_llvm:mk_br("L"++
+      integer_to_list(hipe_rtl:goto_label(I)))).
 
 %%
 %% label
@@ -248,54 +225,99 @@ trans_label(Dev, I) ->
 %%
 %% move
 %%
-trans_move(Dev, I) ->
-  Dst = hipe_rtl:move_dst(I),
-  Src = hipe_rtl:move_src(I),
-  Src_type = arg_type(Src),
-  %% %src_addr = alloca i32
-  io:format(Dev, "  ", []),
-  trans_arg(Dev, Src, dst),
-  io:format(Dev, "_addr ", []),
-  io:format(Dev, " = ", []),
-  io:format(Dev, "alloca ~w~n", [Src_type]),
-  %% store i32 src, i32* src_addr
-  io:format(Dev, "  ", []),
-  io:format(Dev, "store ", []),
-  trans_arg(Dev, Src),
-  io:format(Dev, ", ~w* ", [Src_type]),
-  trans_arg(Dev, Src, dst),
-  io:format(Dev, "_addr ~n", []),
-  %% dst = load i32* src_addr
-  io:format(Dev, "  ", []),
-  trans_arg(Dev, Dst, dst),
-  io:format(Dev, " = ", []),
-  io:format(Dev, "load ~w* ", [Src_type]),
-  trans_arg(Dev, Src, dst),
-  io:format(Dev, "_addr~n", []).
-
+%trans_move(Dev, I) ->
+%  Dst = hipe_rtl:move_dst(I),
+%  Src = hipe_rtl:move_src(I),
+%  Src_type = arg_type(Src),
+%  %% %src_addr = alloca i32
+%  io:format(Dev, "  ", []),
+%  trans_arg(Dev, Src, dst),
+%  io:format(Dev, "_addr ", []),
+%  io:format(Dev, " = ", []),
+%  io:format(Dev, "alloca ~w~n", [Src_type]),
+%  %% store i32 src, i32* src_addr
+%  io:format(Dev, "  ", []),
+%  io:format(Dev, "store ", []),
+%  trans_arg(Dev, Src),
+%  io:format(Dev, ", ~w* ", [Src_type]),
+%  trans_arg(Dev, Src, dst),
+%  io:format(Dev, "_addr ~n", []),
+%  %% dst = load i32* src_addr
+%  io:format(Dev, "  ", []),
+%  trans_arg(Dev, Dst, dst),
+%  io:format(Dev, " = ", []),
+%  io:format(Dev, "load ~w* ", [Src_type]),
+%  trans_arg(Dev, Src, dst),
+%  io:format(Dev, "_addr~n", []).
 
 %% 
 %% phi
 %%
 trans_phi(Dev, I) ->
-  io:format(Dev, "  ", []),
-  trans_arg(Dev, hipe_rtl:phi_dst(I), dst),
-  io:format(Dev, " = ", []),
-  io:format(Dev, "phi ~w ", [arg_type(hipe_rtl:phi_dst(I))]),
-  trans_phi_args(Dev, hipe_rtl:phi_arglist(I)),
-  io:format(Dev, "~n", []).
+  Dst = hipe_rtl:phi_dst(I),
+  L = hipe_llvm:mk_phi(arg_to_var(Dst) , arg_type(Dst), 
+    trans_phi_list(hipe_rtl:phi_arglist(I))),
+  hipe_llvm:pp_ins(Dev, L).
 
 %%
 %% return 
 %%
 trans_return(Dev, I) ->
-  io:format(Dev, "  ",  []),
-  io:format(Dev, "ret ", []),
-  trans_args(Dev, hipe_rtl:return_varlist(I)),
-  io:format(Dev, "~n", []).
+  [A | _As] = hipe_rtl:return_varlist(I),
+  L = hipe_llvm:mk_ret( arg_type(A), arg_to_var(A)),
+  hipe_llvm:pp_ins(Dev, L).
 
 
 %%-----------------------------------------------------------------------------
+
+mk_label(N) ->
+  "L" ++ integer_to_list(N).
+
+arg_to_var(A) ->
+  case hipe_rtl:is_var(A) of
+    true ->
+      "%v" ++ integer_to_list(hipe_rtl:var_index(A));
+    false ->
+      case hipe_rtl:is_reg(A) of
+        true ->
+          "%r"++integer_to_list(hipe_rtl:reg_index(A));
+        false ->
+          case hipe_rtl:is_imm(A) of
+            true ->
+              integer_to_list(hipe_rtl:imm_value(A));
+            false ->
+              case hipe_rtl:is_fpreg(A) of
+                true ->
+                  "%f"++integer_to_list(hipe_rtl:fpreg_index(A));
+                false ->
+                  case hipe_rtl:is_const_label(A) of
+                    true->
+                      "%DL"++integer_to_list(hipe_rtl:const_label_label(A));
+                    false ->
+                      case hipe_rtl:is_label(A) of
+                        true ->
+                          "L"++integer_to_list(hipe_rtl:label_name(A));
+                        false->
+                          exit({?MODULE,arg_to_var,{"bad RTL arg",A}})
+                      end
+                  end
+              end
+          end
+      end
+  end.
+
+%trans_op(Op) ->
+%  case Op of
+%    add -> "add";
+%    sub -> "sub";
+%    'or'-> "or";
+%    'and' -> "and";
+%    'xor' -> "xor";
+%    sll -> "shl";
+%    srl -> "lshr";
+%    sra -> "ashr";
+%    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
+%  end.
 
 %% 
 %% Pretty print arg(s).
@@ -318,7 +340,7 @@ trans_arg(Dev, A) ->
 %%
 trans_arg(Dev, A, Type) ->
   case Type of 
-    src -> io:format(Dev, "~w ", [arg_type(A)]);
+    src -> io:format(Dev, "~s ", [arg_type(A)]);
     dst -> ok
   end,
   case hipe_rtl:is_var(A) of
@@ -346,26 +368,18 @@ trans_arg(Dev, A, Type) ->
       end
   end.
 
-trans_phi_args(_Dev, []) -> ok;
-trans_phi_args(Dev, [{Pred, A}]) ->
-  io:format(Dev, "[ ", []),
-  trans_arg(Dev, A, dst),
-  io:format(Dev, ", %L~w ]", [Pred]);
-trans_phi_args(Dev, [{Pred, A} | Args]) ->
-  io:format(Dev, "[ ", []),
-  trans_arg(Dev, A, dst),
-  io:format(Dev, ", %L~w ] , ", [Pred]),
-  trans_phi_args(Dev, Args).
-
+trans_phi_list([]) -> [];
+trans_phi_list([{Label, Value}| Args]) ->
+  [{arg_to_var(Value), "%L"++integer_to_list(Label)}|trans_phi_list(Args)].
 
 %% Return the type of arg A (only integers of 32 bits supported).
 arg_type(A) ->
   case hipe_rtl:is_var(A) of
-    true -> i32;
+    true -> "i32";
     false ->
       case hipe_rtl:is_reg(A) of
-        true -> i32;
-        false -> i32
+        true -> "i32";
+        false -> "i32"
       end
   end.
 
