@@ -681,7 +681,7 @@ pp_ins(Dev, I) ->
       pp_phi_value_labels(Dev, phi_value_label_list(I)),
       io:format(Dev, "~n", []);
     #llvm_comment{} ->
-      io:format(Dev, "; ~s", [comment_text(I)]);
+      io:format(Dev, "; ~s~n", [comment_text(I)]);
 
       Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
     end.
