@@ -191,7 +191,7 @@ trans_call(Dev, I) ->
 %% trans_comment
 %%
 trans_comment(Dev, I) ->
-  hipe_llvm:pp_ins(Dev, hipe_rtl:comment_text(I)).
+  hipe_llvm:pp_ins(Dev, hipe_llvm:mk_comment(hipe_rtl:comment_text(I))).
 
 %%
 %% fixnumop
@@ -210,9 +210,9 @@ trans_fixnum(Dev, I) ->
 %% gctest
 %%
 trans_gctest(Dev, I) ->
-  Words = integer_to_list(hipe_rtl:gctest_words(I)),
+  W = arg_to_var(hipe_rtl:gctest_words(I)),
   hipe_llvm:pp_ins(Dev,
-    hipe_llvm:mk_comment("gc_test"++Words)).
+    hipe_llvm:mk_comment("gc_test"++W)).
 
 %%
 %% goto
