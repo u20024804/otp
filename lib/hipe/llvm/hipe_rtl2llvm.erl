@@ -62,7 +62,7 @@ translate_instr(Dev, I) ->
     %#multimove{} -> ok;
     #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
-    #store{} -> trans_store(Dev, I);
+    %#store{} -> trans_store(Dev, I);
     %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
@@ -275,17 +275,52 @@ trans_return(Dev, I) ->
 %%
 %% store 
 %%
-trans_store(Dev, I) ->
-  I1 = hipe_llvm:mk_load("%hp1", "i32", "%hp_var", [],  [], false),
-  I2 = hipe_llvm:mk_inttoptr("%hp1_p", "i32", "%hp1", "i32*"),
+%trans_store(Dev, I) ->
+%  Dst = hipe_rtl:store_base(I),
+%  case hipe_rtl_arch:is_precoloured(Dst) of
+%    true -> trans_store_reg(Dev, I);
+%    false -> exit({?MODULE, trans_store ,{"Non Implemened yet", false}})
+%  end.
+%
+%trans_store_reg(Dev, I) ->
+%  Dst = hipe_rtl:store_base(I),
+%  Base = case hipe_rtl:reg_index(Dst) of 
+%    15 -> hp;
+%    Other -> exit({?MODULE, trans_store_reg ,{"Non Implemened yet", Other}})
+%  end,
+%  D1 = mk_hp(),
+%  I1 = hipe_llvm:mk_load(D1, "i32", "%hp1", [],  [], false),
+%  D2 = mk_hp(),
+%  I2 = hipe_llvm:mk_inttoptr(D2, "i32", D1, "i32"),
+%  hipe_llvm:pp_ins(Dev, I1),
+%  hipe_llvm:pp_ins(Dev, I2),
+%  %% TODO Implement getelementptr ....
+%  Offset = integer_to_list(hipe_rtl:imm_value(hipe_rtl:store_offset(I))),
+%  D3 = mk_hp(),
+%  io:format(Dev, "  ~s = getelementptr i32* ~s, i32 ~s~n", [
+%        D3, D2, Offset]),
+%  %% ........
+%  Value = hipe_rtl:store_src(I),
+%  I4 = hipe_llvm:mk_store("i32", arg_to_var(Value), "i32", D3, [], [],
+%                          false),
+%  hipe_llvm:pp_ins(Dev, I4).
+
+
 
 %%-----------------------------------------------------------------------------
 
 mk_label(N) ->
   "L" ++ integer_to_list(N).
 
+mk_temp() ->
+  "%t" ++ integer_to_list(hipe_gensym:new_var(llvm)).
 mk_temp(N) ->
   "%t" ++ integer_to_list(N).
+
+mk_hp() ->
+  "%hp_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
+mk_hp(N) ->
+  "%hp_var_" ++ integer_to_list(N).
 
 arg_to_var(A) ->
   case hipe_rtl:is_var(A) of
