@@ -62,7 +62,7 @@ translate_instr(Dev, I) ->
     %#multimove{} -> ok;
     #phi{} -> trans_phi(Dev, I);
     #return{} -> trans_return(Dev, I);
-    #store{} -> ok;
+    #store{} -> trans_store(Dev, I);
     %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
@@ -272,6 +272,12 @@ trans_return(Dev, I) ->
   L = hipe_llvm:mk_ret( arg_type(A), arg_to_var(A)),
   hipe_llvm:pp_ins(Dev, L).
 
+%%
+%% store 
+%%
+trans_store(Dev, I) ->
+  I1 = hipe_llvm:mk_load("%hp1", "i32", "%hp_var", [],  [], false),
+  I2 = hipe_llvm:mk_inttoptr("%hp1_p", "i32", "%hp1", "i32*"),
 
 %%-----------------------------------------------------------------------------
 
