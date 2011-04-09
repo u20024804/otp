@@ -152,15 +152,16 @@
     
     mk_load/6,
     load_dst/1,
-    load_type/1,
+    load_p_type/1,
     load_pointer/1,
     load_alignment/1,
     load_nontemporal/1,
     load_volatile/1,
 
-    mk_store/6,
-    store_dst/1,
+    mk_store/7,
     store_type/1,
+    store_value/1,
+    store_p_type/1,
     store_pointer/1,
     store_alignment/1,
     store_nontemporal/1,
@@ -464,10 +465,10 @@ alloca_align(#llvm_alloca{align=Align})-> Align.
 %% load
 %%
 mk_load(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
-  #llvm_load{dst=Dst, type=Type, pointer=Pointer, alignment=Alignment,
+  #llvm_load{dst=Dst, p_type=Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
 load_dst(#llvm_load{dst=Dst})-> Dst.
-load_type(#llvm_load{type=Type})-> Type.
+load_p_type(#llvm_load{p_type=Type})-> Type.
 load_pointer(#llvm_load{pointer=Pointer})-> Pointer.
 load_alignment(#llvm_load{alignment=Alignment})-> Alignment.
 load_nontemporal(#llvm_load{nontemporal=Nontemporal})-> Nontemporal.
@@ -476,11 +477,12 @@ load_volatile(#llvm_load{volatile=Volatile})-> Volatile.
 %%
 %% store
 %%
-mk_store(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
-  #llvm_store{dst=Dst, type=Type, pointer=Pointer, alignment=Alignment,
+mk_store(Type, Value, P_Type, Pointer, Alignment, Nontemporal, Volatile) ->
+  #llvm_store{type=Type, value=Value, p_type=P_Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
-store_dst(#llvm_store{dst=Dst})-> Dst.
 store_type(#llvm_store{type=Type})-> Type.
+store_value(#llvm_store{value=Value})-> Value.
+store_p_type(#llvm_store{p_type=P_Type})-> P_Type.
 store_pointer(#llvm_store{pointer=Pointer})-> Pointer.
 store_alignment(#llvm_store{alignment=Alignment})-> Alignment.
 store_nontemporal(#llvm_store{nontemporal=Nontemporal})-> Nontemporal.
@@ -675,7 +677,7 @@ pp_ins(Dev, I) ->
         false -> ok
     end,
       io:format(Dev, "load ~s* ~s ", 
-        [load_type(I), load_pointer(I)]),
+        [load_p_type(I), load_pointer(I)]),
       case load_alignment(I) of 
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
@@ -686,13 +688,12 @@ pp_ins(Dev, I) ->
       end,
       io:format(Dev, "~n", []);
     #llvm_store{} ->
-      io:format(Dev, "~s = ",[store_dst(I)]),
       case store_volatile(I) of
         true -> io:format(Dev, "volatile ", []);
         false -> ok
     end,
-      io:format(Dev, "store ~s* ~s ", 
-        [store_type(I), store_pointer(I)]),
+      io:format(Dev, "store ~s ~s,~s* ~s ", 
+        [store_type(I), store_value(I), store_p_type(I), store_pointer(I)]),
       case store_alignment(I) of 
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
