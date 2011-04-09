@@ -166,6 +166,18 @@
     store_nontemporal/1,
     store_volatile/1,
 
+    mk_ptrtoint/4,
+    ptrtoint_dst/1,
+    ptrtoint_src_type/1,
+    ptrtoint_src/1,
+    ptrtoint_dst_type/1,
+
+    mk_inttoptr/4,
+    inttoptr_dst/1,
+    inttoptr_src_type/1,
+    inttoptr_src/1,
+    inttoptr_dst_type/1,
+
     mk_icmp/5,
     icmp_dst/1,
     icmp_cond/1,
@@ -473,6 +485,26 @@ store_pointer(#llvm_store{pointer=Pointer})-> Pointer.
 store_alignment(#llvm_store{alignment=Alignment})-> Alignment.
 store_nontemporal(#llvm_store{nontemporal=Nontemporal})-> Nontemporal.
 store_volatile(#llvm_store{volatile=Volatile})-> Volatile.
+
+%%
+%% ptrtoint
+%%
+mk_ptrtoint(Dst, Src_Type, Src, Dst_Type) ->
+  #llvm_ptrtoint{dst=Dst, src_type=Src_Type, src=Src, dst_type=Dst_Type}.
+ptrtoint_dst(#llvm_ptrtoint{dst=Dst}) -> Dst.
+ptrtoint_src_type(#llvm_ptrtoint{src_type=Src_Type}) -> Src_Type.
+ptrtoint_src(#llvm_ptrtoint{src=Src}) -> Src.
+ptrtoint_dst_type(#llvm_ptrtoint{dst=Dst_Type}) -> Dst_Type .
+
+%%
+%% inttoptr
+%%
+mk_inttoptr(Dst, Src_Type, Src, Dst_Type) ->
+  #llvm_inttoptr{dst=Dst, src_type=Src_Type, src=Src, dst_type=Dst_Type}.
+inttoptr_dst(#llvm_inttoptr{dst=Dst}) -> Dst.
+inttoptr_src_type(#llvm_inttoptr{src_type=Src_Type}) -> Src_Type.
+inttoptr_src(#llvm_inttoptr{src=Src}) -> Src.
+inttoptr_dst_type(#llvm_inttoptr{dst=Dst_Type}) -> Dst_Type .
 
 %%
 %% icmp
