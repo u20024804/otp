@@ -496,7 +496,7 @@ mk_ptrtoint(Dst, Src_Type, Src, Dst_Type) ->
 ptrtoint_dst(#llvm_ptrtoint{dst=Dst}) -> Dst.
 ptrtoint_src_type(#llvm_ptrtoint{src_type=Src_Type}) -> Src_Type.
 ptrtoint_src(#llvm_ptrtoint{src=Src}) -> Src.
-ptrtoint_dst_type(#llvm_ptrtoint{dst=Dst_Type}) -> Dst_Type .
+ptrtoint_dst_type(#llvm_ptrtoint{dst_type=Dst_Type}) -> Dst_Type .
 
 %%
 %% inttoptr
@@ -506,7 +506,7 @@ mk_inttoptr(Dst, Src_Type, Src, Dst_Type) ->
 inttoptr_dst(#llvm_inttoptr{dst=Dst}) -> Dst.
 inttoptr_src_type(#llvm_inttoptr{src_type=Src_Type}) -> Src_Type.
 inttoptr_src(#llvm_inttoptr{src=Src}) -> Src.
-inttoptr_dst_type(#llvm_inttoptr{dst=Dst_Type}) -> Dst_Type .
+inttoptr_dst_type(#llvm_inttoptr{dst_type=Dst_Type}) -> Dst_Type .
 
 %%
 %% icmp
@@ -703,6 +703,12 @@ pp_ins(Dev, I) ->
         In -> io:format(Dev, ", !nontemporal !~s", [In])
       end,
       io:format(Dev, "~n", []);
+    #llvm_ptrtoint{} ->
+      io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
+                ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
+    #llvm_inttoptr{} ->
+      io:format(Dev, "~s = inttoptr ~s ~s to ~s*~n", [inttoptr_dst(I),
+                inttoptr_src_type(I), inttoptr_src(I), inttoptr_dst_type(I)]);
     #llvm_icmp{} ->
       io:format(Dev, "~s = icmp ~s ~s ~s, ~s~n",
         [icmp_dst(I), icmp_cond(I), icmp_type(I), icmp_src1(I), icmp_src2(I)]);
