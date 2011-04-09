@@ -40,7 +40,10 @@
     volatile = false}).
 -record(llvm_store, {dst, type, pointer, alignment = [], nontemporal = [],
     volatile = false}).
-%%Other Operations
+%% Conversion Operations
+-record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
+-record(llvm_inttoptr, {dst, src_type, src, dst_type}).
+%% Other Operations
 -record(llvm_icmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_fcmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_phi, {dst, type, value_label_list}). 
