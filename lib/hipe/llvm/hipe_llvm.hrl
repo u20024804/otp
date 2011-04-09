@@ -36,9 +36,9 @@
 -record(llvm_extractvalue, {dst, type, val, idx, idxs=[]}).
 %% Memory Access And Addressing Operations
 -record(llvm_alloca, {dst, type, num = [], align = []}).
--record(llvm_load, {dst, type, pointer, alignment = [], nontemporal = [],
+-record(llvm_load, {dst, p_type, pointer, alignment = [], nontemporal = [],
     volatile = false}).
--record(llvm_store, {dst, type, pointer, alignment = [], nontemporal = [],
+-record(llvm_store, {type, value, p_type, pointer, alignment = [], nontemporal = [],
     volatile = false}).
 %% Conversion Operations
 -record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
