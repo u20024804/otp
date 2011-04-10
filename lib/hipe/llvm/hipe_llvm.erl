@@ -563,9 +563,9 @@ pp_ins(Dev, I) ->
     #llvm_ret{} ->
       io:format(Dev, "ret ~s ~s~n", [ret_type(I), ret_value(I)]);
     #llvm_br{} ->
-      io:format(Dev, "br label %~s~n", [br_dst(I)]);
+      io:format(Dev, "br label ~s~n", [br_dst(I)]);
     #llvm_br_cond{} ->
-      io:format(Dev, "br i1 ~s, label %~s, label %~s~n", 
+      io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
     #llvm_add{} ->
       io:format(Dev, "~s = add ", [add_dst(I)]),
@@ -692,7 +692,7 @@ pp_ins(Dev, I) ->
         true -> io:format(Dev, "volatile ", []);
         false -> ok
     end,
-      io:format(Dev, "store ~s ~s,~s* ~s ", 
+      io:format(Dev, "store ~s ~s, ~s* ~s ", 
         [store_type(I), store_value(I), store_p_type(I), store_pointer(I)]),
       case store_alignment(I) of 
         [] -> ok;
