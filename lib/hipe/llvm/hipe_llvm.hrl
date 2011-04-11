@@ -13,6 +13,7 @@
 -record(llvm_br, {dst}).
 -record(llvm_br_cond, {'cond', true_label, false_label}).
 %% Binary Operations
+-record(llvm_operation, {dst, op, type, src1, src2, options=[]}).
 -record(llvm_add, {dst, type, src1, src2, options=[]}).
 -record(llvm_fadd, {dst, type, src1, src2, options=[]}).
 -record(llvm_sub, {dst, type, src1, src2, options=[]}).
@@ -40,6 +41,7 @@
     volatile = false}).
 -record(llvm_store, {type, value, p_type, pointer, alignment = [], nontemporal = [],
     volatile = false}).
+-record(llvm_getelementptr, {dst, p_type, value, typed_idxs = [], inbounds = false}).
 %% Conversion Operations
 -record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
 -record(llvm_inttoptr, {dst, src_type, src, dst_type}).
