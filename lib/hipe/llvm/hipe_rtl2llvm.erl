@@ -336,7 +336,8 @@ trans_src(A) ->
 trans_dst(A) ->
   case hipe_rtl:is_var(A) of
     true ->
-      "%v" ++ integer_to_list(hipe_rtl:var_index(A));
+      trans_var(A);
+      %"%v" ++ integer_to_list(hipe_rtl:var_index(A));
     false ->
       case hipe_rtl:is_reg(A) of
         true ->
@@ -346,6 +347,16 @@ trans_dst(A) ->
       end
   end.
 
+trans_var(A) ->
+  case hipe_rtl:var_index(A) of
+    %TODO: Ugly..just for now to work..
+    19 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    20 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    20 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    21 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    22 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    _ -> "%v" ++ integer_to_list(hipe_rtl:var_index(A))
+  end.
 %% Translate register. If it is precoloured it must be mapped to some llvm var
 %% that corresponds to an argument
 trans_reg(Arg) ->
@@ -356,9 +367,10 @@ trans_reg(Arg) ->
   end.
 
 map_precoloured_reg(Index) ->
+  %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
-    Other ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
+    _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
 
@@ -445,18 +457,47 @@ arg_type(A) ->
 %% Create Header for Function 
 
 create_header(Dev, Name, Params) ->
+  % TODO: What if arguments more than available registers?
+  % TODO: Jump to correct label
   {_,N,_} = Name,
+  {Fixed_regs, Arg_regs} = map_registers(),
   io:format(Dev, "~n~ndefine i32 @~w(", [N]),
-  trans_args(Dev, Params),
-  io:format(Dev, ", i32 %hp_arg", []),
+  header_regs(Dev, Fixed_regs),
+  %trans_args(Dev, Params),
+  io:format(Dev,",~n",[]),
+  L = length(Params),
+  Arg_regs_rest = lists:sublist(Arg_regs, L),
+  header_regs(Dev, Arg_regs_rest),
   io:format(Dev, ") {~nentry:~n",[]),
-  % For now Just Allocate %hp_var
-  I1 = hipe_llvm:mk_alloca(?HP, "i32", [], []),
-  I2 = hipe_llvm:mk_store("i32", "%hp_arg", "i32", ?HP, [], [], false),
+  load_regs(Dev, Fixed_regs),
+  load_regs(Dev, Arg_regs_rest),
+  hipe_llvm:pp_ins(Dev,hipe_llvm:mk_br("%L1")).
+
+map_registers() ->
+  case get(hipe_target_arch) of
+    x86 -> {["hp", "p", "nsp"], 
+        ["arg0", "arg1", "arg2", "arg3", "arg4"]};
+    amd64 ->
+      {["hp", "p", "nsp", "fcalls", "heap_limit"],
+        ["arg0", "arg1", "arg2", "arg3", "arg4", "arg5"]};
+    Other ->
+      exit({?MODULE, map_registers, {"Unknown Architecture"}})
+  end.
+
+header_regs(_Dev, []) -> ok;
+header_regs(Dev, [R | []]) -> 
+  io:format(Dev, "i32 %"++R++"_in", []);
+header_regs(Dev, [R | Rs]) ->
+  io:format(Dev, "i32 %"++R++"_in, ", []),
+  header_regs(Dev, Rs).
+
+load_regs(_Dev, []) -> ok;
+load_regs(Dev, [R | Rs]) ->
+  I1 = hipe_llvm:mk_alloca("%"++R++"_var", "i32", [], []),
   hipe_llvm:pp_ins(Dev, I1),
-  hipe_llvm:pp_ins(Dev, I2).
-
-
+  I2 = hipe_llvm:mk_store("i32", "%"++R++"_in", "i32", "%"++R++"_var", [], [], false),
+  hipe_llvm:pp_ins(Dev, I2),
+  load_regs(Dev, Rs).
 %%-----------------------------------------------------------------------------
 %%
 %% Only For Testing
@@ -472,7 +513,7 @@ create_main(Dev, Name, Params) ->
   io:format(Dev, "Entry:~n", []),
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
   io:format(Dev, "~s = call i32 @~w(", [T1, N]),
-  init_params(Dev, erlang:length(Params)),
+  init_params(Dev, 5+erlang:length(Params)),
   io:format(Dev, ")~n", []),
 
   io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias " ++ 
