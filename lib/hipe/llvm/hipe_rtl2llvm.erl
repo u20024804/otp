@@ -87,22 +87,8 @@ trans_alu(Dev, I) ->
   Src1 = trans_src(hipe_rtl:alu_src1(I)),
   Src2 = trans_src(hipe_rtl:alu_src2(I)),
   Type = arg_type(hipe_rtl:alu_src1(I)),
-  I1 = case hipe_rtl:alu_op(I) of
-    add -> hipe_llvm:mk_add(Dst, Type, Src1, Src2, []);
-    sub -> hipe_llvm:mk_sub(Dst, Type, Src1, Src2, []);
-    'or' -> hipe_llvm:mk_or(Dst, Type, Src1, Src2, []);
-    'and' -> hipe_llvm:mk_and(Dst, Type, Src1, Src2);
-    'xor' -> hipe_llvm:mk_xor(Dst, Type, Src1, Src2);
-    sll -> hipe_llvm:mk_shl(Dst, Type, Src1, Src2, []);
-    srl -> hipe_llvm:mk_lshr(Dst, Type, Src1, Src2, []);
-    sra -> hipe_llvm:mk_ashr(Dst, Type, Src1, Src2, []);
-    %TODO: Following cases should be removed when call is fixed
-    mul -> hipe_llvm:mk_mul(Dst, Type, Src1, Src2, []);
-    'fdiv' -> hipe_llvm:mk_fdiv(Dst, Type, Src1, Src2, []);
-    'sdiv' -> hipe_llvm:mk_sdiv(Dst, Type, Src1, Src2, []);
-    'srem' -> hipe_llvm:mk_srem(Dst, Type, Src1, Src2, []);
-    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
-  end,
+  Op =  trans_op(hipe_rtl:alu_op(I)),
+  I1 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
   hipe_llvm:pp_ins(Dev, I1),
   case IsRegister of 
     true -> 
@@ -112,8 +98,6 @@ trans_alu(Dev, I) ->
     false -> ok
   end.
           
-
-
 %%
 %% alub
 %%
@@ -123,7 +107,6 @@ trans_alub(Dev, I) ->
     not_overflow -> trans_alub_overflow(Dev, I);
     _ -> trans_alub_no_overflow(Dev, I)
   end.
-
 
 trans_alub_overflow(Dev, I) ->
   io:format(Dev, "  ", []),
@@ -139,7 +122,7 @@ trans_alub_overflow(Dev, I) ->
   Dst = trans_dst(hipe_rtl:alub_dst(I)),
   I2 = hipe_llvm:mk_extractvalue(Dst, "{i32, i1}", T1 , "0", []),
   hipe_llvm:pp_ins(Dev, I2),
-  T2 = mk_temp(hipe_gensym:new_var(llvm)),
+  T2 = mk_temp(),
   I3 = hipe_llvm:mk_extractvalue(T2, "{i32, i1}", T1, "1", []),
   hipe_llvm:pp_ins(Dev, I3),
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
@@ -157,7 +140,7 @@ trans_alub_no_overflow(Dev, I) ->
   Src1 = trans_src(hipe_rtl:alub_src1(I)),
   Src2 = trans_src(hipe_rtl:alub_src2(I)),
   Cond = hipe_rtl:alub_cond(I),
-  T1 = mk_temp(hipe_gensym:new_var(llvm)),
+  T1 = mk_temp(),
   I2 = hipe_llvm:mk_icmp(T1, Cond, Type, Src1, Src2),
   hipe_llvm:pp_ins(Dev, I2),
   %br
@@ -315,17 +298,14 @@ trans_store_reg(Dev, I) ->
   I2 = hipe_llvm:mk_inttoptr(D2, "i32", D1, "i32"),
   hipe_llvm:pp_ins(Dev, I1),
   hipe_llvm:pp_ins(Dev, I2),
-  %TODO Implement getelementptr ....
-  Offset = integer_to_list(hipe_rtl:imm_value(hipe_rtl:store_offset(I))),
+  Offset = trans_src(hipe_rtl:store_offset(I)), 
   D3 = mk_hp(),
-  io:format(Dev, "  ~s = getelementptr i32* ~s, i32 ~s~n", [
-        D3, D2, Offset]),
-  % ........
+  I3 = hipe_llvm:mk_getelementptr(D3, "i32", D2, [{"i32", Offset}], false),
+  hipe_llvm:pp_ins(Dev, I3),
   Value = hipe_rtl:store_src(I),
   I4 = hipe_llvm:mk_store("i32", trans_src(Value), "i32", D3, [], [],
                           false),
   hipe_llvm:pp_ins(Dev, I4).
-
 
 %%-----------------------------------------------------------------------------
 
@@ -382,18 +362,22 @@ map_precoloured_reg(Index) ->
             Index}})
   end.
 
-%trans_op(Op) ->
-%  case Op of
-%    add -> "add";
-%    sub -> "sub";
-%    'or'-> "or";
-%    'and' -> "and";
-%    'xor' -> "xor";
-%    sll -> "shl";
-%    srl -> "lshr";
-%    sra -> "ashr";
-%    Other -> exit({?MODULE, trans_alu,{"unknown ALU op", Other}})
-%  end.
+trans_op(Op) ->
+  case Op of
+    add -> add;
+    sub -> sub;
+    'or' -> 'or';
+    'and' -> 'and';
+    'xor' -> 'xor';
+    sll -> shl;
+    srl -> lshr;
+    sra -> ashr;
+    mul -> mul;
+    'fdiv' -> fdiv;
+    'sdiv' -> sdiv;
+    'srem' -> srem;
+    Other -> exit({?MODULE, trans_op, {"Unknown RTL Operator",Other}})
+  end.
 
 %% 
 %% Pretty print arg(s).
