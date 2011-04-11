@@ -13,6 +13,14 @@
     br_cond_cond/1,
     br_cond_true_label/1,
     br_cond_false_label/1,
+    
+    mk_operation/6,
+    operation_dst/1,
+    operation_op/1,
+    operation_type/1,
+    operation_src1/1,
+    operation_src2/1,
+    operation_options/1,
 
     mk_add/5,
     add_dst/1,
@@ -167,6 +175,13 @@
     store_nontemporal/1,
     store_volatile/1,
 
+    mk_getelementptr/5,
+    getelementptr_dst/1,
+    getelementptr_p_type/1,
+    getelementptr_value/1,
+    getelementptr_typed_idxs/1,
+    getelementptr_inbounds/1,
+
     mk_ptrtoint/4,
     ptrtoint_dst/1,
     ptrtoint_src_type/1,
@@ -242,6 +257,19 @@ br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) -> 
   False_label.
 
+
+%%
+%% operation
+%%
+mk_operation(Dst, Op, Type, Src1, Src2, Options) ->
+  #llvm_operation{dst=Dst, op=Op, type=Type, src1=Src1, src2=Src2, 
+              options=Options}.
+operation_dst(#llvm_operation{dst=Dst}) -> Dst.
+operation_op(#llvm_operation{op=Op}) -> Op.
+operation_type(#llvm_operation{type=Type}) -> Type.
+operation_src1(#llvm_operation{src1=Src1}) -> Src1.
+operation_src2(#llvm_operation{src2=Src2}) -> Src2.
+operation_options(#llvm_operation{options=Options}) -> Options.
 %%
 %% add
 %%
@@ -489,6 +517,17 @@ store_nontemporal(#llvm_store{nontemporal=Nontemporal})-> Nontemporal.
 store_volatile(#llvm_store{volatile=Volatile})-> Volatile.
 
 %%
+%% getelementptr
+%%
+mk_getelementptr(Dst, P_Type, Value, Typed_Idxs, Inbounds) ->
+  #llvm_getelementptr{dst=Dst,p_type=P_Type, value=Value, typed_idxs=Typed_Idxs,
+    inbounds=Inbounds}.
+getelementptr_dst(#llvm_getelementptr{dst=Dst}) -> Dst. 
+getelementptr_p_type(#llvm_getelementptr{p_type=P_Type}) -> P_Type.
+getelementptr_value(#llvm_getelementptr{value=Value}) -> Value.
+getelementptr_typed_idxs(#llvm_getelementptr{typed_idxs=Typed_Idxs}) -> Typed_Idxs.
+getelementptr_inbounds(#llvm_getelementptr{inbounds=Inbounds}) -> Inbounds.
+%%
 %% ptrtoint
 %%
 mk_ptrtoint(Dst, Src_Type, Src, Dst_Type) ->
@@ -567,6 +606,11 @@ pp_ins(Dev, I) ->
     #llvm_br_cond{} ->
       io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
+    #llvm_operation{} ->
+      io:format(Dev, "~s = ~s ", [operation_dst(I), operation_op(I)]),
+      pp_options(Dev, operation_options(I)),
+      io:format(Dev, "~s ~s, ~s~n",
+        [operation_type(I), operation_src1(I), operation_src2(I)]);
     #llvm_add{} ->
       io:format(Dev, "~s = add ", [add_dst(I)]),
       pp_options(Dev, add_options(I)),
@@ -703,6 +747,16 @@ pp_ins(Dev, I) ->
         In -> io:format(Dev, ", !nontemporal !~s", [In])
       end,
       io:format(Dev, "~n", []);
+    #llvm_getelementptr{} ->
+      io:format(Dev, "~s = getelementptr ", [getelementptr_dst(I)]),
+      case getelementptr_inbounds(I) of
+        true -> io:format(Dev, "inbounds ", []);
+        false -> ok
+      end,
+      io:format(Dev, "~s* ~s", [getelementptr_p_type(I), 
+          getelementptr_value(I)]),
+      pp_typed_idxs(Dev, getelementptr_typed_idxs(I)),
+      io:format(Dev, "~n", []);
     #llvm_ptrtoint{} ->
       io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
                 ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
@@ -735,4 +789,10 @@ pp_ins(Dev, I) ->
   pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
     io:format(Dev, "[ ~s, ~s ], ", [Value, Label]),
     pp_phi_value_labels(Dev, VL).
+
+
+  pp_typed_idxs(_Dev, []) -> ok;
+  pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
+    io:format(Dev, ", ~s ~s", [Type, Id]),
+    pp_typed_idxs(Dev, Tids).
 
