@@ -213,11 +213,15 @@
     phi_type/1,
     phi_value_label_list/1,
 
-    mk_call/4,
+    mk_call/8,
     call_dst/1,
+    call_is_tail/1,
+    call_cconv/1,
+    call_ret_attrs/1,
     call_type/1,
     call_fnptrval/1,
     call_arglist/1,
+    call_fn_attrs/1,
 
     mk_comment/1,
     comment_text/1
@@ -582,12 +586,17 @@ phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
 %%
 %% call
 %%
-mk_call(Dst, Type, Fnptrval, Arglist) ->
-  #llvm_call{dst=Dst, type=Type, fnptrval=Fnptrval, arglist=Arglist}.
+mk_call(Dst, Is_tail, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs) ->
+  #llvm_call{dst=Dst, is_tail=Is_tail, cconv=Cconv, ret_attrs=Ret_attrs, 
+            type=Type, fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs}.
 call_dst(#llvm_call{dst=Dst}) -> Dst.
+call_is_tail(#llvm_call{is_tail=Is_tail}) -> Is_tail.
+call_cconv(#llvm_call{cconv=Cconv}) -> Cconv.
+call_ret_attrs(#llvm_call{ret_attrs=Ret_attrs}) -> Ret_attrs.
 call_type(#llvm_call{type=Type}) -> Type.
 call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
 call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
+call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 
 %%
 %% comment
@@ -773,11 +782,32 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~s = phi ~s ", [phi_dst(I), phi_type(I)]),
       pp_phi_value_labels(Dev, phi_value_label_list(I)),
       io:format(Dev, "~n", []);
+    #llvm_call{} ->
+      io:format(Dev, "~s = ", [call_dst(I)]),
+      case call_is_tail(I) of
+        true -> io:format(Dev, "tail ", []);
+        false -> ok
+      end,
+      io:format(Dev, "call ", []),
+      pp_options(Dev, call_cconv(I)),
+      pp_options(Dev, call_ret_attrs(I)),
+      io:format(Dev, "~s ~s(", [call_type(I), call_fnptrval(I)]),
+      pp_args(Dev, call_arglist(I)),
+      io:format(Dev, ") ", []),
+      pp_options(Dev, call_fn_attrs(I)),
+      io:format(Dev, "~n", []);
     #llvm_comment{} ->
       io:format(Dev, "; ~s~n", [comment_text(I)]);
 
       Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
     end.
+
+  pp_args(_Dev, []) -> ok;
+  pp_args(Dev, [{Type, Arg} | []]) ->
+    io:format(Dev, "~s ~s", [Type, Arg]);
+  pp_args(Dev, [{Type, Arg} | Args]) ->
+    io:format(Dev, "~s ~s, ", [Type, Arg]),
+    pp_args(Dev, Args).
 
   pp_options(_Dev, []) -> ok;
   pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
