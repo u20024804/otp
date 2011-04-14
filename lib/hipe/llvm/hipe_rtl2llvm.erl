@@ -109,15 +109,13 @@ trans_alub(Dev, I) ->
   end.
 
 trans_alub_overflow(Dev, I) ->
-  io:format(Dev, "  ", []),
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
+  Src1 =  trans_src(hipe_rtl:alub_src1(I)),
+  Src2 =  trans_src(hipe_rtl:alub_src2(I)),
   %TODO: Fix call
-  io:format(Dev, "~s = ", [T1]),
-  io:format(Dev, "call {i32, i1} @llvm.sadd.with.overflow.i32(", []),
-  trans_arg(Dev, hipe_rtl:alub_src1(I)),
-  io:format(Dev, ", ", []),
-  trans_arg(Dev, hipe_rtl:alub_src2(I)),
-  io:format(Dev, ")~n", []),
+  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i32, i1}",
+    "@llvm.sadd.with.overflow.i32", [{"i32", Src1},{"i32", Src2}], []),
+  hipe_llvm:pp_ins(Dev, I1),
   %
   Dst = trans_dst(hipe_rtl:alub_dst(I)),
   I2 = hipe_llvm:mk_extractvalue(Dst, "{i32, i1}", T1 , "0", []),
@@ -352,9 +350,9 @@ trans_var(A) ->
     %TODO: Ugly..just for now to work..
     19 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
     20 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    20 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
     21 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
     22 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
+    23 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
     _ -> "%v" ++ integer_to_list(hipe_rtl:var_index(A))
   end.
 %% Translate register. If it is precoloured it must be mapped to some llvm var
