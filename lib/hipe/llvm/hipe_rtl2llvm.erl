@@ -169,23 +169,26 @@ trans_branch(Dev, I) ->
 %% call
 %%
 trans_call(Dev, I) ->
-  [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
-  Op = case hipe_rtl:call_fun(I) of
-    '+' -> add;
-    '-' -> sub;
-    '*' -> mul;
-    'div' -> 'sdiv';
-    '/' -> 'fdiv';
-    'rem' -> 'srem';
-    Other -> exit({?MODULE, trans_call, {"unknown call", Other}})
+  case hipe_rtl:call_fun(I) of
+    Prim when is_atom(Prim) ->
+      trans_prim_call(Dev, I);
+    {M,F,A} when is_atom(M), is_atom(F), is_integer(A) ->
+      trans_mfa_call(Dev, I)
   end,
-  [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
-  I1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
-  trans_alu(Dev, I1),
   case hipe_rtl:call_continuation(I) of
     [] -> true;
     CC -> trans_goto(Dev, hipe_rtl:mk_goto(CC))
   end.
+
+trans_prim_call(Dev, I) ->
+  [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
+  [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
+  Op = trans_prim_op(hipe_rtl:call_fun(I)),
+  I1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
+  trans_alu(Dev, I1).
+
+trans_mfa_call(Dev, I) ->
+  exit({?MODULE, trans_mfa_call, I}).
 
 %%
 %% trans_comment
@@ -387,6 +390,17 @@ trans_op(Op) ->
     'sdiv' -> sdiv;
     'srem' -> srem;
     Other -> exit({?MODULE, trans_op, {"Unknown RTL Operator",Other}})
+  end.
+
+trans_prim_op(Op) -> 
+  case Op of
+    '+' -> add;
+    '-' -> sub;
+    '*' -> mul;
+    'div' -> 'sdiv';
+    '/' -> 'fdiv';
+    'rem' -> 'srem';
+    Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
 %% 
