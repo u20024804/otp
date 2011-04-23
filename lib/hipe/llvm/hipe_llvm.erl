@@ -223,6 +223,28 @@
     call_arglist/1,
     call_fn_attrs/1,
 
+    mk_fun_def/10,
+    fun_def_linkage/1,
+    fun_def_visibility/1,
+    fun_def_cconv/1,
+    fun_def_ret_attrs/1,
+    fun_def_type/1,
+    fun_def_name/1,
+    fun_def_arglist/1,
+    fun_def_fn_attrs/1,
+    fun_def_align/1,
+    fun_def_body/1,
+    
+    mk_fun_decl/8,
+    fun_decl_linkage/1,
+    fun_decl_visibility/1,
+    fun_decl_cconv/1,
+    fun_decl_ret_attrs/1,
+    fun_decl_type/1,
+    fun_decl_name/1,
+    fun_decl_arglist/1,
+    fun_decl_align/1,
+
     mk_comment/1,
     comment_text/1,
 
@@ -601,6 +623,60 @@ call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
 call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
 call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 
+%% 
+%% fun_def
+%%
+mk_fun_def(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist,
+  Fn_attrs, Align, Body)->
+  #llvm_fun_def{
+    linkage=Linkage,
+    visibility=Visibility,
+    cconv=Cconv,
+    ret_attrs=Ret_attrs,
+    type=Type,
+    'name'=Name,
+    arglist=Arglist,
+    fn_attrs=Fn_attrs,
+    align=Align,
+    body=Body
+  }.
+
+fun_def_linkage(#llvm_fun_def{linkage=Linkage}) -> Linkage.
+fun_def_visibility(#llvm_fun_def{visibility=Visibility}) -> Visibility.
+fun_def_cconv(#llvm_fun_def{cconv=Cconv}) -> Cconv .
+fun_def_ret_attrs(#llvm_fun_def{ret_attrs=Ret_attrs}) -> Ret_attrs.
+fun_def_type(#llvm_fun_def{type=Type}) -> Type.
+fun_def_name(#llvm_fun_def{'name'=Name}) -> Name.
+fun_def_arglist(#llvm_fun_def{arglist=Arglist}) -> Arglist.
+fun_def_fn_attrs(#llvm_fun_def{fn_attrs=Fn_attrs}) -> Fn_attrs.
+fun_def_align(#llvm_fun_def{align=Align}) -> Align.
+fun_def_body(#llvm_fun_def{body=Body}) -> Body.
+
+
+%% 
+%% fun_decl
+%%
+mk_fun_decl(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist, Align)->
+  #llvm_fun_decl{
+    linkage=Linkage,
+    visibility=Visibility,
+    cconv=Cconv,
+    ret_attrs=Ret_attrs,
+    type=Type,
+    'name'=Name,
+    arglist=Arglist,
+    align=Align
+  }.
+
+fun_decl_linkage(#llvm_fun_decl{linkage=Linkage}) -> Linkage.
+fun_decl_visibility(#llvm_fun_decl{visibility=Visibility}) -> Visibility.
+fun_decl_cconv(#llvm_fun_decl{cconv=Cconv}) -> Cconv .
+fun_decl_ret_attrs(#llvm_fun_decl{ret_attrs=Ret_attrs}) -> Ret_attrs.
+fun_decl_type(#llvm_fun_decl{type=Type}) -> Type.
+fun_decl_name(#llvm_fun_decl{'name'=Name}) -> Name.
+fun_decl_arglist(#llvm_fun_decl{arglist=Arglist}) -> Arglist.
+fun_decl_align(#llvm_fun_decl{align=Align}) -> Align.
+
 %%
 %% comment
 %%
@@ -813,6 +889,46 @@ pp_ins(Dev, I) ->
       io:format(Dev, ") ", []),
       pp_options(Dev, call_fn_attrs(I)),
       io:format(Dev, "~n", []);
+    #llvm_fun_def{} ->
+      io:format(Dev, "define ", []),
+      pp_options(Dev, fun_def_linkage(I)),
+      pp_options(Dev, fun_def_visibility(I)),
+      case fun_def_cconv(I) of
+        [] -> ok;
+        Cc -> io:format(Dev, "~s ", [Cc])
+      end,
+      pp_options(Dev, fun_def_ret_attrs(I)),
+      io:format(Dev, "~s @~s", [fun_def_type(I), fun_def_name(I)]),
+      io:format(Dev, "(", []),
+      pp_args(Dev, fun_def_arglist(I)),
+      io:format(Dev, ") ", []),
+      pp_options(Dev, fun_def_fn_attrs(I)),
+      case fun_def_align(I) of
+        [] -> ok;
+        N -> io:format(Dev, "align ~s", [N])
+      end,
+      io:format(Dev, "{~n", []),
+      pp_ins_list(Dev, fun_def_body(I)),
+      io:format(Dev, "}~n", []);
+    #llvm_fun_decl{} ->
+      io:format(Dev, "declare ", []),
+      pp_options(Dev, fun_decl_linkage(I)),
+      pp_options(Dev, fun_decl_visibility(I)),
+      case fun_decl_cconv(I) of
+        [] -> ok;
+        Cc -> io:format(Dev, "~s ", [Cc])
+      end,
+      pp_options(Dev, fun_decl_ret_attrs(I)),
+      io:format(Dev, "~s @~s", [fun_decl_type(I), fun_decl_name(I)]),
+      io:format(Dev, "(", []),
+      pp_types(Dev, fun_decl_arglist(I)),
+      io:format(Dev, ") ", []),
+      case fun_decl_align(I) of
+        [] -> ok;
+        N -> io:format(Dev, "align ~s", [N])
+      end,
+      io:format(Dev, "~n", []);
+
     #llvm_comment{} ->
       io:format(Dev, "; ~s~n", [comment_text(I)]);
     #llvm_label{} ->
@@ -828,6 +944,14 @@ pp_args(Dev, [{Type, Arg} | []]) ->
 pp_args(Dev, [{Type, Arg} | Args]) ->
   io:format(Dev, "~s ~s, ", [Type, Arg]),
   pp_args(Dev, Args).
+
+pp_types(_Dev, []) -> ok;
+pp_types(Dev, [T | []]) ->
+  io:format(Dev, "~s ", [T]);
+pp_types(Dev, [T | Types]) ->
+  io:format(Dev, "~s , ", [T]),
+  pp_types(Dev, Types).
+
 
 pp_options(_Dev, []) -> ok;
 pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
@@ -849,5 +973,7 @@ pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
 indent(I) ->
   case I of 
     #llvm_label{} -> false;
+    #llvm_fun_def{} -> false;
+    #llvm_fun_decl{} -> false;
     _ -> true
   end.
