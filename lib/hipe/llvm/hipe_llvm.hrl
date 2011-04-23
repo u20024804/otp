@@ -51,6 +51,10 @@
 -record(llvm_phi, {dst, type, value_label_list}). 
 -record(llvm_call, {dst, is_tail = false, cconv = [], ret_attrs = [], type,
                     fnptrval, arglist = [], fn_attrs = []}).
+-record(llvm_fun_def, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
+    type, 'name', arglist=[], fn_attrs=[], align=[], body=[]}).
+-record(llvm_fun_decl, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
+    type, 'name', arglist=[],  align=[]}).
 %%---------------------------------------------------------------------
 -record(llvm_comment, {text}).
 -record(llvm_label, {label}).
