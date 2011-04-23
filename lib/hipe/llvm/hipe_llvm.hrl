@@ -53,3 +53,4 @@
                     fnptrval, arglist = [], fn_attrs = []}).
 %%---------------------------------------------------------------------
 -record(llvm_comment, {text}).
+-record(llvm_label, {label}).
