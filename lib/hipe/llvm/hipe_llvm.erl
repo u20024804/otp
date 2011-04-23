@@ -13,7 +13,7 @@
     br_cond_cond/1,
     br_cond_true_label/1,
     br_cond_false_label/1,
-    
+
     mk_operation/6,
     operation_dst/1,
     operation_op/1,
@@ -112,7 +112,7 @@
     shl_src1/1,
     shl_src2/1,
     shl_options/1,
-    
+
     mk_lshr/5,
     lshr_dst/1,
     lshr_type/1,
@@ -157,7 +157,7 @@
     alloca_type/1,
     alloca_num/1,
     alloca_align/1,
-    
+
     mk_load/6,
     load_dst/1,
     load_p_type/1,
@@ -224,10 +224,13 @@
     call_fn_attrs/1,
 
     mk_comment/1,
-    comment_text/1
+    comment_text/1,
+
+    mk_label/1,
+    label_label/1
   ]).
 
--export([pp_ins/2]).
+-export([pp_ins_list/2, pp_ins/2]).
 
 
 %%-----------------------------------------------------------------------------
@@ -267,7 +270,7 @@ br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
 %%
 mk_operation(Dst, Op, Type, Src1, Src2, Options) ->
   #llvm_operation{dst=Dst, op=Op, type=Type, src1=Src1, src2=Src2, 
-              options=Options}.
+    options=Options}.
 operation_dst(#llvm_operation{dst=Dst}) -> Dst.
 operation_op(#llvm_operation{op=Op}) -> Op.
 operation_type(#llvm_operation{type=Type}) -> Type.
@@ -588,7 +591,7 @@ phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
 %%
 mk_call(Dst, Is_tail, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs) ->
   #llvm_call{dst=Dst, is_tail=Is_tail, cconv=Cconv, ret_attrs=Ret_attrs, 
-            type=Type, fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs}.
+    type=Type, fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs}.
 call_dst(#llvm_call{dst=Dst}) -> Dst.
 call_is_tail(#llvm_call{is_tail=Is_tail}) -> Is_tail.
 call_cconv(#llvm_call{cconv=Cconv}) -> Cconv.
@@ -604,9 +607,23 @@ call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 mk_comment(Text) -> #llvm_comment{text=Text}.
 comment_text(#llvm_comment{text=Text}) -> Text.
 
+%%
+%% label
+%%
+mk_label(Label) -> #llvm_label{label=Label}.
+label_label(#llvm_label{label=Label}) -> Label.
+
+pp_ins_list(Dev, []) -> ok;
+pp_ins_list(Dev, [I|Is]) ->
+  pp_ins(Dev, I),
+  pp_ins(Dev, Is).
+
 
 pp_ins(Dev, I) ->
-  io:format(Dev, "  ", []),
+  case indent(I) of
+    true ->  io:format(Dev, "  ", []);
+    false -> ok
+  end,
   case I of
     #llvm_ret{} ->
       io:format(Dev, "ret ~s ~s~n", [ret_type(I), ret_value(I)]);
@@ -728,7 +745,7 @@ pp_ins(Dev, I) ->
       case load_volatile(I) of
         true -> io:format(Dev, "volatile ", []);
         false -> ok
-    end,
+      end,
       io:format(Dev, "load ~s* ~s ", 
         [load_p_type(I), load_pointer(I)]),
       case load_alignment(I) of 
@@ -744,7 +761,7 @@ pp_ins(Dev, I) ->
       case store_volatile(I) of
         true -> io:format(Dev, "volatile ", []);
         false -> ok
-    end,
+      end,
       io:format(Dev, "store ~s ~s, ~s* ~s ", 
         [store_type(I), store_value(I), store_p_type(I), store_pointer(I)]),
       case store_alignment(I) of 
@@ -768,10 +785,10 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~n", []);
     #llvm_ptrtoint{} ->
       io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
-                ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
+          ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
     #llvm_inttoptr{} ->
       io:format(Dev, "~s = inttoptr ~s ~s to ~s*~n", [inttoptr_dst(I),
-                inttoptr_src_type(I), inttoptr_src(I), inttoptr_dst_type(I)]);
+          inttoptr_src_type(I), inttoptr_src(I), inttoptr_dst_type(I)]);
     #llvm_icmp{} ->
       io:format(Dev, "~s = icmp ~s ~s ~s, ~s~n",
         [icmp_dst(I), icmp_cond(I), icmp_type(I), icmp_src1(I), icmp_src2(I)]);
@@ -798,31 +815,39 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~n", []);
     #llvm_comment{} ->
       io:format(Dev, "; ~s~n", [comment_text(I)]);
+    #llvm_label{} ->
+      io:format(Dev, "~s:~n", [label_label(I)]);
 
-      Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
-    end.
-
-  pp_args(_Dev, []) -> ok;
-  pp_args(Dev, [{Type, Arg} | []]) ->
-    io:format(Dev, "~s ~s", [Type, Arg]);
-  pp_args(Dev, [{Type, Arg} | Args]) ->
-    io:format(Dev, "~s ~s, ", [Type, Arg]),
-    pp_args(Dev, Args).
-
-  pp_options(_Dev, []) -> ok;
-  pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
-    pp_options(Dev, Os).
-
-  pp_phi_value_labels(_Dev, []) -> ok;
-  pp_phi_value_labels(Dev, [{Value, Label}|[]]) ->
-    io:format(Dev, "[ ~s, ~s ]", [Value, Label]);
-  pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
-    io:format(Dev, "[ ~s, ~s ], ", [Value, Label]),
-    pp_phi_value_labels(Dev, VL).
+    Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
+  end.
 
 
-  pp_typed_idxs(_Dev, []) -> ok;
-  pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
-    io:format(Dev, ", ~s ~s", [Type, Id]),
-    pp_typed_idxs(Dev, Tids).
+pp_args(_Dev, []) -> ok;
+pp_args(Dev, [{Type, Arg} | []]) ->
+  io:format(Dev, "~s ~s", [Type, Arg]);
+pp_args(Dev, [{Type, Arg} | Args]) ->
+  io:format(Dev, "~s ~s, ", [Type, Arg]),
+  pp_args(Dev, Args).
 
+pp_options(_Dev, []) -> ok;
+pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
+  pp_options(Dev, Os).
+
+pp_phi_value_labels(_Dev, []) -> ok;
+pp_phi_value_labels(Dev, [{Value, Label}|[]]) ->
+  io:format(Dev, "[ ~s, ~s ]", [Value, Label]);
+pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
+  io:format(Dev, "[ ~s, ~s ], ", [Value, Label]),
+  pp_phi_value_labels(Dev, VL).
+
+
+pp_typed_idxs(_Dev, []) -> ok;
+pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
+  io:format(Dev, ", ~s ~s", [Type, Id]),
+  pp_typed_idxs(Dev, Tids).
+
+indent(I) ->
+  case I of 
+    #llvm_label{} -> false;
+    _ -> true
+  end.

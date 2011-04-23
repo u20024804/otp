@@ -15,6 +15,9 @@ translate(RTL) ->
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
+  % To be used later
+  _IsClosure = hipe_rtl:rtl_is_closure(RTL),
+  _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   io:format("Geia sou llvm!~n"),
   {_, Fun_Name, _} = Fun,
 
@@ -213,6 +216,7 @@ trans_fixnum(Dev, I) ->
 %% gctest
 %%
 trans_gctest(Dev, I) ->
+  % For now ignore gc_test. Just print it as comment
   W = trans_src(hipe_rtl:gctest_words(I)),
   hipe_llvm:pp_ins(Dev,
     hipe_llvm:mk_comment("gc_test("++W++")")).
@@ -228,7 +232,9 @@ trans_goto(Dev, I) ->
 %% label
 %%
 trans_label(Dev, I) ->
-  io:format(Dev, "~nL~w:~n", [hipe_rtl:label_name(I)]).
+  Label  = mk_label(hipe_rtl:label_name(I)),
+  I1 = hipe_llvm:mk_label(Label),
+  hipe_llvm:pp_ins(Dev, I1).
 
 %%
 %% move
