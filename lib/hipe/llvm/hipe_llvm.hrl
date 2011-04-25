@@ -61,9 +61,15 @@
 
 
 %% Types
+-record(llvm_void, {}).
 -record(llvm_int, {width}).
+-record(llvm_float, {}).
+-record(llvm_double, {}).
+-record(llvm_fp80, {}).
+-record(llvm_fp128, {}).
+-record(llvm_ppc_fp128, {}).
 -record(llvm_pointer, {type}).
--record(llvm_array, {'size', type}).
 -record(llvm_vector, {'size', type}).
 -record(llvm_struct, {type_list}).
+-record(llvm_array, {'size', type}).
 -record(llvm_fun, {ret_type, arg_type_list}).
