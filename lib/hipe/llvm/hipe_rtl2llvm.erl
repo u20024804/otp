@@ -4,6 +4,7 @@
 -module(hipe_rtl2llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 -include("../rtl/hipe_rtl.hrl").
+-include("hipe_llvm.hrl").
 
 -export([translate/1]).
 
@@ -26,49 +27,49 @@ translate(RTL) ->
   file:close(File_rtl),
 
   {ok, File_llvm} = file:open(atom_to_list(Fun_Name) ++ ".ll", [write]),
-  create_header(File_llvm, Fun, Params),
-  translate_instrs(File_llvm, Code),
+  Llvm_Code = translate_instr_list(Code, []),
+  Final_Code = create_header(Fun, Params, Llvm_Code),
+  hipe_llvm:pp_ins(File_llvm, Final_Code),
   create_main(File_llvm, Fun, Params),
   file:close(File_llvm).
 
 %%-----------------------------------------------------------------------------
 
-translate_instrs(Dev, []) -> 
-  io:format(Dev,"~n}~n",[]),
-  ok;
-translate_instrs(Dev, [I|Is]) ->
-  translate_instr(Dev, I),
-  translate_instrs(Dev, Is).
+translate_instr_list([], Acc) -> 
+  lists:reverse(lists:flatten(Acc));
+translate_instr_list([I|Is], Acc) ->
+  Acc1 = translate_instr(I),
+  translate_instr_list(Is, [Acc1|Acc]).
 
 
-translate_instr(Dev, I) ->
+translate_instr(I) ->
   case I of
-    #alu{} -> trans_alu(Dev, I);
-    #alub{} -> trans_alub(Dev, I);
-    #branch{} -> trans_branch(Dev, I);
-    #call{} -> trans_call(Dev, I);
-    #comment{} -> trans_comment(Dev, I);
+    #alu{} -> trans_alu(I);
+    #alub{} -> trans_alub(I);
+    #branch{} -> trans_branch(I);
+    #call{} -> trans_call(I);
+    #comment{} -> trans_comment(I);
     %#enter{} -> ok;
     %#fconv{} -> ok;
-    #fixnumop{} -> trans_fixnum(Dev, I);
+    #fixnumop{} -> trans_fixnum(I);
     %#fload{} -> ok;
     %#fmove{} -> ok;
     %#fp{} -> ok;
     %#fp_unop{} -> ok;
     %#fstore{} -> ok;
-    #gctest{} -> trans_gctest(Dev, I);
-    #goto{} -> trans_goto(Dev, I);
+    #gctest{} -> trans_gctest(I);
+    #goto{} -> trans_goto(I);
     %#goto_index{} -> ok;
-    #label{} -> trans_label(Dev, I);
+    #label{} -> trans_label(I);
     %#load{} -> ok;
     %#load_address{} -> ok;
     %#load_atom{} -> ok;
     %#load_word_index{} -> ok;
-    %#move{} -> trans_move(Dev, I);
+    %#move{} -> trans_move(I);
     %#multimove{} -> ok;
-    #phi{} -> trans_phi(Dev, I);
-    #return{} -> trans_return(Dev, I);
-    #store{} -> trans_store(Dev, I);
+    #phi{} -> trans_phi(I);
+    #return{} -> trans_return(I);
+    #store{} -> trans_store(I);
     %#switch{} -> ok;
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
@@ -80,7 +81,7 @@ translate_instr(Dev, I) ->
 %%
 %% alu
 %% 
-trans_alu(Dev, I) ->
+trans_alu(I) ->
   % Destination is a register and not in SSA Form..
   IsRegister =  hipe_rtl_arch:is_precoloured(hipe_rtl:alu_dst(I)),
   Dst = case IsRegister of
@@ -92,50 +93,46 @@ trans_alu(Dev, I) ->
   Type = arg_type(hipe_rtl:alu_src1(I)),
   Op =  trans_op(hipe_rtl:alu_op(I)),
   I1 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
-  hipe_llvm:pp_ins(Dev, I1),
-  case IsRegister of 
+  I2 = case IsRegister of 
     true -> 
       Dst2 = trans_dst(hipe_rtl:alu_dst(I)),
-      I2 = hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false),
-            hipe_llvm:pp_ins(Dev, I2);
-    false -> ok
-  end.
+      hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false);
+    false -> []
+  end,
+  [I2, I1].
           
 %%
 %% alub
 %%
-trans_alub(Dev, I) ->
+trans_alub(I) ->
   case hipe_rtl:alub_cond(I) of
-    overflow -> trans_alub_overflow(Dev, I);
-    not_overflow -> trans_alub_overflow(Dev, I);
-    _ -> trans_alub_no_overflow(Dev, I)
+    overflow -> trans_alub_overflow(I);
+    not_overflow -> trans_alub_overflow(I);
+    _ -> trans_alub_no_overflow(I)
   end.
 
-trans_alub_overflow(Dev, I) ->
+trans_alub_overflow(I) ->
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
   Src1 =  trans_src(hipe_rtl:alub_src1(I)),
   Src2 =  trans_src(hipe_rtl:alub_src2(I)),
   %TODO: Fix call
   I1 = hipe_llvm:mk_call(T1, false, [], [], "{i32, i1}",
     "@llvm.sadd.with.overflow.i32", [{"i32", Src1},{"i32", Src2}], []),
-  hipe_llvm:pp_ins(Dev, I1),
   %
   Dst = trans_dst(hipe_rtl:alub_dst(I)),
   I2 = hipe_llvm:mk_extractvalue(Dst, "{i32, i1}", T1 , "0", []),
-  hipe_llvm:pp_ins(Dev, I2),
   T2 = mk_temp(),
   I3 = hipe_llvm:mk_extractvalue(T2, "{i32, i1}", T1, "1", []),
-  hipe_llvm:pp_ins(Dev, I3),
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
   I4 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
-  hipe_llvm:pp_ins(Dev, I4).
+  [I4, I3, I2, I1].
 
-trans_alub_no_overflow(Dev, I) ->
+trans_alub_no_overflow(I) ->
   %alu
-  I1 = hipe_rtl:mk_alu(hipe_rtl:alub_dst(I), hipe_rtl:alub_src1(I),
+  T = hipe_rtl:mk_alu(hipe_rtl:alub_dst(I), hipe_rtl:alub_src1(I),
     hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
-  trans_alu(Dev, I1),
+  I1 = trans_alu(T),
   %icmp
   Type = arg_type(hipe_rtl:alub_src1(I)),
   Src1 = trans_src(hipe_rtl:alub_src1(I)),
@@ -143,17 +140,16 @@ trans_alub_no_overflow(Dev, I) ->
   Cond = hipe_rtl:alub_cond(I),
   T1 = mk_temp(),
   I2 = hipe_llvm:mk_icmp(T1, Cond, Type, Src1, Src2),
-  hipe_llvm:pp_ins(Dev, I2),
   %br
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
   I3 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
-  hipe_llvm:pp_ins(Dev, I3).
+  [I3, I2, I1].
 
 %%
 %% branch
 %%
-trans_branch(Dev, I) ->
+trans_branch(I) ->
   Type = arg_type(hipe_rtl:branch_src1(I)),
   Src1 = trans_src(hipe_rtl:branch_src1(I)),
   Src2 = trans_src(hipe_rtl:branch_src2(I)),
@@ -161,85 +157,88 @@ trans_branch(Dev, I) ->
   %icmp
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
   I1 = hipe_llvm:mk_icmp(T1, Cond, Type, Src1, Src2),
-  hipe_llvm:pp_ins(Dev, I1),
   %br
   True_label = mk_jump_label(hipe_rtl:branch_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:branch_false_label(I)),
   I2 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
-  hipe_llvm:pp_ins(Dev, I2).
+  [I2, I1].
 
 %%
 %% call
 %%
-trans_call(Dev, I) ->
-  case hipe_rtl:call_fun(I) of
+trans_call(I) ->
+  I1 = case hipe_rtl:call_fun(I) of
     Prim when is_atom(Prim) ->
-      trans_prim_call(Dev, I);
+      trans_prim_call(I);
     {M,F,A} when is_atom(M), is_atom(F), is_integer(A) ->
-      trans_mfa_call(Dev, I)
+      trans_mfa_call(I)
   end,
-  case hipe_rtl:call_continuation(I) of
-    [] -> true;
-    CC -> trans_goto(Dev, hipe_rtl:mk_goto(CC))
-  end.
+  I2 = case hipe_rtl:call_continuation(I) of
+    [] -> [];
+    CC -> trans_goto(hipe_rtl:mk_goto(CC))
+  end,
+  [I2, I1].
 
-trans_prim_call(Dev, I) ->
+trans_prim_call(I) ->
   [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
   [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
-  I1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
-  trans_alu(Dev, I1).
+  T1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
+  I1 = trans_alu(T1),
+  [I1].
 
-trans_mfa_call(Dev, I) ->
+trans_mfa_call(I) ->
   exit({?MODULE, trans_mfa_call, I}).
 
 %%
 %% trans_comment
 %%
-trans_comment(Dev, I) ->
-  hipe_llvm:pp_ins(Dev, hipe_llvm:mk_comment(hipe_rtl:comment_text(I))).
+trans_comment(I) ->
+  I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
+  [I1].
 
 %%
 %% fixnumop
 %%
-trans_fixnum(Dev, I) ->
+trans_fixnum(I) ->
   Dst = hipe_rtl:fixnumop_dst(I),
   Src = hipe_rtl:fixnumop_src(I),
-  case hipe_rtl:fixnumop_type(I) of
+  I1 = case hipe_rtl:fixnumop_type(I) of
     tag ->
-      trans_alu(Dev, hipe_tagscheme:realtag_fixnum(Dst, Src));
+      trans_alu(hipe_tagscheme:realtag_fixnum(Dst, Src));
     untag ->
-      trans_alu(Dev, hipe_tagscheme:realuntag_fixnum(Dst, Src))
-  end.
+      trans_alu(hipe_tagscheme:realuntag_fixnum(Dst, Src))
+  end,
+  [I1].
 
 %%
 %% gctest
 %%
-trans_gctest(Dev, I) ->
+trans_gctest(I) ->
   % For now ignore gc_test. Just print it as comment
   W = trans_src(hipe_rtl:gctest_words(I)),
-  hipe_llvm:pp_ins(Dev,
-    hipe_llvm:mk_comment("gc_test("++W++")")).
+  I1 = hipe_llvm:mk_comment("gc_test("++W++")"),
+  [I1].
 
 %%
 %% goto
 %%
-trans_goto(Dev, I) ->
-  hipe_llvm:pp_ins(Dev,
-    hipe_llvm:mk_br(mk_jump_label(hipe_rtl:goto_label(I)))).
+trans_goto(I) ->
+  I1 = hipe_llvm:mk_br(mk_jump_label(hipe_rtl:goto_label(I))),
+  [I1].
 
 %%
 %% label
 %%
-trans_label(Dev, I) ->
+trans_label(I) ->
   Label  = mk_label(hipe_rtl:label_name(I)),
   I1 = hipe_llvm:mk_label(Label),
-  hipe_llvm:pp_ins(Dev, I1).
+  [I1].
 
 %%
 %% move
 %%
-%trans_move(Dev, I) ->
+%trans_move(I) ->
 %  Dst = hipe_rtl:move_dst(I),
 %  Src = hipe_rtl:move_src(I),
 %  Src_type = arg_type(Src),
@@ -267,11 +266,11 @@ trans_label(Dev, I) ->
 %% 
 %% phi
 %%
-trans_phi(Dev, I) ->
+trans_phi(I) ->
   Dst = hipe_rtl:phi_dst(I),
-  L = hipe_llvm:mk_phi(trans_dst(Dst) , arg_type(Dst), 
+  I1 = hipe_llvm:mk_phi(trans_dst(Dst) , arg_type(Dst), 
     trans_phi_list(hipe_rtl:phi_arglist(I))),
-  hipe_llvm:pp_ins(Dev, L).
+  [I1].
 
 trans_phi_list([]) -> [];
 trans_phi_list([{Label, Value}| Args]) ->
@@ -281,38 +280,36 @@ trans_phi_list([{Label, Value}| Args]) ->
 %% return 
 %%
 %% TODO: Take care of returning many items
-trans_return(Dev, I) ->
+trans_return(I) ->
   [A | _As] = hipe_rtl:return_varlist(I),
-  L = hipe_llvm:mk_ret(arg_type(A), trans_src(A)),
-  hipe_llvm:pp_ins(Dev, L).
+  I1 = hipe_llvm:mk_ret(arg_type(A), trans_src(A)),
+  [I1].
 
 %%
 %% store 
 %%
-trans_store(Dev, I) ->
+trans_store(I) ->
   Base = hipe_rtl:store_base(I),
-  case hipe_rtl_arch:is_precoloured(Base) of
-    true -> trans_store_reg(Dev, I);
+  I1 = case hipe_rtl_arch:is_precoloured(Base) of
+    true -> trans_store_reg(I);
     false -> exit({?MODULE, trans_store ,{"Non Implemened yet", false}})
-  end.
+  end,
+  [I1].
 
-trans_store_reg(Dev, I) ->
+trans_store_reg(I) ->
   B = hipe_rtl:store_base(I),
   Base  = trans_reg(B),
   D1 = mk_hp(),
   I1 = hipe_llvm:mk_load(D1, "i32", Base, [],  [], false),
   D2 = mk_hp(),
   I2 = hipe_llvm:mk_inttoptr(D2, "i32", D1, "i32"),
-  hipe_llvm:pp_ins(Dev, I1),
-  hipe_llvm:pp_ins(Dev, I2),
   Offset = trans_src(hipe_rtl:store_offset(I)), 
   D3 = mk_hp(),
   I3 = hipe_llvm:mk_getelementptr(D3, "i32", D2, [{"i32", Offset}], false),
-  hipe_llvm:pp_ins(Dev, I3),
   Value = hipe_rtl:store_src(I),
   I4 = hipe_llvm:mk_store("i32", trans_src(Value), "i32", D3, [], [],
                           false),
-  hipe_llvm:pp_ins(Dev, I4).
+  [I4, I3, I2, I1].
 
 %%-----------------------------------------------------------------------------
 
@@ -474,22 +471,26 @@ arg_type(A) ->
 
 %% Create Header for Function 
 
-create_header(Dev, Name, Params) ->
+create_header(Name, Params, Code) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
   {_,N,_} = Name,
   {Fixed_regs, Arg_regs} = map_registers(),
-  io:format(Dev, "~n~ndefine i32 @~w(", [N]),
-  header_regs(Dev, Fixed_regs),
-  %trans_args(Dev, Params),
-  io:format(Dev,",~n",[]),
+  
+  Args1 = header_regs(Fixed_regs, []),
+  
   L = length(Params),
   Arg_regs_rest = lists:sublist(Arg_regs, L),
-  header_regs(Dev, Arg_regs_rest),
-  io:format(Dev, ") {~nentry:~n",[]),
-  load_regs(Dev, Fixed_regs),
-  load_regs(Dev, Arg_regs_rest),
-  hipe_llvm:pp_ins(Dev,hipe_llvm:mk_br("%L1")).
+  Args2 = header_regs(Arg_regs_rest),
+  
+  I1 = hipe_llvm:mk_label("Entry"),
+  I2 = load_regs(Fixed_regs),
+  I3 = load_regs(Arg_regs_rest),
+  I4 = hipe_llvm:mk_br(mk_jump_label(1)),
+  Final_Code = lists:flatten([I1,I2,I3,I4])++Code,
+  io:format("~w~n", [Final_Code]),
+  hipe_llvm:mk_fun_def([], [], "cc 11", [], "i32", atom_to_list(N),
+                        Args1++Args2, [], [], Final_Code).
 
 map_registers() ->
   case get(hipe_target_arch) of
@@ -502,20 +503,22 @@ map_registers() ->
       exit({?MODULE, map_registers, {"Unknown Architecture"}})
   end.
 
-header_regs(_Dev, []) -> ok;
-header_regs(Dev, [R | []]) -> 
-  io:format(Dev, "i32 %"++R++"_in", []);
-header_regs(Dev, [R | Rs]) ->
-  io:format(Dev, "i32 %"++R++"_in, ", []),
-  header_regs(Dev, Rs).
+header_regs(Regs) -> header_regs(Regs, []).
 
-load_regs(_Dev, []) -> ok;
-load_regs(Dev, [R | Rs]) ->
+header_regs([], Acc) -> Acc;
+header_regs([R|Rs], Acc) ->
+  Reg = {"i32",  "%"++R++"_in"},
+  header_regs(Rs, [Reg|Acc]).
+
+load_regs(Regs) -> load_regs(Regs, []).
+
+load_regs([], Acc) -> Acc;
+load_regs([R | Rs], Acc) ->
   I1 = hipe_llvm:mk_alloca("%"++R++"_var", "i32", [], []),
-  hipe_llvm:pp_ins(Dev, I1),
   I2 = hipe_llvm:mk_store("i32", "%"++R++"_in", "i32", "%"++R++"_var", [], [], false),
-  hipe_llvm:pp_ins(Dev, I2),
-  load_regs(Dev, Rs).
+  load_regs(Rs, [I1,I2,Acc]).
+
+
 %%-----------------------------------------------------------------------------
 %%
 %% Only For Testing

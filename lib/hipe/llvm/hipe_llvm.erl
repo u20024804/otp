@@ -692,7 +692,7 @@ label_label(#llvm_label{label=Label}) -> Label.
 pp_ins_list(Dev, []) -> ok;
 pp_ins_list(Dev, [I|Is]) ->
   pp_ins(Dev, I),
-  pp_ins(Dev, Is).
+  pp_ins_list(Dev, Is).
 
 
 pp_ins(Dev, I) ->
