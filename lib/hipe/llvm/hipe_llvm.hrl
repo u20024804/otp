@@ -58,3 +58,12 @@
 %%---------------------------------------------------------------------
 -record(llvm_comment, {text}).
 -record(llvm_label, {label}).
+
+
+%% Types
+-record(llvm_int, {width}).
+-record(llvm_pointer, {type}).
+-record(llvm_array, {'size', type}).
+-record(llvm_vector, {'size', type}).
+-record(llvm_struct, {type_list}).
+-record(llvm_fun, {ret_type, arg_type_list}).
