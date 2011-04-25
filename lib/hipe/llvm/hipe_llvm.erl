@@ -710,96 +710,12 @@ pp_ins(Dev, I) ->
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
     #llvm_operation{} ->
       io:format(Dev, "~s = ~s ", [operation_dst(I), operation_op(I)]),
-      pp_options(Dev, operation_options(I)),
+      case op_has_options(operation_op(I)) of
+        true -> pp_options(Dev, operation_options(I));
+        false -> ok
+      end,
       io:format(Dev, "~s ~s, ~s~n",
         [operation_type(I), operation_src1(I), operation_src2(I)]);
-    #llvm_add{} ->
-      io:format(Dev, "~s = add ", [add_dst(I)]),
-      pp_options(Dev, add_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [add_type(I), add_src1(I), add_src2(I)]);
-    #llvm_fadd{} ->
-      io:format(Dev, "~s = fadd ", [fadd_dst(I)]),
-      pp_options(Dev, fadd_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [fadd_type(I), fadd_src1(I), fadd_src2(I)]);
-    #llvm_sub{} ->
-      io:format(Dev, "~s = sub ", [sub_dst(I)]),
-      pp_options(Dev, sub_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [sub_type(I), sub_src1(I), sub_src2(I)]);
-    #llvm_fsub{} ->
-      io:format(Dev, "~s = fsub ", [fsub_dst(I)]),
-      pp_options(Dev, fsub_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [fsub_type(I), fsub_src1(I), fsub_src2(I)]);
-    #llvm_mul{} ->
-      io:format(Dev, "~s = mul ", [mul_dst(I)]),
-      pp_options(Dev, mul_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [mul_type(I), mul_src1(I), mul_src2(I)]);
-    #llvm_fmul{} ->
-      io:format(Dev, "~s = fmul ", [fmul_dst(I)]),
-      pp_options(Dev, fmul_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [fmul_type(I), fmul_src1(I), fmul_src2(I)]);
-    #llvm_udiv{} ->
-      io:format(Dev, "~s = udiv ", [udiv_dst(I)]),
-      pp_options(Dev, udiv_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [udiv_type(I), udiv_src1(I), udiv_src2(I)]);
-    #llvm_sdiv{} ->
-      io:format(Dev, "~s = sdiv ", [sdiv_dst(I)]),
-      pp_options(Dev, sdiv_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [sdiv_type(I), sdiv_src1(I), sdiv_src2(I)]);
-    #llvm_fdiv{} ->
-      io:format(Dev, "~s = fdiv ", [fdiv_dst(I)]),
-      pp_options(Dev, fdiv_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [fdiv_type(I), fdiv_src1(I), fdiv_src2(I)]);
-    #llvm_urem{} ->
-      io:format(Dev, "~s = urem ", [urem_dst(I)]),
-      pp_options(Dev, urem_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [urem_type(I), urem_src1(I), urem_src2(I)]);
-    #llvm_srem{} ->
-      io:format(Dev, "~s = srem ", [srem_dst(I)]),
-      pp_options(Dev, srem_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [srem_type(I), srem_src1(I), srem_src2(I)]);
-    #llvm_frem{} ->
-      io:format(Dev, "~s = frem ", [frem_dst(I)]),
-      pp_options(Dev, frem_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [frem_type(I), frem_src1(I), frem_src2(I)]);
-    #llvm_shl{} ->
-      io:format(Dev, "~s = shl ", [shl_dst(I)]),
-      pp_options(Dev, shl_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [shl_type(I), shl_src1(I), shl_src2(I)]);
-    #llvm_lshr{} ->
-      io:format(Dev, "~s = lshr ", [lshr_dst(I)]),
-      pp_options(Dev, lshr_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [lshr_type(I), lshr_src1(I), lshr_src2(I)]);
-    #llvm_ashr{} ->
-      io:format(Dev, "~s = ashr ", [ashr_dst(I)]),
-      pp_options(Dev, ashr_options(I)),
-      io:format(Dev, "~s ~s, ~s~n",
-        [ashr_type(I), ashr_src1(I), ashr_src2(I)]);
-    #llvm_and{} ->
-      io:format(Dev, "~s = and ", [and_dst(I)]),
-      io:format(Dev, "~s ~s, ~s~n",
-        [and_type(I), and_src1(I), and_src2(I)]);
-    #llvm_or{} ->
-      io:format(Dev, "~s = or ", [or_dst(I)]),
-      io:format(Dev, "~s ~s, ~s~n",
-        [or_type(I), or_src1(I), or_src2(I)]);
-    #llvm_xor{} ->
-      io:format(Dev, "~s = xor ", [xor_dst(I)]),
-      io:format(Dev, "~s ~s, ~s~n",
-        [xor_type(I), xor_src1(I), xor_src2(I)]);
     #llvm_extractvalue{} ->
       io:format(Dev, "~s = extractvalue ~s ~s, ~s~n", 
         %%TODO Print idxs
@@ -937,6 +853,13 @@ pp_ins(Dev, I) ->
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
+op_has_options(Op) ->
+  case Op of
+    'and' -> false;
+    'or' -> false;
+    'xor' -> false;
+    _ -> true
+  end.
 
 pp_args(_Dev, []) -> ok;
 pp_args(Dev, [{Type, Arg} | []]) ->
