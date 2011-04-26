@@ -412,56 +412,6 @@ trans_prim_op(Op) ->
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
-%% 
-%% Pretty print arg(s).
-%%
-trans_args(Dev, A) ->
-  trans_args(Dev, A, src).
-%%
-trans_args(_, [], _) ->
-  ok;
-trans_args(Dev, [A], Type) ->
-  trans_arg(Dev, A, Type);
-trans_args(Dev, [A|As], Type) ->
-  trans_arg(Dev, A, Type),
-  io:format(Dev, ", ", []),
-  trans_args(Dev, As, Type).
-
-
-trans_arg(Dev, A) ->
-  trans_arg(Dev, A, src).
-%%
-trans_arg(Dev, A, Type) ->
-  case Type of 
-    src -> io:format(Dev, "~s ", [arg_type(A)]);
-    dst -> ok
-  end,
-  case hipe_rtl:is_var(A) of
-    true ->
-      io:format(Dev, "%", []),
-      hipe_rtl:pp_var(Dev, A);
-    false ->
-      case hipe_rtl:is_reg(A) of
-        true ->
-          io:format(Dev, "%", []),
-          hipe_rtl:pp_reg(Dev, A);
-        false ->
-          case hipe_rtl:is_imm(A) of
-            true ->
-              Val = hipe_rtl:imm_value(A),
-              io:format(Dev, "~w", [Val]);
-            false ->
-              case hipe_rtl:is_fpreg(A) of
-                true ->
-                  io:format(Dev, "f~w", [hipe_rtl:fpreg_index(A)]);
-                false ->
-                  ok
-              end
-          end
-      end
-  end.
-
-
 %% Return the type of arg A (only integers of 32 bits supported).
 arg_type(A) ->
   case hipe_rtl:is_var(A) of
