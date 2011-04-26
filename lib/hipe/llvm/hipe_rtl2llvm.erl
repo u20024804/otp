@@ -78,28 +78,45 @@ translate_instr(I) ->
 %%-----------------------------------------------------------------------------
 
 
+isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 %%
 %% alu
 %% 
 trans_alu(I) ->
   % Destination is a register and not in SSA Form..
-  IsRegister =  hipe_rtl_arch:is_precoloured(hipe_rtl:alu_dst(I)),
-  Dst = case IsRegister of
+  _Dst = hipe_rtl:alu_dst(I),
+  _Src1 = hipe_rtl:alu_src1(I),
+  _Src2 = hipe_rtl:alu_src2(I),
+  Dst = case isPrecoloured(_Dst) of
     true -> mk_temp();
     false -> trans_dst(hipe_rtl:alu_dst(I))
   end,
-  Src1 = trans_src(hipe_rtl:alu_src1(I)),
-  Src2 = trans_src(hipe_rtl:alu_src2(I)),
+  {Src1, I1} = 
+  case isPrecoloured(_Src1) of
+    true -> 
+      T1 = mk_temp(),
+      {T1, hipe_llvm:mk_load(T1, "i32", trans_src(_Src1), [], [], false)};
+    false ->
+      {trans_src(_Src1), []}
+  end,
+  {Src2, I2} = 
+  case isPrecoloured(_Src2) of
+    true -> 
+      T2 = mk_temp(),
+      {T2, hipe_llvm:mk_load(T2, "i32", trans_src(_Src2), [], [], false)};
+    false ->
+      {trans_src(_Src2), []}
+  end,
   Type = arg_type(hipe_rtl:alu_src1(I)),
   Op =  trans_op(hipe_rtl:alu_op(I)),
-  I1 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
-  I2 = case IsRegister of 
+  I3 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
+  I4 = case isPrecoloured(_Dst) of 
     true -> 
       Dst2 = trans_dst(hipe_rtl:alu_dst(I)),
       hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false);
     false -> []
   end,
-  [I2, I1].
+  [I4, I3, I2, I1].
           
 %%
 %% alub
@@ -340,8 +357,7 @@ trans_src(A) ->
 trans_dst(A) ->
   case hipe_rtl:is_var(A) of
     true ->
-      trans_var(A);
-      %"%v" ++ integer_to_list(hipe_rtl:var_index(A));
+      "%v" ++ integer_to_list(hipe_rtl:var_index(A));
     false ->
       case hipe_rtl:is_reg(A) of
         true ->
@@ -351,16 +367,6 @@ trans_dst(A) ->
       end
   end.
 
-trans_var(A) ->
-  case hipe_rtl:var_index(A) of
-    %TODO: Ugly..just for now to work..
-    19 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    20 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    21 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    22 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    23 -> "%arg"++integer_to_list(hipe_rtl:var_index(A)-19)++"_in";
-    _ -> "%v" ++ integer_to_list(hipe_rtl:var_index(A))
-  end.
 %% Translate register. If it is precoloured it must be mapped to some llvm var
 %% that corresponds to an argument
 trans_reg(Arg) ->
@@ -475,30 +481,25 @@ create_header(Name, Params, Code) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
   {_,N,_} = Name,
-  {Fixed_regs, Arg_regs} = map_registers(),
-  
+
+  Fixed_regs = fixed_registers(),
   Args1 = header_regs(Fixed_regs, []),
-  
-  L = length(Params),
-  Arg_regs_rest = lists:sublist(Arg_regs, L),
-  Args2 = header_regs(Arg_regs_rest),
+  Args2 = lists:map( fun(X) -> {"i32", "%v" ++
+          integer_to_list(hipe_rtl:var_index(X))}
+    end, Params),
   
   I1 = hipe_llvm:mk_label("Entry"),
   I2 = load_regs(Fixed_regs),
-  I3 = load_regs(Arg_regs_rest),
-  I4 = hipe_llvm:mk_br(mk_jump_label(1)),
-  Final_Code = lists:flatten([I1,I2,I3,I4])++Code,
-  io:format("~w~n", [Final_Code]),
-  hipe_llvm:mk_fun_def([], [], "cc 11", [], "i32", atom_to_list(N),
+  I3 = hipe_llvm:mk_br(mk_jump_label(1)),
+  Final_Code = lists:flatten([I1,I2,I3])++Code,
+  hipe_llvm:mk_fun_def([], [], "cc 11", [], "{i32,i32,i32,i32,i32,i32}", atom_to_list(N),
                         Args1++Args2, [], [], Final_Code).
 
-map_registers() ->
+fixed_registers() ->
   case get(hipe_target_arch) of
-    x86 -> {["hp", "p", "nsp"], 
-        ["arg0", "arg1", "arg2", "arg3", "arg4"]};
+    x86 -> ["hp", "p", "nsp"];
     amd64 ->
-      {["hp", "p", "nsp", "fcalls", "heap_limit"],
-        ["arg0", "arg1", "arg2", "arg3", "arg4", "arg5"]};
+      ["hp", "p", "nsp", "fcalls", "heap_limit"];
     Other ->
       exit({?MODULE, map_registers, {"Unknown Architecture"}})
   end.
@@ -533,7 +534,7 @@ create_main(Dev, Name, Params) ->
   io:format(Dev, "~n~ndefine i32 @main() {~n", []),
   io:format(Dev, "Entry:~n", []),
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
-  io:format(Dev, "~s = call i32 @~w(", [T1, N]),
+  io:format(Dev, "~s = call {i32,i32,i32,i32,i32,i32} @~w(", [T1, N]),
   init_params(Dev, 5+erlang:length(Params)),
   io:format(Dev, ")~n", []),
 
