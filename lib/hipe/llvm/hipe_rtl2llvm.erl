@@ -202,7 +202,7 @@ trans_prim_call(I) ->
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
   T1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
   I1 = trans_alu(T1),
-  [I1].
+  I1.
 
 trans_mfa_call(I) ->
   exit({?MODULE, trans_mfa_call, I}).
@@ -212,7 +212,7 @@ trans_mfa_call(I) ->
 %%
 trans_comment(I) ->
   I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
-  [I1].
+  I1.
 
 %%
 %% fixnumop
@@ -226,7 +226,7 @@ trans_fixnum(I) ->
     untag ->
       trans_alu(hipe_tagscheme:realuntag_fixnum(Dst, Src))
   end,
-  [I1].
+  I1.
 
 %%
 %% gctest
@@ -235,14 +235,14 @@ trans_gctest(I) ->
   % For now ignore gc_test. Just print it as comment
   W = trans_src(hipe_rtl:gctest_words(I)),
   I1 = hipe_llvm:mk_comment("gc_test("++W++")"),
-  [I1].
+  I1.
 
 %%
 %% goto
 %%
 trans_goto(I) ->
   I1 = hipe_llvm:mk_br(mk_jump_label(hipe_rtl:goto_label(I))),
-  [I1].
+  I1.
 
 %%
 %% label
@@ -250,7 +250,7 @@ trans_goto(I) ->
 trans_label(I) ->
   Label  = mk_label(hipe_rtl:label_name(I)),
   I1 = hipe_llvm:mk_label(Label),
-  [I1].
+  I1.
 
 %%
 %% move
@@ -287,7 +287,7 @@ trans_phi(I) ->
   Dst = hipe_rtl:phi_dst(I),
   I1 = hipe_llvm:mk_phi(trans_dst(Dst) , arg_type(Dst), 
     trans_phi_list(hipe_rtl:phi_arglist(I))),
-  [I1].
+  I1.
 
 trans_phi_list([]) -> [];
 trans_phi_list([{Label, Value}| Args]) ->
@@ -300,7 +300,7 @@ trans_phi_list([{Label, Value}| Args]) ->
 trans_return(I) ->
   [A | _As] = hipe_rtl:return_varlist(I),
   I1 = hipe_llvm:mk_ret(arg_type(A), trans_src(A)),
-  [I1].
+  I1.
 
 %%
 %% store 
@@ -311,7 +311,7 @@ trans_store(I) ->
     true -> trans_store_reg(I);
     false -> exit({?MODULE, trans_store ,{"Non Implemened yet", false}})
   end,
-  [I1].
+  I1.
 
 trans_store_reg(I) ->
   B = hipe_rtl:store_base(I),
