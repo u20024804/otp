@@ -2,9 +2,8 @@
 -module(hipe_llvm).
 
 -export([
-    mk_ret/2,
-    ret_type/1,
-    ret_value/1,
+    mk_ret/1,
+    ret_ret_list/1,
 
     mk_br/1,
     br_dst/1,
@@ -290,9 +289,8 @@
 %%
 %% ret
 %% 
-mk_ret(Type, Value) -> #llvm_ret{type=Type, value=Value}.
-ret_type(#llvm_ret{type=Type}) -> Type.
-ret_value(#llvm_ret{value=Value}) -> Value.
+mk_ret(Ret_list) -> #llvm_ret{ret_list=Ret_list}.
+ret_ret_list(#llvm_ret{ret_list=Ret_list}) -> Ret_list.
 
 %%
 %% br
@@ -744,6 +742,8 @@ function_ret_type(#llvm_fun{ret_type=Ret_type}) -> Ret_type.
 function_arg_type_list(#llvm_fun{arg_type_list=Arg_type_list}) ->
   Arg_type_list.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 
 pp_ins_list(Dev, []) -> ok;
 pp_ins_list(Dev, [I|Is]) ->
@@ -758,7 +758,12 @@ pp_ins(Dev, I) ->
   end,
   case I of
     #llvm_ret{} ->
-      io:format(Dev, "ret ~s ~s~n", [ret_type(I), ret_value(I)]);
+      io:format(Dev, "ret ", []),
+      case ret_ret_list(I) of
+        [] -> io:format(Dev, "void", []);
+        List -> pp_args(Dev, List)
+      end,
+      io:format(Dev, "~n", []);
     #llvm_br{} ->
       io:format(Dev, "br label ~s~n", [br_dst(I)]);
     #llvm_br_cond{} ->
