@@ -299,8 +299,16 @@ trans_phi_list([{Label, Value}| Args]) ->
 %% TODO: Take care of returning many items
 trans_return(I) ->
   [A | _As] = hipe_rtl:return_varlist(I),
-  I1 = hipe_llvm:mk_ret(arg_type(A), trans_src(A)),
-  I1.
+  FixedRegs = fixed_registers(),
+  RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret" end, FixedRegs),
+  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret", "i32",
+          "%"++X++"_var",[],[],false) end, FixedRegs),
+  Ret1 = {arg_type(A), trans_src(A)},
+  Ret2 = lists:map(fun(X) -> {"i32", X} end, RetFixedRegs),
+  I2 = hipe_llvm:mk_ret([Ret1|Ret2]),
+  [I2, I1].
+
+
 
 %%
 %% store 
@@ -442,7 +450,10 @@ create_header(Name, Params, Code) ->
   I2 = load_regs(Fixed_regs),
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
   Final_Code = lists:flatten([I1,I2,I3])++Code,
-  hipe_llvm:mk_fun_def([], [], "cc 11", [], "{i32,i32,i32,i32,i32,i32}", atom_to_list(N),
+  [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i32" end, [],
+    Fixed_regs++Params) ,
+  Type = "{"++Typ++"}",
+  hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, atom_to_list(N),
                         Args1++Args2, [], [], Final_Code).
 
 fixed_registers() ->

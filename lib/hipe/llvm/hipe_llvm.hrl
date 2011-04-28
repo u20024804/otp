@@ -9,7 +9,7 @@
 %%---------------------------------------------------------------------
 
 %% Terminator Instructions
--record(llvm_ret, {type, value}).
+-record(llvm_ret, {ret_list=[]}).
 -record(llvm_br, {dst}).
 -record(llvm_br_cond, {'cond', true_label, false_label}).
 %% Binary Operations
