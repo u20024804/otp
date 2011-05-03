@@ -95,7 +95,7 @@ trans_alu(I) ->
   case isPrecoloured(_Src1) of
     true -> 
       T1 = mk_temp(),
-      {T1, hipe_llvm:mk_load(T1, "i32", trans_src(_Src1), [], [], false)};
+      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
     false ->
       {trans_src(_Src1), []}
   end,
@@ -103,7 +103,7 @@ trans_alu(I) ->
   case isPrecoloured(_Src2) of
     true -> 
       T2 = mk_temp(),
-      {T2, hipe_llvm:mk_load(T2, "i32", trans_src(_Src2), [], [], false)};
+      {T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
     false ->
       {trans_src(_Src2), []}
   end,
@@ -133,15 +133,15 @@ trans_alub_overflow(I) ->
   Src1 =  trans_src(hipe_rtl:alub_src1(I)),
   Src2 =  trans_src(hipe_rtl:alub_src2(I)),
   %TODO: Fix call
-  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i32, i1}",
-    "@llvm.sadd.with.overflow.i32", [{"i32", Src1},{"i32", Src2}], []),
+  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i64, i1}",
+    "@llvm.sadd.with.overflow.i64", [{"i64", Src1},{"i64", Src2}], []),
   %
   Dst = trans_dst(hipe_rtl:alub_dst(I)),
-  I2 = hipe_llvm:mk_extractvalue(Dst, "{i32, i1}", T1 , "0", []),
+  I2 = hipe_llvm:mk_extractvalue(Dst, "{i64, i1}", T1 , "0", []),
   T2 = mk_temp(),
-  I3 = hipe_llvm:mk_extractvalue(T2, "{i32, i1}", T1, "1", []),
-  True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
-  False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
+  I3 = hipe_llvm:mk_extractvalue(T2, "{i64, i1}", T1, "1", []),
+  True_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
+  False_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   I4 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
   [I4, I3, I2, I1].
 
@@ -301,10 +301,10 @@ trans_return(I) ->
   [A | _As] = hipe_rtl:return_varlist(I),
   FixedRegs = fixed_registers(),
   RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret" end, FixedRegs),
-  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret", "i32",
+  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret", "i64",
           "%"++X++"_var",[],[],false) end, FixedRegs),
   Ret1 = {arg_type(A), trans_src(A)},
-  Ret2 = lists:map(fun(X) -> {"i32", X} end, RetFixedRegs),
+  Ret2 = lists:map(fun(X) -> {"i64", X} end, RetFixedRegs),
   I2 = hipe_llvm:mk_ret([Ret1|Ret2]),
   [I2, I1].
 
@@ -325,14 +325,14 @@ trans_store_reg(I) ->
   B = hipe_rtl:store_base(I),
   Base  = trans_reg(B),
   D1 = mk_hp(),
-  I1 = hipe_llvm:mk_load(D1, "i32", Base, [],  [], false),
+  I1 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
   D2 = mk_hp(),
-  I2 = hipe_llvm:mk_inttoptr(D2, "i32", D1, "i32"),
+  I2 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "i64"),
   Offset = trans_src(hipe_rtl:store_offset(I)), 
   D3 = mk_hp(),
-  I3 = hipe_llvm:mk_getelementptr(D3, "i32", D2, [{"i32", Offset}], false),
+  I3 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
   Value = hipe_rtl:store_src(I),
-  I4 = hipe_llvm:mk_store("i32", trans_src(Value), "i32", D3, [], [],
+  I4 = hipe_llvm:mk_store("i64", trans_src(Value), "i64", D3, [], [],
                           false),
   [I4, I3, I2, I1].
 
@@ -423,11 +423,11 @@ trans_prim_op(Op) ->
 %% Return the type of arg A (only integers of 32 bits supported).
 arg_type(A) ->
   case hipe_rtl:is_var(A) of
-    true -> "i32";
+    true -> "i64";
     false ->
       case hipe_rtl:is_reg(A) of
-        true -> "i32";
-        false -> "i32"
+        true -> "i64";
+        false -> "i64"
       end
   end.
 
@@ -442,7 +442,7 @@ create_header(Name, Params, Code) ->
 
   Fixed_regs = fixed_registers(),
   Args1 = header_regs(Fixed_regs, []),
-  Args2 = lists:map( fun(X) -> {"i32", "%v" ++
+  Args2 = lists:map( fun(X) -> {"i64", "%v" ++
           integer_to_list(hipe_rtl:var_index(X))}
     end, Params),
   
@@ -450,7 +450,7 @@ create_header(Name, Params, Code) ->
   I2 = load_regs(Fixed_regs),
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
   Final_Code = lists:flatten([I1,I2,I3])++Code,
-  [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i32" end, [],
+  [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
     Fixed_regs++Params) ,
   Type = "{"++Typ++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, atom_to_list(N),
@@ -469,15 +469,15 @@ header_regs(Regs) -> header_regs(Regs, []).
 
 header_regs([], Acc) -> Acc;
 header_regs([R|Rs], Acc) ->
-  Reg = {"i32",  "%"++R++"_in"},
+  Reg = {"i64",  "%"++R++"_in"},
   header_regs(Rs, [Reg|Acc]).
 
 load_regs(Regs) -> load_regs(Regs, []).
 
 load_regs([], Acc) -> Acc;
 load_regs([R | Rs], Acc) ->
-  I1 = hipe_llvm:mk_alloca("%"++R++"_var", "i32", [], []),
-  I2 = hipe_llvm:mk_store("i32", "%"++R++"_in", "i32", "%"++R++"_var", [], [], false),
+  I1 = hipe_llvm:mk_alloca("%"++R++"_var", "i64", [], []),
+  I2 = hipe_llvm:mk_store("i64", "%"++R++"_in", "i64", "%"++R++"_var", [], [], false),
   load_regs(Rs, [I1,I2,Acc]).
 
 
@@ -491,25 +491,25 @@ load_regs([R | Rs], Acc) ->
 
 create_main(Dev, Name, Params) ->
   {_,N,_} = Name,
-  io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
-  io:format(Dev, "~n~ndefine i32 @main() {~n", []),
-  io:format(Dev, "Entry:~n", []),
-  T1 = mk_temp(hipe_gensym:new_var(llvm)),
-  io:format(Dev, "~s = call {i32,i32,i32,i32,i32,i32} @~w(", [T1, N]),
-  init_params(Dev, 5+erlang:length(Params)),
-  io:format(Dev, ")~n", []),
-
-  io:format(Dev, "%0 = tail call i32 (i8*, ...)* @printf(i8* noalias " ++ 
-    "getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0)," ++ 
-    " i32 ~s) nounwind~n", [T1]),
-  io:format(Dev, "ret i32 ~s~n}~n",[T1]),
-  io:format(Dev, "declare i32 @printf(i8* noalias, ...) nounwind~n",[]),
-  io:format(Dev, "declare {i32, i1} @llvm.sadd.with.overflow.i32(i32 %a, "++
-    "i32%b)~n", []).
+%  io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
+%  io:format(Dev, "~n~ndefine i64 @main() {~n", []),
+%  io:format(Dev, "Entry:~n", []),
+%  T1 = mk_temp(hipe_gensym:new_var(llvm)),
+%  io:format(Dev, "~s = call {i64,i64,i64,i64,i64,i64} @~w(", [T1, N]),
+%  init_params(Dev, 5+erlang:length(Params)),
+%  io:format(Dev, ")~n", []),
+%
+%  io:format(Dev, "%0 = tail call i64 (i8*, ...)* @printf(i8* noalias " ++ 
+%    "getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0)," ++ 
+%    " i64 ~s) nounwind~n", [T1]),
+%  io:format(Dev, "ret i64 ~s~n}~n",[T1]),
+%  io:format(Dev, "declare i64 @printf(i8* noalias, ...) nounwind~n",[]),
+  io:format(Dev, "declare {i64, i1} @llvm.sadd.with.overflow.i64(i64 %a, "++
+    "i64%b)~n", []).
 
 %% Print random parameters in main function
 init_params(Dev, 1) -> 
-  io:format(Dev,"i32 ~w",[random:uniform(20)]);
+  io:format(Dev,"i64 ~w",[random:uniform(20)]);
 init_params(Dev, N) -> 
-  io:format(Dev,"i32 ~w,",[random:uniform(20)]),
+  io:format(Dev,"i64 ~w,",[random:uniform(20)]),
   init_params(Dev, N-1).
