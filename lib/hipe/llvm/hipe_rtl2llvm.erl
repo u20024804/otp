@@ -31,7 +31,13 @@ translate(RTL) ->
   Final_Code = create_header(Fun, Params, Llvm_Code),
   hipe_llvm:pp_ins(File_llvm, Final_Code),
   create_main(File_llvm, Fun, Params),
-  file:close(File_llvm).
+  file:close(File_llvm),
+  os:cmd("./load.sh "++atom_to_list(Fun_Name)),
+
+  %%Parse relocations from object file and for now just write them to file.
+  Relocs = obj_parse:get_relocs("temp.o"),
+  io:format("Relocs_in_trans: ~w~n", [Relocs]),
+  file:write_file("relocs.o", erlang:term_to_binary(Relocs), [binary]).
 
 %%-----------------------------------------------------------------------------
 
@@ -133,15 +139,27 @@ trans_alub_overflow(I) ->
   Src1 =  trans_src(hipe_rtl:alub_src1(I)),
   Src2 =  trans_src(hipe_rtl:alub_src2(I)),
   %TODO: Fix call
-  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i64, i1}",
-    "@llvm.sadd.with.overflow.i64", [{"i64", Src1},{"i64", Src2}], []),
+  Name = case hipe_rtl:alub_op(I) of
+    add -> "@llvm.sadd.with.overflow.i64";
+    mul -> "@llvm.smul.with.overflow.i64";
+    sub -> "@llvm.ssub.with.overflow.i64";
+      _ -> exit({?MODULE, trans_alub_overflow, I})
+    end,
+  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i64, i1}", Name,
+    [{"i64", Src1},{"i64", Src2}], []),
   %
   Dst = trans_dst(hipe_rtl:alub_dst(I)),
   I2 = hipe_llvm:mk_extractvalue(Dst, "{i64, i1}", T1 , "0", []),
-  T2 = mk_temp(),
+    T2 = mk_temp(),
   I3 = hipe_llvm:mk_extractvalue(T2, "{i64, i1}", T1, "1", []),
-  True_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
-  False_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
+  case hipe_rtl:alub_cond(I) of
+    overflow ->
+      True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
+      False_label = mk_jump_label(hipe_rtl:alub_false_label(I));
+    not_overflow ->
+      True_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
+      False_label = mk_jump_label(hipe_rtl:alub_true_label(I))
+  end,
   I4 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
   [I4, I3, I2, I1].
 
@@ -200,9 +218,14 @@ trans_prim_call(I) ->
   [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
   [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
-  T1 = hipe_rtl:mk_alu(Dst, Src1, Op, Src2), 
-  I1 = trans_alu(T1),
-  I1.
+  T1 = mk_temp(),
+  I1 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
+    i64}",
+    "@"++Op, [{"i64","undef"}, {"i64","undef"}, {"i64","undef"}, {"i64", "undef"},
+      {"i64", "undef"},{"i64", trans_src(Src1)},{"i64", trans_src(Src2)}], []),
+  I2 = hipe_llvm:mk_extractvalue(trans_dst(Dst), "{i64, i64, i64, i64, i64,
+    i64}", T1, "5", []),
+  [I2, I1].
 
 trans_mfa_call(I) ->
   exit({?MODULE, trans_mfa_call, I}).
@@ -303,9 +326,10 @@ trans_return(I) ->
   RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret" end, FixedRegs),
   I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret", "i64",
           "%"++X++"_var",[],[],false) end, FixedRegs),
-  Ret1 = {arg_type(A), trans_src(A)},
+  Ret1 = [{arg_type(A), trans_src(A)}],
   Ret2 = lists:map(fun(X) -> {"i64", X} end, RetFixedRegs),
-  I2 = hipe_llvm:mk_ret([Ret1|Ret2]),
+  Ret = lists:append(Ret2,Ret1),
+  I2 = hipe_llvm:mk_ret(Ret),
   [I2, I1].
 
 
@@ -328,7 +352,8 @@ trans_store_reg(I) ->
   I1 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
   D2 = mk_hp(),
   I2 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "i64"),
-  Offset = trans_src(hipe_rtl:store_offset(I)), 
+  Offset =
+  integer_to_list(list_to_integer(trans_src(hipe_rtl:store_offset(I))) div 8), 
   D3 = mk_hp(),
   I3 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
   Value = hipe_rtl:store_src(I),
@@ -388,6 +413,7 @@ map_precoloured_reg(Index) ->
   %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
+    "%fcalls" -> "%fcalls_var";
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
@@ -410,13 +436,15 @@ trans_op(Op) ->
   end.
 
 trans_prim_op(Op) -> 
+  io:format("PRIM OP: ~w~n", [Op]),
   case Op of
-    '+' -> add;
-    '-' -> sub;
-    '*' -> mul;
-    'div' -> 'sdiv';
-    '/' -> 'fdiv';
-    'rem' -> 'srem';
+    '+' -> "bif_add";
+    '-' -> "bif_sub";
+    '*' -> "bif_mul";
+    'div' -> "bif_div";
+    '/' -> "bif_div";
+    %'rem' -> "srem';
+    "suspend_0" -> "suspend_0";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
@@ -467,7 +495,7 @@ fixed_registers() ->
 
 header_regs(Regs) -> header_regs(Regs, []).
 
-header_regs([], Acc) -> Acc;
+header_regs([], Acc) -> lists:reverse(Acc);
 header_regs([R|Rs], Acc) ->
   Reg = {"i64",  "%"++R++"_in"},
   header_regs(Rs, [Reg|Acc]).
@@ -504,8 +532,20 @@ create_main(Dev, Name, Params) ->
 %    " i64 ~s) nounwind~n", [T1]),
 %  io:format(Dev, "ret i64 ~s~n}~n",[T1]),
 %  io:format(Dev, "declare i64 @printf(i8* noalias, ...) nounwind~n",[]),
+  io:format(Dev, "declare {i64, i1} @llvm.smul.with.overflow.i64(i64 %a, "++
+    "i64%b)~n", []),
+  io:format(Dev, "declare {i64, i1} @llvm.ssub.with.overflow.i64(i64 %a, "++
+    "i64%b)~n", []),
   io:format(Dev, "declare {i64, i1} @llvm.sadd.with.overflow.i64(i64 %a, "++
-    "i64%b)~n", []).
+    "i64%b)~n", []),
+io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_add(i64 %a, i64
+  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
+io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_sub(i64 %a, i64
+  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
+io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_mul(i64 %a, i64
+  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
+io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_div(i64 %a, i64
+  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]).
 
 %% Print random parameters in main function
 init_params(Dev, 1) -> 
