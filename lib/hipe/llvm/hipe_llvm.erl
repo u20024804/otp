@@ -859,7 +859,7 @@ pp_ins(Dev, I) ->
         false -> ok
       end,
       io:format(Dev, "call ", []),
-      pp_options(Dev, call_cconv(I)),
+      io:format(Dev, "~s " , [call_cconv(I)]),
       pp_options(Dev, call_ret_attrs(I)),
       io:format(Dev, "~s ~s(", [call_type(I), call_fnptrval(I)]),
       pp_args(Dev, call_arglist(I)),
