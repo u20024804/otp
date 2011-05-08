@@ -30,7 +30,14 @@ translate(RTL) ->
   Llvm_Code = translate_instr_list(Code, []),
   Final_Code = create_header(Fun, Params, Llvm_Code),
   hipe_llvm:pp_ins(File_llvm, Final_Code),
-  create_main(File_llvm, Fun, Params),
+  %create_main(File_llvm, Fun, Params),
+
+  % Find and print function declarations
+  I1 = lists:filter(fun is_call/1, Llvm_Code),
+  I2 = lists:map(fun call_to_decl/1, I1),
+  hipe_llvm:pp_ins_list(File_llvm, I2),
+
+
   file:close(File_llvm),
   os:cmd("./load.sh "++atom_to_list(Fun_Name)),
 
@@ -83,8 +90,6 @@ translate_instr(I) ->
 
 %%-----------------------------------------------------------------------------
 
-
-isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 %%
 %% alu
 %% 
@@ -169,17 +174,33 @@ trans_alub_no_overflow(I) ->
     hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
   I1 = trans_alu(T),
   %icmp
+  _Src1 = hipe_rtl:alub_src1(I),
+  _Src2 = hipe_rtl:alub_src2(I),
+  {Src1, I2} = 
+  case isPrecoloured(_Src1) of
+    true -> 
+      T1 = mk_temp(),
+      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
+    false ->
+      {trans_src(_Src1), []}
+  end,
+  {Src2, I3} = 
+  case isPrecoloured(_Src2) of
+    true -> 
+      T2 = mk_temp(),
+      {T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
+    false ->
+      {trans_src(_Src2), []}
+  end,
   Type = arg_type(hipe_rtl:alub_src1(I)),
-  Src1 = trans_src(hipe_rtl:alub_src1(I)),
-  Src2 = trans_src(hipe_rtl:alub_src2(I)),
-  Cond = hipe_rtl:alub_cond(I),
-  T1 = mk_temp(),
-  I2 = hipe_llvm:mk_icmp(T1, Cond, Type, Src1, Src2),
+  Cond = trans_rel_op(hipe_rtl:alub_cond(I)),
+  T3 = mk_temp(),
+  I4 = hipe_llvm:mk_icmp(T3, Cond, Type, Src1, Src2),
   %br
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
-  I3 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
-  [I3, I2, I1].
+  I5 = hipe_llvm:mk_br_cond(T3, True_label, False_label),
+  [I5, I4, I3, I2, I1].
 
 %%
 %% branch
@@ -215,20 +236,44 @@ trans_call(I) ->
   [I2, I1].
 
 trans_prim_call(I) ->
-  [Dst|_Dsts] = hipe_rtl:call_dstlist(I),
-  [Src1|[Src2|_Args]] =  hipe_rtl:call_arglist(I),
+  Dst = case hipe_rtl:call_dstlist(I) of
+    [] -> mk_temp();
+    [Destination] -> trans_dst(Destination);
+    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not implemented
+          yet"})
+      end,
+  Args = fix_args(hipe_rtl:call_arglist(I)),
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
   T1 = mk_temp(),
   I1 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
     i64}",
     "@"++Op, [{"i64","undef"}, {"i64","undef"}, {"i64","undef"}, {"i64", "undef"},
-      {"i64", "undef"},{"i64", trans_src(Src1)},{"i64", trans_src(Src2)}], []),
-  I2 = hipe_llvm:mk_extractvalue(trans_dst(Dst), "{i64, i64, i64, i64, i64,
+      {"i64", "undef"}]++Args, []),
+  I2 = hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
     i64}", T1, "5", []),
   [I2, I1].
 
+
 trans_mfa_call(I) ->
-  exit({?MODULE, trans_mfa_call, I}).
+  Dst = case hipe_rtl:call_dstlist(I) of
+    [] -> mk_temp();
+    [Destination] -> trans_dst(Destination);
+    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not implemented
+          yet"})
+      end,
+  Args = fix_args(hipe_rtl:call_arglist(I)),
+  FixedRegs = fixed_registers(),
+  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ Args,
+  Name = trans_mfa_name(hipe_rtl:call_fun(I)),
+  T1 = mk_temp(),
+  I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64, 
+                        i64}", Name, FinalArgs, []),
+  I3 = store_call_regs(FixedRegs, T1),
+  I4 = hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
+    i64}", T1, "5", []),
+  [I4, I3, I2, I1].
+
 
 %%
 %% trans_comment
@@ -363,6 +408,51 @@ trans_store_reg(I) ->
 
 %%-----------------------------------------------------------------------------
 
+isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
+
+is_call(A) -> 
+  case A of
+    #llvm_call{} -> true;
+    _ -> false
+  end.
+
+call_to_decl(A) -> 
+  Cconv = hipe_llvm:call_cconv(A),
+  Type = hipe_llvm:call_type(A),
+  Name = hipe_llvm:call_fnptrval(A),
+  Args_type = lists:map(fun({X,Y}) -> X end, hipe_llvm:call_arglist(A)),
+    hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, Name, Args_type, []). 
+
+
+% Convert RTL argument list to LLVM argument list
+fix_args(ArgList) -> lists:map(fun(A) -> {"i64", trans_src(A)} end, ArgList).
+
+% Convert a list of Precoloured registers to LLVM argument list
+fix_reg_args(ArgList) -> lists:map(fun(A) -> {"i64", A} end, ArgList).
+
+% Load Precoloured registers.
+% Names : Tha name of LLVM temp variables
+% Ins   : LLVM Instructions tha achieve the loading
+load_call_regs(RegList) -> 
+  Names = lists:map(fun mk_temp_reg/1 , RegList),
+  Ins = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_load(X, "i64", "%"++Y++"_var", [], 
+                  [], false) end, Names, RegList),
+  {Names, Ins}.
+
+% Store Precoloured Registers
+% Name: The LLVM temp variable name tha holds the struct of return value
+store_call_regs(RegList, Name) -> 
+  Type = "{i64, i64, i64, i64, i64, i64}",
+  Names = lists:map(fun mk_temp_reg/1, RegList),
+  Indexes = lists:seq(1, erlang:length(RegList)),
+  I1 = lists:zipwith(fun(X,Y) -> hipe_llvm:mk_extractvalue(X, Type, Name,
+          integer_to_list(Y), [])
+    end, Names, Indexes),
+  I2 = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_store("i64", X, "i64",
+          "%"++Y++"_var", [], [], false) end, Names, RegList),
+  [I2, I1].
+
+trans_mfa_name({M,F,A}) -> "@"++atom_to_list(M)++"_"++atom_to_list(F).
 
 mk_label(N) ->
   "L" ++ integer_to_list(N).
@@ -374,6 +464,8 @@ mk_temp() ->
   "%t" ++ integer_to_list(hipe_gensym:new_var(llvm)).
 mk_temp(N) ->
   "%t" ++ integer_to_list(N).
+
+mk_temp_reg(Name) -> "%"++Name++integer_to_list(hipe_gensym:new_var(llvm)).
 
 mk_hp() ->
   "%hp_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
@@ -435,6 +527,20 @@ trans_op(Op) ->
     Other -> exit({?MODULE, trans_op, {"Unknown RTL Operator",Other}})
   end.
 
+trans_rel_op(Op) ->
+  case Op of
+    eq -> eq;
+    ne -> ne;
+    gtu -> ugt;
+    geu -> uge;
+    ltu -> ult;
+    leu -> ule;
+    gt -> sgt;
+    ge -> sge;
+    lt -> slt;
+    le -> sle
+  end.
+
 trans_prim_op(Op) -> 
   io:format("PRIM OP: ~w~n", [Op]),
   case Op of
@@ -444,7 +550,7 @@ trans_prim_op(Op) ->
     'div' -> "bif_div";
     '/' -> "bif_div";
     %'rem' -> "srem';
-    "suspend_0" -> "suspend_0";
+    suspend_0 -> "suspend_0";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
