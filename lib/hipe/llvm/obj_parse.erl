@@ -12,7 +12,7 @@
 %% flatten_call_list/1
 flatten_call_list(L) ->
   L1 = lists:keysort(1,L),
-  L2 = lists:foldl(fun (Li,Acc) -> flatten_call_list(Li, Acc) end, [], L1),
+  L2 = lists:foldl(fun flatten_call_list/2 , [], L1),
   L2.
 
 %% floatten_call_list/2
@@ -35,7 +35,7 @@ get_relocs(ObjFile) ->
   S = os:cmd("objdump -r " ++ ObjFile ++ " | awk 'NR>5 && NF>0{print \"_\"$1\"_\" \" \" \"{\"$3\"}\"}' "),
   Options = [global, {capture, all_but_first, list}],
   MatchedRelocs = 
-  case re:run(S, "_([0-9a-f]*)_ {([a-z]*_[a-z]*)", Options) of
+  case re:run(S, "_([0-9a-f]*)_ {([a-z_0-9]*)", Options) of
     {match, ListOfMatches} -> 
       ListOfMatches;
     nomatch -> 
@@ -50,10 +50,15 @@ get_relocs(ObjFile) ->
   FinalRelocs = [{3, FlattenedRelocs1}],
   FinalRelocs.
 
+
+%% Ugly..Just for testing reasons
 map_bifs(Name) ->
   case Name of
     "bif_add" -> '+';
     "bif_sub" -> '-';
     "bif_mul" -> '*';
-    "bif_div" -> 'div'
+    "bif_div" -> 'div';
+    "suspend_0" -> suspend_0;
+    "math_test_inc" -> {math_test,inc,1};
+    "math_test_dec" -> {math_test,dec,1}
   end.

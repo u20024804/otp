@@ -896,7 +896,7 @@ pp_ins(Dev, I) ->
         Cc -> io:format(Dev, "~s ", [Cc])
       end,
       pp_options(Dev, fun_decl_ret_attrs(I)),
-      io:format(Dev, "~s @~s", [fun_decl_type(I), fun_decl_name(I)]),
+      io:format(Dev, "~s ~s", [fun_decl_type(I), fun_decl_name(I)]),
       io:format(Dev, "(", []),
       pp_types(Dev, fun_decl_arglist(I)),
       io:format(Dev, ") ", []),
