@@ -420,7 +420,8 @@ rtl_symbolic(RtlCfg, Options) ->
 rtl_llvm(RtlCfg0, Options) ->
   case proplists:get_bool(to_llvm, Options) of
     true ->
-      RtlSSA0 = rtl_ssa_convert(RtlCfg0, Options),
+      RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
+      RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
       LinearRtl = hipe_rtl_cfg:linearize(RtlSSA0),
       %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
       %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
