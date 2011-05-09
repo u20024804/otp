@@ -58,6 +58,7 @@ map_bifs(Name) ->
     "bif_sub" -> '-';
     "bif_mul" -> '*';
     "bif_div" -> 'div';
+    "gc_1" -> gc_1;
     "suspend_0" -> suspend_0;
     "math_test_inc" -> {math_test,inc,1};
     "math_test_dec" -> {math_test,dec,1}
