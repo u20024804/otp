@@ -39,9 +39,12 @@ translate(RTL) ->
 
 
   file:close(File_llvm),
-  os:cmd("./load.sh "++atom_to_list(Fun_Name)),
+  %os:cmd("./load.sh "++atom_to_list(Fun_Name)),
 
-  %%Parse relocations from object file and for now just write them to file.
+  % Temporary call to incorporate LLVM.
+  llvm:run_all(atom_to_list(Fun_Name)),
+
+  %% Parse relocations from object file and for now just write them to file.
   Relocs = obj_parse:get_relocs("temp.o"),
   io:format("Relocs_in_trans: ~w~n", [Relocs]),
   file:write_file("relocs.o", erlang:term_to_binary(Relocs), [binary]).
