@@ -49,6 +49,7 @@
 -record(llvm_icmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_fcmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_phi, {dst, type, value_label_list}). 
+-record(llvm_select, {dst, 'cond', typ1, val1, typ2, val2}).
 -record(llvm_call, {dst, is_tail = false, cconv = [], ret_attrs = [], type,
                     fnptrval, arglist = [], fn_attrs = []}).
 -record(llvm_fun_def, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
