@@ -41,7 +41,8 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 ifdef HIPE_ENABLED
 HIPE_MODULES = hipe_rtl2llvm \
 							 hipe_llvm \
-							 obj_parse
+							 obj_parse \
+							 llvm
 else
 HIPE_MODULES =
 endif
