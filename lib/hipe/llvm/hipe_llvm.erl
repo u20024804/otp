@@ -212,6 +212,14 @@
     phi_type/1,
     phi_value_label_list/1,
 
+    mk_select/6,
+    select_dst/1,
+    select_cond/1,
+    select_typ1/1,
+    select_val1/1,
+    select_typ2/1,
+    select_val2/1,
+
     mk_call/8,
     call_dst/1,
     call_is_tail/1,
@@ -632,6 +640,17 @@ phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
   Value_label_list.
 
 %%
+%% select
+%%
+mk_select(Dst, Cond, Typ1, Val1, Typ2, Val2) -> #llvm_select{dst=Dst, 'cond'=Cond, typ1=Typ1, val1=Val1, typ2=Typ2, val2=Val2}.
+select_dst(#llvm_select{dst=Dst}) -> Dst.
+select_cond(#llvm_select{'cond'=Cond}) -> Cond.
+select_typ1(#llvm_select{typ1=Typ1}) -> Typ1.
+select_val1(#llvm_select{val1=Val1}) -> Val1.
+select_typ2(#llvm_select{typ2=Typ2}) -> Typ2.
+select_val2(#llvm_select{val2=Val2}) -> Val2.
+
+%%
 %% call
 %%
 mk_call(Dst, Is_tail, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs) ->
@@ -851,6 +870,11 @@ pp_ins(Dev, I) ->
     #llvm_phi{} ->
       io:format(Dev, "~s = phi ~s ", [phi_dst(I), phi_type(I)]),
       pp_phi_value_labels(Dev, phi_value_label_list(I)),
+      io:format(Dev, "~n", []);
+    #llvm_select{} ->
+      io:format(Dev, "~s = select i1 ~s, ~s ~s, ~s ~s", [select_dst(I),
+          select_cond(I), select_typ1(I), select_val1(I), select_typ2(I),
+          select_val2(I)]),
       io:format(Dev, "~n", []);
     #llvm_call{} ->
       io:format(Dev, "~s = ", [call_dst(I)]),
