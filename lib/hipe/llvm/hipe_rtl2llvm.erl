@@ -212,7 +212,7 @@ trans_branch(I) ->
   Type = arg_type(hipe_rtl:branch_src1(I)),
   Src1 = trans_src(hipe_rtl:branch_src1(I)),
   Src2 = trans_src(hipe_rtl:branch_src2(I)),
-  Cond = hipe_rtl:branch_cond(I),
+  Cond = trans_rel_op(hipe_rtl:branch_cond(I)),
   %icmp
   T1 = mk_temp(hipe_gensym:new_var(llvm)),
   I1 = hipe_llvm:mk_icmp(T1, Cond, Type, Src1, Src2),
@@ -508,6 +508,7 @@ map_precoloured_reg(Index) ->
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
     "%fcalls" -> "%fcalls_var";
+    "%hplim" -> "%heap_limit_var";
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
@@ -553,6 +554,7 @@ trans_prim_op(Op) ->
     '/' -> "bif_div";
     %'rem' -> "srem';
     suspend_0 -> "suspend_0";
+    gc_1 -> "gc_1";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
