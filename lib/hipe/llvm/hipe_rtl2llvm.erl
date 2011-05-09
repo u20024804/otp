@@ -81,7 +81,7 @@ translate_instr(I) ->
     %#load_address{} -> ok;
     %#load_atom{} -> ok;
     %#load_word_index{} -> ok;
-    %#move{} -> trans_move(I);
+    #move{} -> trans_move(I);
     %#multimove{} -> ok;
     #phi{} -> trans_phi(I);
     #return{} -> trans_return(I);
@@ -103,7 +103,7 @@ trans_alu(I) ->
   _Src2 = hipe_rtl:alu_src2(I),
   Dst = case isPrecoloured(_Dst) of
     true -> mk_temp();
-    false -> trans_dst(hipe_rtl:alu_dst(I))
+    false -> trans_dst(_Dst)
   end,
   {Src1, I1} = 
   case isPrecoloured(_Src1) of
@@ -121,12 +121,12 @@ trans_alu(I) ->
     false ->
       {trans_src(_Src2), []}
   end,
-  Type = arg_type(hipe_rtl:alu_src1(I)),
+  Type = arg_type(_Src1),
   Op =  trans_op(hipe_rtl:alu_op(I)),
   I3 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
   I4 = case isPrecoloured(_Dst) of 
     true -> 
-      Dst2 = trans_dst(hipe_rtl:alu_dst(I)),
+      Dst2 = trans_dst(_Dst),
       hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false);
     false -> []
   end,
@@ -326,30 +326,29 @@ trans_label(I) ->
 %%
 %% move
 %%
-%trans_move(I) ->
-%  Dst = hipe_rtl:move_dst(I),
-%  Src = hipe_rtl:move_src(I),
-%  Src_type = arg_type(Src),
-%  %% %src_addr = alloca i32
-%  io:format(Dev, "  ", []),
-%  trans_arg(Dev, Src, dst),
-%  io:format(Dev, "_addr ", []),
-%  io:format(Dev, " = ", []),
-%  io:format(Dev, "alloca ~w~n", [Src_type]),
-%  %% store i32 src, i32* src_addr
-%  io:format(Dev, "  ", []),
-%  io:format(Dev, "store ", []),
-%  trans_arg(Dev, Src),
-%  io:format(Dev, ", ~w* ", [Src_type]),
-%  trans_arg(Dev, Src, dst),
-%  io:format(Dev, "_addr ~n", []),
-%  %% dst = load i32* src_addr
-%  io:format(Dev, "  ", []),
-%  trans_arg(Dev, Dst, dst),
-%  io:format(Dev, " = ", []),
-%  io:format(Dev, "load ~w* ", [Src_type]),
-%  trans_arg(Dev, Src, dst),
-%  io:format(Dev, "_addr~n", []).
+trans_move(I) ->
+  _Dst = hipe_rtl:move_dst(I),
+  _Src = hipe_rtl:move_src(I),
+  Dst = case isPrecoloured(_Dst) of
+    true -> mk_temp();
+    false -> trans_dst(_Dst)
+  end,
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      T1 = mk_temp(),
+      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src), [], [], false)};
+    false ->
+      {trans_src(_Src), []}
+  end,
+  I2 = hipe_llvm:mk_select(Dst, "true", "i64", Src, "i64", "undef"),
+  I3 = case isPrecoloured(_Dst) of 
+    true -> 
+      Dst2 = trans_dst(_Dst),
+      hipe_llvm:mk_store("i64", Dst, "i64", Dst2, [], [], false);
+    false -> []
+  end,
+  [I3,I2,I1].
 
 %% 
 %% phi
