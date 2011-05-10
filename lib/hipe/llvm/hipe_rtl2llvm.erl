@@ -238,23 +238,30 @@ trans_call(I) ->
   end,
   [I2, I1].
 
+
+%TODO: Fix Return Type of calls.
 trans_prim_call(I) ->
   Dst = case hipe_rtl:call_dstlist(I) of
     [] -> mk_temp();
     [Destination] -> trans_dst(Destination);
-    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not implemented
-          yet"})
-      end,
+    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not i
+          implemented yet"})
+  end,
   Args = fix_args(hipe_rtl:call_arglist(I)),
+  FixedRegs = fixed_registers(),
+  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ Args,
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
   T1 = mk_temp(),
-  I1 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
-    i64}",
-    "@"++Op, [{"i64","undef"}, {"i64","undef"}, {"i64","undef"}, {"i64", "undef"},
-      {"i64", "undef"}]++Args, []),
-  I2 = hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
-    i64}", T1, "5", []),
-  [I2, I1].
+  I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
+    i64}", "@"++Op, FinalArgs, []),
+  I3 = store_call_regs(FixedRegs, T1),
+  I4 = case hipe_rtl:call_dstlist(I) of
+    [] -> [];
+    [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
+    i64}", T1, "6", [])
+  end,
+  [I4, I3, I2, I1].
 
 
 trans_mfa_call(I) ->
@@ -263,7 +270,7 @@ trans_mfa_call(I) ->
     [Destination] -> trans_dst(Destination);
     [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not implemented
           yet"})
-      end,
+  end,
   Args = fix_args(hipe_rtl:call_arglist(I)),
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
@@ -273,8 +280,11 @@ trans_mfa_call(I) ->
   I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64, 
                         i64}", Name, FinalArgs, []),
   I3 = store_call_regs(FixedRegs, T1),
-  I4 = hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
-    i64}", T1, "5", []),
+  I4 = case hipe_rtl:call_dstlist(I) of
+    [] -> [];
+    [_] ->  hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64,
+        ii64, i64}", T1, "6", [])
+  end,
   [I4, I3, I2, I1].
 
 
