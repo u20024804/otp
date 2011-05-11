@@ -97,10 +97,10 @@ translate_instr(I) ->
 %% alu
 %% 
 trans_alu(I) ->
-  % Destination is a register and not in SSA Form..
   _Dst = hipe_rtl:alu_dst(I),
   _Src1 = hipe_rtl:alu_src1(I),
   _Src2 = hipe_rtl:alu_src2(I),
+  % Destination is a register and not in SSA Form..
   Dst = case isPrecoloured(_Dst) of
     true -> mk_temp();
     false -> trans_dst(_Dst)
@@ -108,16 +108,18 @@ trans_alu(I) ->
   {Src1, I1} = 
   case isPrecoloured(_Src1) of
     true -> 
-      T1 = mk_temp(),
-      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
+      fix_reg_src(_Src1);
+      %T1 = mk_temp(),
+      %{T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
     false ->
       {trans_src(_Src1), []}
   end,
   {Src2, I2} = 
   case isPrecoloured(_Src2) of
     true -> 
-      T2 = mk_temp(),
-      {T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
+      fix_reg_src(_Src2);
+      %T2 = mk_temp(),
+      %{T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
     false ->
       {trans_src(_Src2), []}
   end,
@@ -126,8 +128,9 @@ trans_alu(I) ->
   I3 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
   I4 = case isPrecoloured(_Dst) of 
     true -> 
-      Dst2 = trans_dst(_Dst),
-      hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false);
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false),
+      [Ins2, Ins];
     false -> []
   end,
   [I4, I3, I2, I1].
@@ -182,16 +185,18 @@ trans_alub_no_overflow(I) ->
   {Src1, I2} = 
   case isPrecoloured(_Src1) of
     true -> 
-      T1 = mk_temp(),
-      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
+      fix_reg_src(_Src1);
+      %T1 = mk_temp(),
+      %{T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src1), [], [], false)};
     false ->
       {trans_src(_Src1), []}
   end,
   {Src2, I3} = 
   case isPrecoloured(_Src2) of
     true -> 
-      T2 = mk_temp(),
-      {T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
+      fix_reg_src(_Src2);
+      %T2 = mk_temp(),
+      %{T2, hipe_llvm:mk_load(T2, "i64", trans_src(_Src2), [], [], false)};
     false ->
       {trans_src(_Src2), []}
   end,
@@ -259,7 +264,7 @@ trans_prim_call(I) ->
   I4 = case hipe_rtl:call_dstlist(I) of
     [] -> [];
     [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
-    i64}", T1, "6", [])
+    i64}", T1, "5", [])
   end,
   [I4, I3, I2, I1].
 
@@ -283,7 +288,7 @@ trans_mfa_call(I) ->
   I4 = case hipe_rtl:call_dstlist(I) of
     [] -> [];
     [_] ->  hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64,
-        ii64, i64}", T1, "6", [])
+        i64, i64}", T1, "5", [])
   end,
   [I4, I3, I2, I1].
 
@@ -346,19 +351,19 @@ trans_move(I) ->
   {Src, I1} = 
   case isPrecoloured(_Src) of
     true -> 
-      T1 = mk_temp(),
-      {T1, hipe_llvm:mk_load(T1, "i64", trans_src(_Src), [], [], false)};
+      fix_reg_src(_Src);
     false ->
       {trans_src(_Src), []}
   end,
   I2 = hipe_llvm:mk_select(Dst, "true", "i64", Src, "i64", "undef"),
   I3 = case isPrecoloured(_Dst) of 
     true -> 
-      Dst2 = trans_dst(_Dst),
-      hipe_llvm:mk_store("i64", Dst, "i64", Dst2, [], [], false);
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store("i64", Dst, "i64", Dst2, [], [], false),
+      [Ins2, Ins];
     false -> []
   end,
-  [I3,I2,I1].
+  [I3, I2, I1].
 
 %% 
 %% phi
@@ -456,7 +461,7 @@ load_call_regs(RegList) ->
 store_call_regs(RegList, Name) -> 
   Type = "{i64, i64, i64, i64, i64, i64}",
   Names = lists:map(fun mk_temp_reg/1, RegList),
-  Indexes = lists:seq(1, erlang:length(RegList)),
+  Indexes = lists:seq(0, erlang:length(RegList)-1),
   I1 = lists:zipwith(fun(X,Y) -> hipe_llvm:mk_extractvalue(X, Type, Name,
           integer_to_list(Y), [])
     end, Names, Indexes),
@@ -517,11 +522,45 @@ map_precoloured_reg(Index) ->
   %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
-    "%fcalls" -> "%fcalls_var";
-    "%hplim" -> "%heap_limit_var";
+    "%fcalls" -> {"%p_var", 240};
+    "%hplim" -> {"%p_var", 8};
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
+
+fix_reg_dst(Reg) ->
+  case trans_src(Reg) of
+    {Name, Offset} -> 
+      Type = "i64",
+      pointer_from_reg(Name, Type, Offset);
+    Name -> 
+      {Name, []}
+  end.
+
+fix_reg_src(Reg) -> 
+  case trans_src(Reg) of
+    {Name, Offset} -> 
+      Type = "i64",
+      {T1, I1} = pointer_from_reg(Name, Type, Offset),
+      T2 = mk_temp(),
+      I2 = hipe_llvm:mk_load(T2, Type, T1, [], [] , false),
+      {T2, [I2,I1]};
+    Name -> 
+      T1 = mk_temp(),
+      {T1, hipe_llvm:mk_load(T1, "i64", Name, [], [], false)}
+  end.
+
+pointer_from_reg(RegName, Type, Offset) ->
+      T1 = mk_temp(),
+      I1 = hipe_llvm:mk_load(T1, Type, RegName, [], [] ,false),
+      T2 = mk_temp(),
+      I2 = hipe_llvm:mk_inttoptr(T2, Type, T1, Type),
+      T3 = mk_temp(),
+      I3 = hipe_llvm:mk_getelementptr(T3, Type, T2, [{Type,
+            erlang:integer_to_list(Offset div 8)}], false),
+      {T3, [I3, I2, I1]}.
+  
+
 
 trans_op(Op) ->
   case Op of
