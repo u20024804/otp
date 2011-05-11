@@ -84,7 +84,7 @@ translate_instr(I) ->
     #branch{} -> trans_branch(I);
     #call{} -> trans_call(I);
     #comment{} -> trans_comment(I);
-    %#enter{} -> ok;
+    #enter{} -> trans_enter(I);
     %#fconv{} -> ok;
     #fixnumop{} -> trans_fixnum(I);
     %#fload{} -> ok;
@@ -260,6 +260,7 @@ trans_call(I) ->
     [] -> [];
     CC -> trans_goto(hipe_rtl:mk_goto(CC))
   end,
+  %% TODO: Fail call continuation
   [I2, I1].
 
 
@@ -319,6 +320,26 @@ trans_comment(I) ->
   I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
   I1.
 
+
+%%
+%% enter
+%%
+trans_enter(I) ->
+  %For now treat it as normal call
+  Foo = hipe_rtl:mk_new_var(),
+  I1 = hipe_rtl:mk_call(
+    [Foo],
+    hipe_rtl:enter_fun(I),
+    hipe_rtl:enter_arglist(I),
+    [],
+    [],
+    hipe_rtl:enter_type(I)
+  ),
+  I2 = hipe_rtl:mk_return([Foo]),
+  [trans_return(I2), trans_call(I1)].
+    
+      
+  
 %%
 %% fixnumop
 %%
@@ -402,13 +423,16 @@ trans_phi_list([{Label, Value}| Args]) ->
 %%
 %% TODO: Take care of returning many items
 trans_return(I) ->
-  [A | _As] = hipe_rtl:return_varlist(I),
+  Ret1 = case hipe_rtl:return_varlist(I) of
+    [] -> [];
+    [A] -> [{arg_type(A), trans_src(A)}];
+    [_] -> exit({?MODULE, trans_return, "Multiple return not implemented"})
+  end,
   FixedRegs = fixed_registers(),
   Num = mk_num(),
   RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret"++Num end, FixedRegs),
   I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret"++Num, "i64",
           "%"++X++"_var",[],[],false) end, FixedRegs),
-  Ret1 = [{arg_type(A), trans_src(A)}],
   Ret2 = lists:map(fun(X) -> {"i64", X} end, RetFixedRegs),
   Ret = lists:append(Ret2,Ret1),
   I2 = hipe_llvm:mk_ret(Ret),
