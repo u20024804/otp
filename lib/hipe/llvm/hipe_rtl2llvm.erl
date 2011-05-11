@@ -20,7 +20,7 @@ translate(RTL) ->
   _IsClosure = hipe_rtl:rtl_is_closure(RTL),
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   io:format("Geia sou llvm!~n"),
-  {_, Fun_Name, _} = Fun,
+  {Mod_Name, Fun_Name, _} = Fun,
 
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -35,6 +35,8 @@ translate(RTL) ->
   % Find and print function declarations
   I1 = lists:filter(fun is_call/1, Llvm_Code),
   I2 = lists:map(fun call_to_decl/1, I1),
+  CallDict = dict:new(),
+  CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
   hipe_llvm:pp_ins_list(File_llvm, I2),
 
 
@@ -45,11 +47,28 @@ translate(RTL) ->
   llvm:run_all(atom_to_list(Fun_Name)),
 
   %% Parse relocations from object file and for now just write them to file.
-  Relocs = obj_parse:get_relocs("temp.o"),
+  Relocs = obj_parse:get_relocs("temp.o", CallDict2, Mod_Name),
   io:format("Relocs_in_trans: ~w~n", [Relocs]),
   file:write_file("relocs.o", erlang:term_to_binary(Relocs), [binary]).
 
 %%-----------------------------------------------------------------------------
+call_to_dict(Elem, Dict) -> 
+  Name = hipe_llvm:call_fnptrval(Elem),
+  case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
+      [global,{capture,all_but_first,list}]) of
+    {match, [[BifName, [], []]]} -> 
+      dict:store(Name, {erlang:list_to_atom(BifName)}, Dict);
+    {match, [[M,F,A]]} -> 
+      case M of
+        "llvm" -> Dict;
+        _ -> dict:store(Name, {erlang:list_to_atom(M),
+                        erlang:list_to_atom(F),
+                        erlang:list_to_integer(A)}, Dict)
+                end;
+    {match, _} -> Dict;
+    nomatch -> 
+      exit({?MODULE, call_to_dict, "Unknown call"})
+  end.
 
 translate_instr_list([], Acc) -> 
   lists:reverse(lists:flatten(Acc));
@@ -385,8 +404,9 @@ trans_phi_list([{Label, Value}| Args]) ->
 trans_return(I) ->
   [A | _As] = hipe_rtl:return_varlist(I),
   FixedRegs = fixed_registers(),
-  RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret" end, FixedRegs),
-  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret", "i64",
+  Num = mk_num(),
+  RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret"++Num end, FixedRegs),
+  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret"++Num, "i64",
           "%"++X++"_var",[],[],false) end, FixedRegs),
   Ret1 = [{arg_type(A), trans_src(A)}],
   Ret2 = lists:map(fun(X) -> {"i64", X} end, RetFixedRegs),
@@ -469,7 +489,10 @@ store_call_regs(RegList, Name) ->
           "%"++Y++"_var", [], [], false) end, Names, RegList),
   [I2, I1].
 
-trans_mfa_name({M,F,A}) -> "@"++atom_to_list(M)++"_"++atom_to_list(F).
+trans_mfa_name({M,F,A}) ->
+  "@"++atom_to_list(M)++"."++atom_to_list(F)++"."++integer_to_list(A).
+
+mk_num() -> integer_to_list(hipe_gensym:new_var(llvm)).
 
 mk_label(N) ->
   "L" ++ integer_to_list(N).
@@ -596,14 +619,14 @@ trans_rel_op(Op) ->
 trans_prim_op(Op) -> 
   io:format("PRIM OP: ~w~n", [Op]),
   case Op of
-    '+' -> "bif_add";
-    '-' -> "bif_sub";
-    '*' -> "bif_mul";
-    'div' -> "bif_div";
-    '/' -> "bif_div";
+    '+' -> "bif_add..";
+    '-' -> "bif_sub..";
+    '*' -> "bif_mul..";
+    'div' -> "bif_div..";
+    '/' -> "bif_div..";
     %'rem' -> "srem';
-    suspend_0 -> "suspend_0";
-    gc_1 -> "gc_1";
+    suspend_0 -> "suspend_0..";
+    gc_1 -> "gc_1..";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 

@@ -7,7 +7,7 @@
 %% with awk script and regular expressions. 
 
 -module(obj_parse).
--export([get_relocs/1]).
+-export([get_relocs/3]).
 
 %% flatten_call_list/1
 flatten_call_list(L) ->
@@ -31,11 +31,11 @@ hex_to_dec(StrN) ->
     {ok, [Num], _} = io_lib:fread("~16u", StrN),
     Num.
 
-get_relocs(ObjFile) ->
+get_relocs(ObjFile, Dict, Mod_Name) ->
   S = os:cmd("objdump -r " ++ ObjFile ++ " | awk 'NR>5 && NF>0{print \"_\"$1\"_\" \" \" \"{\"$3\"}\"}' "),
   Options = [global, {capture, all_but_first, list}],
   MatchedRelocs = 
-  case re:run(S, "_([0-9a-f]*)_ {([a-z_0-9]*)", Options) of
+    case re:run(S, "_([0-9a-f]*)_ {([a-z_0-9\.]*)", Options) of
     {match, ListOfMatches} -> 
       ListOfMatches;
     nomatch -> 
@@ -46,20 +46,31 @@ get_relocs(ObjFile) ->
   %% to form: [{"addd", hex("57")}, {"foo", hex("42")}]
   Relocs = [ {Fun, hex_to_dec(HexOff)} || [HexOff, Fun] <- MatchedRelocs ],
   FlattenedRelocs = flatten_call_list(Relocs),
-  FlattenedRelocs1 = lists:map(fun({A,B}) -> {map_bifs(A),B} end, FlattenedRelocs),
-  FinalRelocs = [{3, FlattenedRelocs1}],
+  Is_mfa = fun ({Name,_}) ->
+  case Name of
+    {Mod_Name, _, _} -> false;
+    {_, _, _} -> true;
+    _ -> false
+  end end,
+  FlattenedRelocs1 = lists:map(fun({A,B}) -> {map_funs(A, Dict), B} end, FlattenedRelocs),
+  {MFAs, BIFs} = lists:partition(Is_mfa, FlattenedRelocs1),
+  FinalRelocs = [{2, MFAs},{3, BIFs}],
   FinalRelocs.
 
+map_funs(Name, Dict) ->
+    B = case dict:fetch("@"++Name, Dict) of
+      {BifName} -> map_bifs(BifName);
+      {M,F,A} -> {M,F,A};
+      _ -> exit({?MODULE,map_funs,"Unknown call"})
+    end,
+    io:format("~nFOOO ~w~n", [B]), B.
 
 %% Ugly..Just for testing reasons
 map_bifs(Name) ->
   case Name of
-    "bif_add" -> '+';
-    "bif_sub" -> '-';
-    "bif_mul" -> '*';
-    "bif_div" -> 'div';
-    "gc_1" -> gc_1;
-    "suspend_0" -> suspend_0;
-    "math_test_inc" -> {math_test,inc,1};
-    "math_test_dec" -> {math_test,dec,1}
+    bif_add -> '+';
+    bif_sub -> '-';
+    bif_mul -> '*';
+    bif_div -> 'div';
+    Other -> Other
   end.
