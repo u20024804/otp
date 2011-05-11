@@ -1,14 +1,27 @@
 %% -*- erlang-indent-level: 2 -*-
 
-
 -module(hipe_rtl2llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 -include("../rtl/hipe_rtl.hrl").
 -include("hipe_llvm.hrl").
-
+-include("../rtl/hipe_literals.hrl").
 -export([translate/1]).
 
--define(HP, "%hp_var").
+-define(HP, "hp").
+-define(P, "p").
+-define(NSP, "nsp").
+
+-ifdef(AMD64_FCALLS_IN_REGISTER).
+-define(FCALLS, "fcalls").
+-else.
+-define(FCALLS, "undef").
+-endif.
+
+-ifdef(AMD64_HEAP_LIMIT_IN_REGISTER).
+-define(HEAP_LIMIT, "heap_limit").
+-else.
+-define(HEAP_LIMIT, "undef").
+-endif.
 
 translate(RTL) ->
   hipe_gensym:init(llvm),
@@ -429,11 +442,8 @@ trans_return(I) ->
     [_] -> exit({?MODULE, trans_return, "Multiple return not implemented"})
   end,
   FixedRegs = fixed_registers(),
-  Num = mk_num(),
-  RetFixedRegs =  lists:map(fun(X) -> "%"++X++"_ret"++Num end, FixedRegs),
-  I1 = lists:map(fun (X) -> hipe_llvm:mk_load("%"++X++"_ret"++Num, "i64",
-          "%"++X++"_var",[],[],false) end, FixedRegs),
-  Ret2 = lists:map(fun(X) -> {"i64", X} end, RetFixedRegs),
+  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
+  Ret2 = lists:map(fun(X) -> {"i64", X} end, LoadedFixedRegs),
   Ret = lists:append(Ret2,Ret1),
   I2 = hipe_llvm:mk_ret(Ret),
   [I2, I1].
@@ -491,26 +501,35 @@ fix_args(ArgList) -> lists:map(fun(A) -> {"i64", trans_src(A)} end, ArgList).
 % Convert a list of Precoloured registers to LLVM argument list
 fix_reg_args(ArgList) -> lists:map(fun(A) -> {"i64", A} end, ArgList).
 
+reg_not_undef(Name) ->
+  case Name of
+    "undef" -> false;
+    _ -> true
+  end.
 % Load Precoloured registers.
 % Names : Tha name of LLVM temp variables
 % Ins   : LLVM Instructions tha achieve the loading
 load_call_regs(RegList) -> 
-  Names = lists:map(fun mk_temp_reg/1 , RegList),
+  RegList2 = lists:filter(fun reg_not_undef/1, RegList),
+  Names = lists:map(fun mk_temp_reg/1, RegList),
+  Names2 = lists:filter(fun reg_not_undef/1, Names), 
   Ins = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_load(X, "i64", "%"++Y++"_var", [], 
-                  [], false) end, Names, RegList),
+                  [], false) end, Names2, RegList2),
   {Names, Ins}.
 
 % Store Precoloured Registers
 % Name: The LLVM temp variable name tha holds the struct of return value
 store_call_regs(RegList, Name) -> 
   Type = "{i64, i64, i64, i64, i64, i64}",
+  RegList2 = lists:filter(fun reg_not_undef/1, RegList),
   Names = lists:map(fun mk_temp_reg/1, RegList),
-  Indexes = lists:seq(0, erlang:length(RegList)-1),
+  Indexes = lists:seq(0, erlang:length(RegList2)-1),
+  Names2 = lists:filter(fun reg_not_undef/1, Names), 
   I1 = lists:zipwith(fun(X,Y) -> hipe_llvm:mk_extractvalue(X, Type, Name,
           integer_to_list(Y), [])
-    end, Names, Indexes),
+    end, Names2, Indexes),
   I2 = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_store("i64", X, "i64",
-          "%"++Y++"_var", [], [], false) end, Names, RegList),
+          "%"++Y++"_var", [], [], false) end, Names2, RegList2),
   [I2, I1].
 
 trans_mfa_name({M,F,A}) ->
@@ -529,7 +548,11 @@ mk_temp() ->
 mk_temp(N) ->
   "%t" ++ integer_to_list(N).
 
-mk_temp_reg(Name) -> "%"++Name++integer_to_list(hipe_gensym:new_var(llvm)).
+mk_temp_reg(Name) -> 
+  case reg_not_undef(Name) of
+    true -> "%"++Name++integer_to_list(hipe_gensym:new_var(llvm));
+    false -> "undef"
+  end.
 
 mk_hp() ->
   "%hp_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
@@ -569,8 +592,8 @@ map_precoloured_reg(Index) ->
   %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
-    "%fcalls" -> {"%p_var", 240};
-    "%hplim" -> {"%p_var", 8};
+    "%fcalls" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:fcalls())};
+    "%hplim" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:heap_limit())};
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
@@ -681,7 +704,8 @@ create_header(Name, Params, Code) ->
     end, Params),
   
   I1 = hipe_llvm:mk_label("Entry"),
-  I2 = load_regs(Fixed_regs),
+  RegList = lists:filter(fun reg_not_undef/1, Fixed_regs),
+  I2 = load_regs(RegList),
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
   Final_Code = lists:flatten([I1,I2,I3])++Code,
   [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
@@ -692,9 +716,9 @@ create_header(Name, Params, Code) ->
 
 fixed_registers() ->
   case get(hipe_target_arch) of
-    x86 -> ["hp", "p", "nsp"];
+    x86 -> [?HP, ?P, ?NSP];
     amd64 ->
-      ["hp", "p", "nsp", "fcalls", "heap_limit"];
+      [?HP, ?P, ?NSP, ?FCALLS, ?HEAP_LIMIT];
     Other ->
       exit({?MODULE, map_registers, {"Unknown Architecture"}})
   end.
@@ -703,8 +727,14 @@ header_regs(Regs) -> header_regs(Regs, []).
 
 header_regs([], Acc) -> lists:reverse(Acc);
 header_regs([R|Rs], Acc) ->
-  Reg = {"i64",  "%"++R++"_in"},
-  header_regs(Rs, [Reg|Acc]).
+  case R of
+    "undef" ->
+      Reg = {"i64",  mk_temp()},
+      header_regs(Rs, [Reg|Acc]);
+    _ ->
+      Reg = {"i64",  "%"++R++"_in"},
+      header_regs(Rs, [Reg|Acc])
+  end.
 
 load_regs(Regs) -> load_regs(Regs, []).
 
