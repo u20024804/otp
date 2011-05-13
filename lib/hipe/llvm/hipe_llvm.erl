@@ -256,7 +256,13 @@
     comment_text/1,
 
     mk_label/1,
-    label_label/1
+    label_label/1,
+
+    mk_const_decl/4,
+    const_decl_dst/1,
+    const_decl_decl_type/1,
+    const_decl_type/1,
+    const_decl_value/1
   ]).
 
 
@@ -731,6 +737,14 @@ comment_text(#llvm_comment{text=Text}) -> Text.
 mk_label(Label) -> #llvm_label{label=Label}.
 label_label(#llvm_label{label=Label}) -> Label.
 
+%%
+%% constant declaration
+mk_const_decl(Dst, Decl_type, Type, Value) -> #llvm_const_decl{dst=Dst, decl_type=Decl_type, type=Type, value=Value}.
+const_decl_dst(#llvm_const_decl{dst=Dst}) -> Dst.
+const_decl_decl_type(#llvm_const_decl{decl_type=Decl_type}) -> Decl_type.
+const_decl_type(#llvm_const_decl{type=Type}) -> Type.
+const_decl_value(#llvm_const_decl{value=Value}) -> Value.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -934,7 +948,9 @@ pp_ins(Dev, I) ->
       io:format(Dev, "; ~s~n", [comment_text(I)]);
     #llvm_label{} ->
       io:format(Dev, "~s:~n", [label_label(I)]);
-
+    #llvm_const_decl{} ->
+      io:format(Dev, "~s = ~s ~s ~s", [const_decl_dst(I),
+          const_decl_decl_type(I), const_decl_type(I), const_decl_value(I)]);
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
@@ -1037,5 +1053,6 @@ indent(I) ->
     #llvm_label{} -> false;
     #llvm_fun_def{} -> false;
     #llvm_fun_decl{} -> false;
+    #llvm_const_decl{} -> false;
     _ -> true
   end.
