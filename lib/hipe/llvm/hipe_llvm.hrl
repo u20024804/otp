@@ -59,6 +59,7 @@
 %%---------------------------------------------------------------------
 -record(llvm_comment, {text}).
 -record(llvm_label, {label}).
+-record(llvm_const_decl, {dst, decl_type, type, value}).
 
 
 %% Types
