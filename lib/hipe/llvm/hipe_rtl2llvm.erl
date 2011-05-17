@@ -25,44 +25,32 @@
 
 translate(RTL) ->
   hipe_gensym:init(llvm),
-  % Data = hipe_rtl:rtl_data(RTL),
+  %% Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
-  % To be used later
+  %% To be used later
   _IsClosure = hipe_rtl:rtl_is_closure(RTL),
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   io:format("Geia sou llvm!~n"),
-  {Mod_Name, Fun_Name, _} = Fun,
+  {_, Fun_Name, _} = Fun,
 
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
   file:close(File_rtl),
 
-  {ok, File_llvm} = file:open(atom_to_list(Fun_Name) ++ ".ll", [write]),
-  Llvm_Code = translate_instr_list(Code, []),
-  Final_Code = create_header(Fun, Params, Llvm_Code),
-  hipe_llvm:pp_ins(File_llvm, Final_Code),
-  %create_main(File_llvm, Fun, Params),
+  LLVM_Code = translate_instr_list(Code, []),
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code),
 
-  % Find and print function declarations
-  I1 = lists:filter(fun is_call/1, Llvm_Code),
-  I2 = lists:map(fun call_to_decl/1, I1),
+  %% Find function declarations
+  I1 = lists:filter(fun is_call/1, LLVM_Code),
+  Fun_Declarations = lists:map(fun call_to_decl/1, I1),
+  LLVM_Code3 = [LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
-  hipe_llvm:pp_ins_list(File_llvm, I2),
+  {LLVM_Code3, CallDict2}.
 
 
-  file:close(File_llvm),
-  %os:cmd("./load.sh "++atom_to_list(Fun_Name)),
-
-  % Temporary call to incorporate LLVM.
-  llvm:run_all(atom_to_list(Fun_Name)),
-
-  %% Parse relocations from object file and for now just write them to file.
-  Relocs = obj_parse:get_relocs("temp.o", CallDict2, Mod_Name),
-  io:format("Relocs_in_trans: ~w~n", [Relocs]),
-  file:write_file("relocs.o", erlang:term_to_binary(Relocs), [binary]).
 
 %%-----------------------------------------------------------------------------
 call_to_dict(Elem, Dict) -> 
@@ -709,8 +697,8 @@ create_header(Name, Params, Code) ->
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
   Final_Code = lists:flatten([I1,I2,I3])++Code,
   [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
-    Fixed_regs++Params) ,
-  Type = "{"++Typ++"}",
+    Fixed_regs) ,
+  Type = "{"++Typ++",i64"++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, atom_to_list(N),
                         Args1++Args2, [], [], Final_Code).
 
