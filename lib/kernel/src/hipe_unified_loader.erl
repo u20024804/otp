@@ -48,7 +48,7 @@
 	 load_module/3,
 	 load/2]).
 
-%%-define(DEBUG,true).
+-define(DEBUG,true).
 -define(DO_ASSERT,true).
 -define(HIPE_LOGGING,true).
 
@@ -191,9 +191,25 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
   %% Unpack the binary.
   [{Version, CheckSum},
    ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
-   CodeSize,  CodeBinary,  Refs,
+   _,  CodeBinary2,  Refs2,
    0,[] % ColdSize, CRrefs
   ] = binary_to_term(Bin),
+  file:write_file("erl.o", CodeBinary2, [binary]),
+  io:format("Version: ~s ~n", [Version]),
+  io:format("CheckSum: ~w ~n", [CheckSum]),
+  io:format("ConstAlign: ~w ~n", [ConstAlign]),
+  io:format("ConstSize: ~w ~n", [ConstSize]),
+  io:format("ConstMap: ~w ~n", [ConstMap]),
+  io:format("LabelMap: ~w ~n", [LabelMap]),
+  io:format("ExportMap: ~w ~n", [ExportMap]),
+  io:format("Refs: ~w ~n", [Refs2]),
+  {ok, RefsBinary} = file:read_file("relocs.o"),
+  Refs =  binary_to_term(RefsBinary),
+  io:format("My_Refs: ~w ~n", [Refs]),
+
+  {ok, CodeBinary} = file:read_file("code.o"),
+  CodeSize = byte_size(CodeBinary),
+
   %% Check that we are loading up-to-date code.
   version_check(Version, Mod),
   case hipe_bifs:check_crc(CheckSum) of
@@ -214,6 +230,7 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
 	enter_code(CodeSize, CodeBinary, CalleeMFAs, Mod, Beam),
       %% Construct CalleeMFA-to-trampoline mapping.
       TrampolineMap = mk_trampoline_map(CalleeMFAs, Trampolines),
+      io:format("Tramboline Map : ~w~n",[TrampolineMap]),
       %% Patch references to code labels in data seg.
       ok = patch_consts(LabelMap, ConstAddr, CodeAddress),
       %% Find out which functions are being loaded (and where).
@@ -221,9 +238,11 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
       {MFAs,Addresses} = exports(ExportMap, CodeAddress),
       %% Remove references to old versions of the module.
       ReferencesToPatch = get_refs_from(MFAs, []),
+      %io:format("ReferencesToPatch ~w~n", [ReferencesToPatch]),
       ok = remove_refs_from(MFAs),
       %% Patch all dynamic references in the code.
       %%  Function calls, Atoms, Constants, System calls
+      io:format("Refs After: ~w~n", [Refs]),
       ok = patch(Refs, CodeAddress, ConstMap2, Addresses, TrampolineMap),
 
       %% Tell the system where the loaded funs are. 
@@ -473,6 +492,9 @@ patch_call([{DestMFA,Offsets}|SortedRefs], BaseAddress, Addresses, RemoteOrLocal
       patch_mfa_call_list(Offsets, BaseAddress, DestMFA, DestAddress, Addresses, RemoteOrLocal, Trampoline);
     BifAddress when is_integer(BifAddress) ->
       Trampoline = trampoline_map_lookup(DestMFA, TrampolineMap),
+      io:format("DestMFA ~w~n", [DestMFA]),
+      io:format("Offsets~w~n", [Offsets]),
+      io:format("~w~n", [Trampoline]),
       patch_bif_call_list(Offsets, BaseAddress, BifAddress, Trampoline)
   end,
   patch_call(SortedRefs, BaseAddress, Addresses, RemoteOrLocal, TrampolineMap);
