@@ -429,7 +429,7 @@ rtl_llvm(RtlCfg0, Options) ->
       %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
       %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
       %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
-      hipe_rtl2llvm:translate(LinearRtl);
+      {_Code, _Relocs} = hipe_llvm_main:rtl_to_native(LinearRtl, Options);
     false ->
       ok
   end.
