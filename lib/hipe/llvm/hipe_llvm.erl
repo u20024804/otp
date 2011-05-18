@@ -950,7 +950,8 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~s:~n", [label_label(I)]);
     #llvm_const_decl{} ->
       io:format(Dev, "~s = ~s ~s ~s", [const_decl_dst(I),
-          const_decl_decl_type(I), const_decl_type(I), const_decl_value(I)]);
+          const_decl_decl_type(I), const_decl_type(I), const_decl_value(I)]),
+      io:format(Dev, "~n", []);
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
