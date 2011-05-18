@@ -31,10 +31,10 @@ rtl_to_native(RTL, Options) ->
     end,
   {MFAs, BIFs} = lists:partition(Is_mfa, Relocs1),
   FinalRelocs = [{2, MFAs},{3, BIFs}],
-  file:write_file("relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
+  ok = file:write_file("relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
-  file:write_file("code.o", BinCode, [binary]),
+  ok = file:write_file("code.o", BinCode, [binary]),
   {BinCode, FinalRelocs}.
 
 
@@ -43,15 +43,20 @@ llvmc(Fun_Name) ->
   llvmc(Fun_Name, Options).
 
 llvmc(Fun_Name, Options) ->
+  Llvm_File = Fun_Name++".ll",
   Object_File = Fun_Name++".o",
   Options2 = lists:foldl(fun(X, Acc) -> Acc++" "++X end, "", Options),
-  Command = "llvmc "++Options2++" -o "++Object_File,
-  os:cmd(Command),
+  Command = "llvmc "++Options2++" -o "++Object_File++" -c "++Llvm_File,
+  case os:cmd(Command) of
+    [] -> ok;
+    Error -> exit({?MODULE, llvmc, Error})
+  end,
   {ok, Object_File}.
 
 
 map_funs(Name, Dict) ->
-    B = case dict:fetch("@"++Name, Dict) of
+    B = 
+    case dict:fetch("@"++Name, Dict) of
       {BifName} -> map_bifs(BifName);
       {M,F,A} -> {M,F,A};
       _ -> exit({?MODULE,map_funs,"Unknown call"})
