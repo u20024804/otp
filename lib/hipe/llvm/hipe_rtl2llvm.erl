@@ -727,7 +727,9 @@ arg_type(A) ->
 create_header(Name, Params, Code, ConstLoad) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
-  {_,N,_} = Name,
+  {Mod_Name,Fun_Name,Arity} = Name,
+  N = atom_to_list(Mod_Name) ++ "." ++ atom_to_list(Fun_Name) ++ "." ++
+  integer_to_list(Arity),
 
   Fixed_regs = fixed_registers(),
   Args1 = header_regs(Fixed_regs, []),
@@ -743,7 +745,7 @@ create_header(Name, Params, Code, ConstLoad) ->
   [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
-  hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, atom_to_list(N),
+  hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
                         Args1++Args2, [], [], Final_Code).
 
 fixed_registers() ->
