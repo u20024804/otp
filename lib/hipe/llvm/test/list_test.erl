@@ -1,7 +1,13 @@
 -module(list_test).
--export([alist/2, nested_list/3,big_list/10,weird_list/4]).
+-compile(export_all).
+
+alist() -> [1,2,3,4,5,[5,6]].
+
+alist(X) -> [1,2,3,4,5,6,7]++X++[1,2,3].
 
 alist(X,Y) -> [X,Y].
+
+alist(X,Y,Z) -> listsX++lists:reverse(Y)++Z.
 
 nested_list(X,Y,Z) -> [X, [Y,Z]].
 
