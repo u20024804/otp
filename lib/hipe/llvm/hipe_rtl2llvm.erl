@@ -134,7 +134,7 @@ translate_instr(I) ->
     #goto{} -> trans_goto(I);
     %#goto_index{} -> ok;
     #label{} -> trans_label(I);
-    %#load{} -> ok;
+    #load{} -> trans_load(I);
     %#load_address{} -> ok;
     %#load_atom{} -> ok;
     %#load_word_index{} -> ok;
@@ -415,6 +415,40 @@ trans_label(I) ->
   Label  = mk_label(hipe_rtl:label_name(I)),
   I1 = hipe_llvm:mk_label(Label),
   I1.
+
+%%
+%% load
+%%
+trans_load(I) ->
+  _Dst = hipe_rtl:load_dst(I),
+  _Src = hipe_rtl:load_src(I),
+  Size = hipe_rtl:load_size(I),
+  _Offset = hipe_rtl:load_offset(I),
+  Dst = trans_dst(_Dst),
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      {trans_src(_Src), []}
+  end,
+  {Offset, I2} = 
+  case isPrecoloured(_Offset) of
+    true -> 
+      fix_reg_src(_Offset);
+    false ->
+      {trans_src(_Offset), []}
+  end,
+  Type = arg_type(_Src),
+  T1 = mk_temp(),
+  I3 = hipe_llvm:mk_operation(T1, add, Type, Src, Offset, []),
+  T2 = mk_temp(),
+  I4 = hipe_llvm:mk_inttoptr(T2, Type, T1, Type),
+  T3 = mk_temp(),
+  I5 = hipe_llvm:mk_load(T3, Type, T2, [], [], false),
+  I6 = hipe_llvm:mk_select(Dst, true, Type, T3, Type, "undef"),
+  [I6, I5, I4, I3, I2, I1].
+
 
 %%
 %% move
