@@ -21,6 +21,7 @@ rtl_to_native(RTL, _Options) ->
   ObjBin = elf64_format:open_object_file(Object_filename),
   %% Get relocation info and write to file for loader
   Relocs = elf64_format:get_call_list(ObjBin),
+  %% Temporary code for creating references needed by  the loader
   Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
   Is_mfa = 
     fun ({Function,_}) ->
@@ -30,8 +31,16 @@ rtl_to_native(RTL, _Options) ->
         _ -> false
       end 
     end,
-  {MFAs, BIFs} = lists:partition(Is_mfa, Relocs1),
-  FinalRelocs = [{2, MFAs},{3, BIFs}],
+  Is_constant = 
+    fun ({A, _}) ->
+      case A of
+        {constant, _} -> true;
+        _ -> false
+      end
+    end,
+  {MFAs, Rest} = lists:partition(Is_mfa, Relocs1),
+  {Constants, BIFs} = lists:partition(Is_constant, Rest),
+  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants}],
   ok = file:write_file("relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
@@ -103,6 +112,7 @@ llvmc(Fun_Name, Opts) ->
 map_funs(Name, Dict) ->
     B = 
     case dict:fetch("@"++Name, Dict) of
+      {'constant', Label} -> {'constant', Label};
       {BifName} -> map_bifs(BifName);
       {M,F,A} -> {M,F,A};
       _ -> exit({?MODULE,map_funs,"Unknown call"})
