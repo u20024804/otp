@@ -7,7 +7,7 @@ alist(X) -> [1,2,3,4,5,6,7]++X++[1,2,3].
 
 alist(X,Y) -> [X,Y].
 
-alist(X,Y,Z) -> listsX++lists:reverse(Y)++Z.
+alist(X,Y,Z) -> X++lists:reverse(Y)++Z.
 
 nested_list(X,Y,Z) -> [X, [Y,Z]].
 
