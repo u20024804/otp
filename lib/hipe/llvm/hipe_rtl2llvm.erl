@@ -23,9 +23,11 @@
 -define(HEAP_LIMIT, "undef").
 -endif.
 
+-define(HIPE_X86_REGISTERS, hipe_amd64_registers).
+
 translate(RTL) ->
   hipe_gensym:init(llvm),
-  %% Data = hipe_rtl:rtl_data(RTL),
+  Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
@@ -34,25 +36,57 @@ translate(RTL) ->
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   io:format("Geia sou llvm!~n"),
   {_, Fun_Name, _} = Fun,
-
+  %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
   file:close(File_rtl),
-
+  %% Create constant map and write it to file for loader
+  {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
+  hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
+  SC = hipe_pack_constants:slim_constmap(ConstMap),
+  file:write_file("constmap.o", erlang:term_to_binary(SC), [binary]),
+  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
+  %% Extract constant labels from Constant Map
+  ConstLabels = find_constants(SC),
+  io:format("Constant Labels Found: ~w~n", [ConstLabels]),
+  %% Create code to declare constants 
+  ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
+  %% Create code to create local name for constants
+  ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   LLVM_Code = translate_instr_list(Code, []),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code),
-
-  %% Find function declarations
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ConstLoad),
+  %% Find function calls in code
   I1 = lists:filter(fun is_call/1, LLVM_Code),
+  %% Create code to declare external function
   Fun_Declarations = lists:map(fun call_to_decl/1, I1),
-  LLVM_Code3 = [LLVM_Code2|Fun_Declarations],
+  LLVM_Code3 = ConstDecl++[LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
-  {LLVM_Code3, CallDict2}.
-
-
+  CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
+  {LLVM_Code3, CallDict3}.
 
 %%-----------------------------------------------------------------------------
+
+%% Extracts Constant Labels from ConstMap
+find_constants(ConstMap) -> find_constants(ConstMap, []).
+find_constants([], ConstLabels) -> ConstLabels;
+find_constants([Label, _, _, _| Rest], ConstLabels) -> find_constants(Rest,
+    [Label|ConstLabels]).
+
+declare_constant(Label) -> 
+  Name = "@DL"++integer_to_list(Label),
+  io:format("Mapping Name is ~s~n", [Name]),
+  hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
+
+load_constant(Label) ->
+  Dst = "%DL"++integer_to_list(Label)++"_var",
+  Name = "@DL"++integer_to_list(Label),
+  hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
+
+const_to_dict(Elem, Dict) ->
+  Name = "@DL"++integer_to_list(Elem),
+  dict:store(Name, {'constant', Elem}, Dict).
+
 call_to_dict(Elem, Dict) -> 
   Name = hipe_llvm:call_fnptrval(Elem),
   case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
@@ -569,7 +603,11 @@ trans_dst(A) ->
         true ->
           trans_reg(A);
         false ->
-          exit({?MODULE, trans_dst, {"bad RTL arg",A}})
+          case hipe_rtl:is_const_label(A) of
+            true ->
+              "%DL"++integer_to_list(hipe_rtl:const_label_label(A))++"_var";
+            false -> exit({?MODULE, trans_dst, {"bad RTL arg",A}})
+          end
       end
   end.
 
@@ -686,7 +724,7 @@ arg_type(A) ->
 
 %% Create Header for Function 
 
-create_header(Name, Params, Code) ->
+create_header(Name, Params, Code, ConstLoad) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
   {_,N,_} = Name,
@@ -701,7 +739,7 @@ create_header(Name, Params, Code) ->
   RegList = lists:filter(fun reg_not_undef/1, Fixed_regs),
   I2 = load_regs(RegList),
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
-  Final_Code = lists:flatten([I1,I2,I3])++Code,
+  Final_Code = lists:flatten([I1,I2,ConstLoad,I3])++Code,
   [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
