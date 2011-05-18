@@ -35,7 +35,7 @@ translate(RTL) ->
   _IsClosure = hipe_rtl:rtl_is_closure(RTL),
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   io:format("Geia sou llvm!~n"),
-  {_, Fun_Name, _} = Fun,
+  {Mod_Name, Fun_Name, Arity} = Fun,
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -56,9 +56,12 @@ translate(RTL) ->
   LLVM_Code = translate_instr_list(Code, []),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ConstLoad),
   %% Find function calls in code
+  Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
+        atom_to_list(Fun_Name), integer_to_list(Arity)) end,
   I1 = lists:filter(fun is_call/1, LLVM_Code),
+  I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
-  Fun_Declarations = lists:map(fun call_to_decl/1, I1),
+  Fun_Declarations = lists:map(fun call_to_decl/1, I2),
   LLVM_Code3 = ConstDecl++[LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
@@ -503,9 +506,22 @@ trans_store_reg(I) ->
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 
-is_call(A) -> 
-  case A of
+is_call(I) -> 
+  case I of 
     #llvm_call{} -> true;
+    _ -> false
+  end.
+
+is_external_call(I, M, F, A) -> 
+  case I of
+    #llvm_call{} -> 
+      io:format("Yo"),
+      Name = hipe_llvm:call_fnptrval(I),
+      case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
+          [global,{capture,all_but_first,list}]) of
+        {match, [[M,F,A]]} -> io:format("Yo1"),false;
+        _ -> true
+      end;
     _ -> false
   end.
 
@@ -746,7 +762,7 @@ create_header(Name, Params, Code, ConstLoad) ->
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
-                        Args1++Args2, [], [], Final_Code).
+                        Args1++Args2, [nounwind], [], Final_Code).
 
 fixed_registers() ->
   case get(hipe_target_arch) of
