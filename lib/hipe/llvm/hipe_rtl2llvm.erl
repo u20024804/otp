@@ -520,8 +520,14 @@ store_call_regs(RegList, Name) ->
           "%"++Y++"_var", [], [], false) end, Names2, RegList2),
   [I2, I1].
 
+fix_name(Name) ->
+  case Name of
+    '++' -> concat;
+    Other -> Other
+  end.
+
 trans_mfa_name({M,F,A}) ->
-  "@"++atom_to_list(M)++"."++atom_to_list(F)++"."++integer_to_list(A).
+  "@"++atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A).
 
 mk_num() -> integer_to_list(hipe_gensym:new_var(llvm)).
 
