@@ -114,7 +114,7 @@ map_funs(Name, Dict) ->
     case dict:fetch("@"++Name, Dict) of
       {'constant', Label} -> {'constant', Label};
       {BifName} -> map_bifs(BifName);
-      {M,F,A} -> {M,F,A};
+      {M,F,A} -> {M,map_bifs(F),A};
       _ -> exit({?MODULE,map_funs,"Unknown call"})
     end,
     io:format("~nFOOO ~w~n", [B]), B.
@@ -126,5 +126,7 @@ map_bifs(Name) ->
     bif_sub -> '-';
     bif_mul -> '*';
     bif_div -> 'div';
+    concat -> '++';
     Other -> Other
   end.
+
