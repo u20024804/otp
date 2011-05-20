@@ -1,8 +1,8 @@
 -module(call_test).
 -compile(export_all).
 
-factorial(0) -> 0;
-factorial(1) -> 0;
+factorial(0) -> 1;
+factorial(1) -> 1;
 factorial(X) ->
   X*factorial(X-1).
 
