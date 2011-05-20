@@ -48,13 +48,20 @@ translate(RTL) ->
   io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
   %% Extract constant labels from Constant Map
   ConstLabels = find_constants(SC),
-  io:format("Constant Labels Found: ~w~n", [ConstLabels]),
+  io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
+  %% Extract atoms from RTL Code
+  Atoms = find_atoms(Code),
+  io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
+  %% Create code to declare atoms
+  AtomDecl = lists:map(fun declare_atom/1, Atoms),
+  %% Create code to create local name for atoms
+  AtomLoad = lists:map(fun load_atom/1, Atoms),
   %% Create code to declare constants 
   ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   LLVM_Code = translate_instr_list(Code, []),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ConstLoad),
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, AtomLoad++ConstLoad),
   %% Find function calls in code
   Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
         atom_to_list(Fun_Name), integer_to_list(Arity)) end,
@@ -62,14 +69,38 @@ translate(RTL) ->
   I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
   Fun_Declarations = lists:map(fun call_to_decl/1, I2),
-  LLVM_Code3 = ConstDecl++[LLVM_Code2|Fun_Declarations],
+  LLVM_Code3 = AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
   CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
-  {LLVM_Code3, CallDict3}.
+  CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
+  {LLVM_Code3, CallDict4}.
 
 %%-----------------------------------------------------------------------------
 
+%% Extract Atoms from RTL Code
+find_atoms(Code) -> find_atoms(Code, []).
+find_atoms([], Atoms) -> Atoms;
+find_atoms([I|Is], Atoms) -> 
+  case I of
+    #load_atom{} ->
+      Atom = hipe_rtl:load_atom_atom(I),
+      find_atoms(Is, [Atom|Atoms]);
+    _ -> find_atoms(Is, Atoms)
+  end.
+
+declare_atom(Atom) ->
+  Name = "@"++atom_to_list(Atom),
+  hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
+load_atom(Atom) ->
+  Dst = "%"++atom_to_list(Atom)++"_var",
+  Name = "@"++atom_to_list(Atom),
+  hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
+atom_to_dict(Atom, Dict) ->
+  Name = "@"++atom_to_list(Atom),
+  dict:store(Name, {'atom', Atom}, Dict).
+
+      
 %% Extracts Constant Labels from ConstMap
 find_constants(ConstMap) -> find_constants(ConstMap, []).
 find_constants([], ConstLabels) -> ConstLabels;
@@ -78,7 +109,6 @@ find_constants([Label, _, _, _| Rest], ConstLabels) -> find_constants(Rest,
 
 declare_constant(Label) -> 
   Name = "@DL"++integer_to_list(Label),
-  io:format("Mapping Name is ~s~n", [Name]),
   hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
 
 load_constant(Label) ->
@@ -136,7 +166,7 @@ translate_instr(I) ->
     #label{} -> trans_label(I);
     #load{} -> trans_load(I);
     %#load_address{} -> ok;
-    %#load_atom{} -> ok;
+    #load_atom{} -> trans_load_atom(I);
     %#load_word_index{} -> ok;
     #move{} -> trans_move(I);
     %#multimove{} -> ok;
@@ -449,7 +479,15 @@ trans_load(I) ->
   I6 = hipe_llvm:mk_select(Dst, true, Type, T3, Type, "undef"),
   [I6, I5, I4, I3, I2, I1].
 
-
+%%
+%% load_atom
+%%
+trans_load_atom(I) ->
+  _Dst = hipe_rtl:load_atom_dst(I),
+  _Atom = hipe_rtl:load_atom_atom(I),
+  Atom_Name = "%"++atom_to_list(_Atom)++"_var",
+  Dst = trans_dst(_Dst),
+  hipe_llvm:mk_select(Dst, true, "i64", Atom_Name, "i64", "undef").
 %%
 %% move
 %%
@@ -549,7 +587,6 @@ is_call(I) ->
 is_external_call(I, M, F, A) -> 
   case I of
     #llvm_call{} -> 
-      io:format("Yo"),
       Name = hipe_llvm:call_fnptrval(I),
       case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
           [global,{capture,all_but_first,list}]) of

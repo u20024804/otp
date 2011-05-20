@@ -38,9 +38,18 @@ rtl_to_native(RTL, _Options) ->
         _ -> false
       end
     end,
+  Is_atom = 
+    fun ({A, _}) ->
+      case A of
+        {'atom', _} -> true;
+        _ -> false
+      end
+    end,
   {MFAs, Rest} = lists:partition(Is_mfa, Relocs1),
-  {Constants, BIFs} = lists:partition(Is_constant, Rest),
-  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants}],
+  {Constants, Rest1} = lists:partition(Is_constant, Rest),
+  {Atoms1, BIFs} = lists:partition(Is_atom, Rest1),
+  Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
+  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants}, {0, Atoms}],
   ok = file:write_file("relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
@@ -113,11 +122,11 @@ map_funs(Name, Dict) ->
     B = 
     case dict:fetch("@"++Name, Dict) of
       {'constant', Label} -> {'constant', Label};
+      {'atom', AtomName} -> {'atom', AtomName};
       {BifName} -> map_bifs(BifName);
       {M,F,A} -> {M,map_bifs(F),A};
       _ -> exit({?MODULE,map_funs,"Unknown call"})
-    end,
-    io:format("~nFOOO ~w~n", [B]), B.
+    end.
 
 %% Ugly..Just for testing reasons
 map_bifs(Name) ->
