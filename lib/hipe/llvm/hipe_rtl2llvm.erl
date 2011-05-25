@@ -267,9 +267,14 @@ trans_alub_no_overflow(I) ->
     hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
   I1 = trans_alu(T),
   %icmp
+  _Dst = hipe_rtl:alub_dst(I),
+  {Dst, I2} = case isPrecoloured(_Dst) of
+    true -> fix_reg_src(_Dst);
+    false -> {trans_dst(_Dst), []}
+  end,
   _Src1 = hipe_rtl:alub_src1(I),
   _Src2 = hipe_rtl:alub_src2(I),
-  {Src1, I2} = 
+  {Src1, I3} = 
   case isPrecoloured(_Src1) of
     true -> 
       fix_reg_src(_Src1);
@@ -278,7 +283,7 @@ trans_alub_no_overflow(I) ->
     false ->
       {trans_src(_Src1), []}
   end,
-  {Src2, I3} = 
+  {Src2, I4} = 
   case isPrecoloured(_Src2) of
     true -> 
       fix_reg_src(_Src2);
@@ -290,12 +295,12 @@ trans_alub_no_overflow(I) ->
   Type = arg_type(hipe_rtl:alub_src1(I)),
   Cond = trans_rel_op(hipe_rtl:alub_cond(I)),
   T3 = mk_temp(),
-  I4 = hipe_llvm:mk_icmp(T3, Cond, Type, Src1, Src2),
+  I5 = hipe_llvm:mk_icmp(T3, Cond, Type, Dst, "0"),
   %br
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
-  I5 = hipe_llvm:mk_br_cond(T3, True_label, False_label),
-  [I5, I4, I3, I2, I1].
+  I6 = hipe_llvm:mk_br_cond(T3, True_label, False_label),
+  [I6, I5, I4, I3, I2, I1].
 
 %%
 %% branch
