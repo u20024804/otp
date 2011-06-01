@@ -165,7 +165,7 @@ translate_instr(I) ->
     %#goto_index{} -> ok;
     #label{} -> trans_label(I);
     #load{} -> trans_load(I);
-    %#load_address{} -> ok;
+    #load_address{} -> trans_load_address(I);
     #load_atom{} -> trans_load_atom(I);
     %#load_word_index{} -> ok;
     #move{} -> trans_move(I);
@@ -485,6 +485,32 @@ trans_load(I) ->
   [I6, I5, I4, I3, I2, I1].
 
 %%
+%% load_address
+%%
+trans_load_address(I) ->
+  %% Check the load_type is constant. We have not implemented other cases yet.
+  _Dst = hipe_rtl:load_address_dst(I),
+  _Addr = hipe_rtl:load_address_addr(I),
+  Dst = case isPrecoloured(_Dst) of
+    true -> mk_temp();
+    false -> trans_dst(_Dst)
+  end,
+  Addr = case hipe_rtl:load_address_type(I) of
+    constant -> "@DL"++integer_to_list(_Addr);
+    _ -> exit({?MODULE,trans_load_address, "Type not implemented in
+          load_address"})
+      end,
+  Type = "i64",
+  I1 = hipe_llvm:mk_select(Dst, true, Type, Addr, Type, "undef"),
+  I2 = case isPrecoloured(_Dst) of 
+    true -> 
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store(Type, Dst, Type, Dst2, [], [], false),
+      [Ins2, Ins];
+    false -> []
+  end,
+  [I2, I1].
+%%
 %% load_atom
 %%
 trans_load_atom(I) ->
@@ -798,6 +824,7 @@ trans_prim_op(Op) ->
     %'rem' -> "srem';
     suspend_0 -> "suspend_0..";
     gc_1 -> "gc_1..";
+    op_exact_eqeq_2 -> "op_exact_eqeq_2..";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
