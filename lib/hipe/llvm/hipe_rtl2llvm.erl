@@ -173,7 +173,7 @@ translate_instr(I) ->
     #phi{} -> trans_phi(I);
     #return{} -> trans_return(I);
     #store{} -> trans_store(I);
-    %#switch{} -> ok;
+    #switch{} -> trans_switch(I);
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
@@ -496,7 +496,7 @@ trans_load_address(I) ->
     false -> trans_dst(_Dst)
   end,
   Addr = case hipe_rtl:load_address_type(I) of
-    constant -> "@DL"++integer_to_list(_Addr);
+    constant -> "%DL"++integer_to_list(_Addr)++"_var";
     _ -> exit({?MODULE,trans_load_address, "Type not implemented in
           load_address"})
       end,
@@ -605,6 +605,23 @@ trans_store_reg(I) ->
                           false),
   [I4, I3, I2, I1].
 
+%%
+%% switch
+%%
+trans_switch(I) ->
+  _Src = hipe_rtl:switch_src(I),
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      {trans_src(_Src), []}
+  end,
+  LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
+  ValueList = lists:map(fun integer_to_list/1, hipe_rtl:switch_sort_order(I)),
+  ValueLabelList = lists:zip(ValueList, LabelList),
+  I2 = hipe_llvm:mk_switch("i64", Src, lists:nth(1, LabelList), ValueLabelList),
+  [I2, I1]. 
 %%-----------------------------------------------------------------------------
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
