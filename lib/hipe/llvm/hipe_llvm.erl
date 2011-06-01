@@ -13,6 +13,12 @@
     br_cond_true_label/1,
     br_cond_false_label/1,
 
+    mk_switch/4,
+    switch_type/1,
+    switch_value/1,
+    switch_default_label/1,
+    switch_value_label_list/1,
+
     mk_operation/6,
     operation_dst/1,
     operation_op/1,
@@ -323,6 +329,14 @@ br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) -> 
   False_label.
 
+%%
+%% switch
+%%
+mk_switch(Type, Value, Default_label, Value_label_list) -> #llvm_switch{type=Type, value=Value, default_label=Default_label, value_label_list=Value_label_list}.
+switch_type(#llvm_switch{type=Type}) -> Type.
+switch_value(#llvm_switch{value=Value}) -> Value.
+switch_default_label(#llvm_switch{default_label=Default_label}) -> Default_label.
+switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) -> Value_label_list.
 
 %%
 %% operation
@@ -778,7 +792,7 @@ function_arg_type_list(#llvm_fun{arg_type_list=Arg_type_list}) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-pp_ins_list(Dev, []) -> ok;
+pp_ins_list(_Dev, []) -> ok;
 pp_ins_list(Dev, [I|Is]) ->
   pp_ins(Dev, I),
   pp_ins_list(Dev, Is).
@@ -799,6 +813,11 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~n", []);
     #llvm_br{} ->
       io:format(Dev, "br label ~s~n", [br_dst(I)]);
+    #llvm_switch{} ->
+      io:format(Dev, "switch ~s ~s, label ~s ~n    [~n", 
+        [switch_type(I), switch_value(I), switch_default_label(I)]),
+      pp_switch_value_label_list(Dev, switch_type(I), switch_value_label_list(I)),
+      io:format(Dev, "    ]~n", []);
     #llvm_br_cond{} ->
       io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
@@ -956,7 +975,7 @@ pp_ins(Dev, I) ->
   end.
 
 
-pp_type_list(Dev, []) -> ok;
+pp_type_list(_Dev, []) -> ok;
 pp_type_list(Dev, [T]) ->
   pp_type(Dev, T);
 pp_type_list(Dev, [T|Ts]) ->
@@ -1048,6 +1067,11 @@ pp_typed_idxs(_Dev, []) -> ok;
 pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
   io:format(Dev, ", ~s ~s", [Type, Id]),
   pp_typed_idxs(Dev, Tids).
+
+pp_switch_value_label_list(_Dev, _Type,  []) -> ok;
+pp_switch_value_label_list(Dev, Type, [{Value, Label} | VLs]) ->
+  io:format(Dev, "      ~s ~s, label ~s~n", [Type, Value, Label]),
+  pp_switch_value_label_list(Dev, Type, VLs).
 
 indent(I) ->
   case I of 
