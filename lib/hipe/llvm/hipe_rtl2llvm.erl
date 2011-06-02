@@ -34,7 +34,7 @@ translate(RTL) ->
   %% To be used later
   _IsClosure = hipe_rtl:rtl_is_closure(RTL),
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
-  io:format("Geia sou llvm!~n"),
+%  io:format("Geia sou llvm!~n"),
   {Mod_Name, Fun_Name, Arity} = Fun,
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
@@ -45,13 +45,13 @@ translate(RTL) ->
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   file:write_file("constmap.o", erlang:term_to_binary(SC), [binary]),
-  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
+%  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
   %% Extract constant labels from Constant Map
   ConstLabels = find_constants(SC),
-  io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
+%  io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
   %% Extract atoms from RTL Code
   Atoms = find_atoms(Code),
-  io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
+%  io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, Atoms),
   %% Create code to create local name for atoms
@@ -74,7 +74,9 @@ translate(RTL) ->
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
   CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
   CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
-  {LLVM_Code3, CallDict4}.
+  %% Temporary Store inc_stack to Dictionary
+  CallDict5 = dict:store(inc_stack, {"inc_stack"}, CallDict);
+  {LLVM_Code3, CallDict5}.
 
 %%-----------------------------------------------------------------------------
 
@@ -638,7 +640,8 @@ is_external_call(I, M, F, A) ->
       Name = hipe_llvm:call_fnptrval(I),
       case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
           [global,{capture,all_but_first,list}]) of
-        {match, [[M,F,A]]} -> io:format("Yo1"),false;
+        {match, [[M,F,A]]} -> %io:format("Yo1"),
+          false;
         _ -> true
       end;
     _ -> false
@@ -831,7 +834,7 @@ trans_rel_op(Op) ->
   end.
 
 trans_prim_op(Op) -> 
-  io:format("PRIM OP: ~w~n", [Op]),
+  %io:format("PRIM OP: ~w~n", [Op]),
   case Op of
     '+' -> "bif_add..";
     '-' -> "bif_sub..";
