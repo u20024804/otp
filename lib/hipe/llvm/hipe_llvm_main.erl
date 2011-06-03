@@ -11,11 +11,11 @@ rtl_to_native(RTL, _Options) ->
   {LLVMCode, RefDict} = hipe_rtl2llvm:translate(RTL),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
-  {Mod_Name, Fun_Name, _} = Fun,
-  {ok, File_llvm} = file:open(atom_to_list(Fun_Name) ++ ".ll", [write]),
+  {Mod_Name, Fun_Name, Arity} = Fun,
+  Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
+  {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
-  Filename = atom_to_list(Fun_Name),
   Object_filename = compile_with_llvm(Filename),
   %% Extract information from object file
   ObjBin = elf64_format:open_object_file(Object_filename),
