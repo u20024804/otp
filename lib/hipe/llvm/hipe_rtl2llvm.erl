@@ -762,6 +762,7 @@ map_precoloured_reg(Index) ->
   %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_var";
+    "%rbp" -> "%p_var";
     "%fcalls" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:fcalls())};
     "%hplim" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:heap_limit())};
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
