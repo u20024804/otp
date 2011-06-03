@@ -46,11 +46,11 @@ translate(RTL) ->
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   file:write_file("constmap.o", erlang:term_to_binary(SC), [binary]),
 %  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
-  %% Extract constant labels from Constant Map
-  ConstLabels = find_constants(SC),
+  %% Extract constant labels from Constant Map (remove duplicates)
+  ConstLabels = lists:usort(find_constants(SC)),
 %  io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
-  %% Extract atoms from RTL Code
-  Atoms = find_atoms(Code),
+  %% Extract atoms from RTL Code(remove duplicates)
+  Atoms = lists:usort(find_atoms(Code)),
 %  io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, Atoms),
