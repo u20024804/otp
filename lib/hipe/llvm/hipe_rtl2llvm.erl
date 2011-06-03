@@ -75,7 +75,7 @@ translate(RTL) ->
   CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
   CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
   %% Temporary Store inc_stack to Dictionary
-  CallDict5 = dict:store(inc_stack, {"inc_stack"}, CallDict);
+  CallDict5 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict4),
   {LLVM_Code3, CallDict5}.
 
 %%-----------------------------------------------------------------------------
