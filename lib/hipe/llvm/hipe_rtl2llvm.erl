@@ -137,7 +137,7 @@ call_to_dict(Elem, Dict) ->
                 end;
     {match, _} -> Dict;
     nomatch -> 
-      exit({?MODULE, call_to_dict, "Unknown call"})
+      exit({?MODULE, call_to_dict, {"Unknown call",Name}})
   end.
 
 translate_instr_list([], Acc) -> 
@@ -336,6 +336,10 @@ trans_call(I) ->
     CC -> trans_goto(hipe_rtl:mk_goto(CC))
   end,
   %% TODO: Fail call continuation
+  case hipe_rtl:call_fail(I) of 
+    [] -> ok;
+    FC when erlang:is_integer(FC)-> exit({?MODULE, trans_call, "Fail Continuation Not Implemented Yet"})
+  end,
   [I2, I1].
 
 
@@ -568,8 +572,9 @@ trans_phi_list([{Label, Value}| Args]) ->
 trans_return(I) ->
   Ret1 = case hipe_rtl:return_varlist(I) of
     [] -> [];
-    [A] -> [{arg_type(A), trans_src(A)}];
-    [_] -> exit({?MODULE, trans_return, "Multiple return not implemented"})
+    [A,B,[]] -> exit({?MODULE, trans_return, "Multiple return not
+          implemented"});
+    [A|[]] -> [{arg_type(A), trans_src(A)}]
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
@@ -587,7 +592,7 @@ trans_store(I) ->
   Base = hipe_rtl:store_base(I),
   I1 = case hipe_rtl_arch:is_precoloured(Base) of
     true -> trans_store_reg(I);
-    false -> exit({?MODULE, trans_store ,{"Non Implemened yet", false}})
+    false -> exit({?MODULE, trans_store ,{"Non Implemened yet", I}})
   end,
   I1.
 
