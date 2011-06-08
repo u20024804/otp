@@ -352,9 +352,17 @@ trans_prim_call(I) ->
           implemented yet"})
   end,
   Args = fix_args(hipe_rtl:call_arglist(I)),
+  %% Reverse arguments that are passed to stack to match with the Erlang
+  %% calling convention(Propably not needed in prim calls).
+  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
+    false -> Args;
+    true -> 
+      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
+      ArgsInRegs++lists:reverse(ArgsInStack)
+  end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ Args,
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
   Op = trans_prim_op(hipe_rtl:call_fun(I)),
   T1 = mk_temp(),
   I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
@@ -376,9 +384,17 @@ trans_mfa_call(I) ->
           yet"})
   end,
   Args = fix_args(hipe_rtl:call_arglist(I)),
+  %% Reverse arguments that are passed to stack to match with the Erlang
+  %% calling convention
+  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
+    false -> Args;
+    true -> 
+      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
+      ArgsInRegs++lists:reverse(ArgsInStack)
+  end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ Args,
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
   Name = trans_mfa_name(hipe_rtl:call_fun(I)),
   T1 = mk_temp(),
   I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64, 
@@ -878,9 +894,16 @@ create_header(Name, Params, Code, ConstLoad) ->
 
   Fixed_regs = fixed_registers(),
   Args1 = header_regs(Fixed_regs, []),
+  %% Reverse Parameters to match with the Erlang calling convention
+  ReversedParams = case erlang:length(Params) > ?AMD64_NR_ARG_REGS of
+    false -> Params;
+    true -> 
+      {ParamsInRegs, ParamsInStack} = lists:split(?AMD64_NR_ARG_REGS, Params),
+      ParamsInRegs++lists:reverse(ParamsInStack)
+  end,
   Args2 = lists:map( fun(X) -> {"i64", "%v" ++
           integer_to_list(hipe_rtl:var_index(X))}
-    end, Params),
+    end, ReversedParams),
   
   I1 = hipe_llvm:mk_label("Entry"),
   RegList = lists:filter(fun reg_not_undef/1, Fixed_regs),
