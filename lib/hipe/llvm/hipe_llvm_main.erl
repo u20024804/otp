@@ -50,10 +50,10 @@ rtl_to_native(RTL, _Options) ->
   {Atoms1, BIFs} = lists:partition(Is_atom, Rest1),
   Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
   FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants}, {0, Atoms}],
-  ok = file:write_file("relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
+  ok = file:write_file(Filename ++ "_relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
-  ok = file:write_file("code.o", BinCode, [binary]),
+  ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   {BinCode, FinalRelocs}.
 
 
