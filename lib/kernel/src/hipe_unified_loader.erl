@@ -165,7 +165,41 @@ load_module(Mod, Bin, Beam, OldReferencesToPatch) ->
   ?debug_msg("************ Loading Module ~w ************\n",[Mod]),
   %% Loading a whole module, let the BEAM loader patch closures.
   put(hipe_patch_closures, false),
-  load_common(Mod, Bin, Beam, OldReferencesToPatch).
+  %% Instead of calling load_common for the whole module(as hipe did),
+  %% we call my_load_module, which will call load_common for each function
+  %% that is in export map.
+  my_load_module(Mod, Bin, Beam, OldReferencesToPatch).
+  %%load_common(Mod, Bin, Beam, OldReferencesToPatch).
+
+%% This function extracts useful information from Bin (as created by the
+%% hipe), creates a NewBin and calls load_common with it, for each function
+%% in ExportMap.
+my_load_module(Mod, Bin, _Beam, OldReferencesToPatch) ->
+  [{Version, CheckSum},
+   ConstAlign, ConstSize, ConstMap, _LabelMap, ExportMap,
+   CodeSize,  CodeBinary,  Refs,
+   0,[] % ColdSize, CRrefs
+  ] = binary_to_term(Bin),
+  NewLabelMap = [], %XXX: Empty LabelMap means no pattern match/switch
+  MyExportMap = find_functions(ExportMap),
+  lists:map(fun ({Name, Arity, IsClosure, IsLeaf}) -> 
+        NewExportMap = [0, Mod, Name, Arity, IsClosure, IsLeaf],
+        NewBin = [{Version, CheckSum},
+                  ConstAlign, ConstSize, ConstMap, NewLabelMap, NewExportMap,
+                  CodeSize,  CodeBinary,  Refs,
+                   0,[] % ColdSize, CRrefs
+                  ],
+                  load_common(Mod, term_to_binary(NewBin), [], OldReferencesToPatch) end,
+              MyExportMap),
+            {module, Mod}.
+
+%% Retun {Name, Arity, IsClosure, IsLeaf} from all functions
+find_functions(ExportMap) -> find_functions(ExportMap, []).
+
+find_functions([], Acc) -> lists:reverse(Acc);
+find_functions([_,_, Name, Arity, IsClosure, IsLeaf| Tail], Acc) ->
+  find_functions(Tail, [{Name, Arity, IsClosure, IsLeaf} | Acc]).
+
 
 %%========================================================================
 
@@ -187,28 +221,40 @@ load_nosmp(Mod, Bin) ->
 
 %%------------------------------------------------------------------------
 
+
 load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
   %% Unpack the binary.
   [{Version, CheckSum},
-   ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
-   _,  CodeBinary2,  Refs2,
+   ConstAlign, ConstSize, _ConstMap, LabelMap, ExportMap,
+   _,  _CodeBinary,  _Refs,
    0,[] % ColdSize, CRrefs
   ] = binary_to_term(Bin),
-  file:write_file("erl.o", CodeBinary2, [binary]),
-  io:format("Version: ~s ~n", [Version]),
-  io:format("CheckSum: ~w ~n", [CheckSum]),
-  io:format("ConstAlign: ~w ~n", [ConstAlign]),
-  io:format("ConstSize: ~w ~n", [ConstSize]),
-  io:format("ConstMap: ~w ~n", [ConstMap]),
-  io:format("LabelMap: ~w ~n", [LabelMap]),
-  io:format("ExportMap: ~w ~n", [ExportMap]),
-  io:format("Refs: ~w ~n", [Refs2]),
-  {ok, RefsBinary} = file:read_file("relocs.o"),
-  Refs =  binary_to_term(RefsBinary),
-  io:format("My_Refs: ~w ~n", [Refs]),
+  ?debug_msg("Version: ~s ~n", [Version]),
+  ?debug_msg("CheckSum: ~w ~n", [CheckSum]),
+  ?debug_msg("ConstSize: ~w ~n", [ConstSize]),
+  ?debug_msg("ConstAlign: ~w ~n", [ConstAlign]),
+  ?debug_msg("ConstMap: ~w ~n", [_ConstMap]),
+  ?debug_msg("LabelMap: ~w ~n", [LabelMap]),
+  ?debug_msg("ExportMap: ~w ~n", [ExportMap]),
+  ?debug_msg("Refs: ~w ~n", [_Refs]),
+  file:write_file("erl.o", _CodeBinary, [binary]),
 
-  {ok, CodeBinary} = file:read_file("code.o"),
+  %% Read Relocations, ConstMap, And CodeBinary from files, as produced by
+  %% hipe_llvm_main
+  [_, _, Name, Arity, _, _] = ExportMap,
+  FileName = atom_to_list(Name) ++ "_" ++ integer_to_list(Arity),
+  {ok, RefsBinary} = file:read_file(FileName ++ "_relocs.o"),
+  Refs =  binary_to_term(RefsBinary),
+  
+
+  {ok, ConstMapBinary} = file:read_file(FileName ++ "_constmap.o"),
+  ConstMap =  binary_to_term(ConstMapBinary),
+
+  {ok, CodeBinary} = file:read_file(FileName ++ "_code.o"),
   CodeSize = byte_size(CodeBinary),
+
+  ?debug_msg("My_Refs: ~w ~n", [Refs]),
+  ?debug_msg("My_ConstMap: ~w ~n", [ConstMap]),
 
   %% Check that we are loading up-to-date code.
   version_check(Version, Mod),
@@ -227,7 +273,6 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
       {CodeAddress,Trampolines} = enter_code(CodeSize, CodeBinary, CalleeMFAs, Mod, Beam),
       %% Construct CalleeMFA-to-trampoline mapping.
       TrampolineMap = mk_trampoline_map(CalleeMFAs, Trampolines),
-      io:format("Tramboline Map : ~w~n",[TrampolineMap]),
       %% Patch references to code labels in data seg.
       patch_consts(LabelMap, ConstAddr, CodeAddress),
       %% Find out which functions are being loaded (and where).
@@ -235,11 +280,10 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
       {MFAs,Addresses} = exports(ExportMap, CodeAddress),
       %% Remove references to old versions of the module.
       ReferencesToPatch = get_refs_from(MFAs, []),
-      io:format("ReferencesToPatch ~w~n", [ReferencesToPatch]),
       remove_refs_from(MFAs),
       %% Patch all dynamic references in the code.
       %%  Function calls, Atoms, Constants, System calls
-      io:format("Refs After: ~w~n", [Refs]),
+     % io:format("Refs After: ~w~n", [Refs]),
       patch(Refs, CodeAddress, ConstMap2, Addresses, TrampolineMap),
       %% Tell the system where the loaded funs are. 
       %%  (patches the BEAM code to redirect to native.)
