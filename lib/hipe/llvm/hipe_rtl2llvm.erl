@@ -44,7 +44,8 @@ translate(RTL) ->
   {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
-  file:write_file("constmap.o", erlang:term_to_binary(SC), [binary]),
+  file:write_file(atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity) ++ 
+    "_constmap.o", erlang:term_to_binary(SC), [binary]),
 %  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SC)),
