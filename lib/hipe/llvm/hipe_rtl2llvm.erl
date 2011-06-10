@@ -181,7 +181,7 @@ translate_instr(I) ->
     #enter{} -> trans_enter(I);
     #fconv{} -> trans_fconv(I);
     #fixnumop{} -> trans_fixnum(I);
-    %#fload{} -> ok;
+    #fload{} -> trans_fload(I);
     %#fmove{} -> ok;
     %#fp{} -> ok;
     %#fp_unop{} -> ok;
@@ -461,6 +461,37 @@ trans_fixnum(I) ->
       trans_alu(hipe_tagscheme:realuntag_fixnum(Dst, Src))
   end,
   I1.
+
+
+%%
+%% fload
+%% 
+trans_fload(I) ->
+  _Dst = hipe_rtl:fload_dst(I),
+  _Src = hipe_rtl:fload_src(I),
+  _Offset = hipe_rtl:fload_offset(I),
+  Dst = trans_dst(_Dst),
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      {trans_src(_Src), []}
+  end,
+  {Offset, I2} = 
+  case isPrecoloured(_Offset) of
+    true -> 
+      fix_reg_src(_Offset);
+    false ->
+      {trans_src(_Offset), []}
+  end,
+  T1 = mk_temp(),
+  I3 = hipe_llvm:mk_operation(T1, add, "i64", Src, Offset, []),
+  T2 = mk_temp(),
+  I4 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "double"),
+  I5 = hipe_llvm:mk_load(Dst, "double", T2, [], [], false),
+  [I5, I4, I3, I2, I1].
+
 
 %%
 %% gctest
