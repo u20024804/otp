@@ -198,6 +198,19 @@
     getelementptr_typed_idxs/1,
     getelementptr_inbounds/1,
 
+    mk_conversion/5,
+    conversion_dst/1,
+    conversion_op/1,
+    conversion_src_type/1,
+    conversion_src/1,
+    conversion_dst_type/1,
+
+    mk_sitofp/4,
+    sitofp_dst/1,
+    sitofp_src_type/1,
+    sitofp_src/1,
+    sitofp_dst_type/1,
+
     mk_ptrtoint/4,
     ptrtoint_dst/1,
     ptrtoint_src_type/1,
@@ -640,6 +653,26 @@ getelementptr_p_type(#llvm_getelementptr{p_type=P_Type}) -> P_Type.
 getelementptr_value(#llvm_getelementptr{value=Value}) -> Value.
 getelementptr_typed_idxs(#llvm_getelementptr{typed_idxs=Typed_Idxs}) -> Typed_Idxs.
 getelementptr_inbounds(#llvm_getelementptr{inbounds=Inbounds}) -> Inbounds.
+
+%%
+%% conversion
+%%
+mk_conversion(Dst, Op, Src_type, Src, Dst_type) -> #llvm_conversion{dst=Dst, op=Op, src_type=Src_type, src=Src, dst_type=Dst_type}.
+conversion_dst(#llvm_conversion{dst=Dst}) -> Dst.
+conversion_op(#llvm_conversion{op=Op}) -> Op.
+conversion_src_type(#llvm_conversion{src_type=Src_type}) -> Src_type.
+conversion_src(#llvm_conversion{src=Src}) -> Src.
+conversion_dst_type(#llvm_conversion{dst_type=Dst_type}) -> Dst_type.
+
+%%
+%% sitofp
+%%
+mk_sitofp(Dst, Src_type, Src, Dst_type) -> #llvm_sitofp{dst=Dst, src_type=Src_type, src=Src, dst_type=Dst_type}.
+sitofp_dst(#llvm_sitofp{dst=Dst}) -> Dst.
+sitofp_src_type(#llvm_sitofp{src_type=Src_type}) -> Src_type.
+sitofp_src(#llvm_sitofp{src=Src}) -> Src.
+sitofp_dst_type(#llvm_sitofp{dst_type=Dst_type}) -> Dst_type.
+
 %%
 %% ptrtoint
 %%
@@ -786,6 +819,7 @@ label_label(#llvm_label{label=Label}) -> Label.
 
 %%
 %% constant declaration
+%%
 mk_const_decl(Dst, Decl_type, Type, Value) -> #llvm_const_decl{dst=Dst, decl_type=Decl_type, type=Type, value=Value}.
 const_decl_dst(#llvm_const_decl{dst=Dst}) -> Dst.
 const_decl_decl_type(#llvm_const_decl{decl_type=Decl_type}) -> Decl_type.
@@ -932,6 +966,13 @@ pp_ins(Dev, I) ->
           getelementptr_value(I)]),
       pp_typed_idxs(Dev, getelementptr_typed_idxs(I)),
       io:format(Dev, "~n", []);
+    #llvm_conversion{} ->
+      io:format(Dev, "~s = ~w ~s ~s to ~s~n",
+        [conversion_dst(I),conversion_op(I),
+          conversion_src_type(I), conversion_src(I), conversion_dst_type(I)]);
+    #llvm_sitofp{} ->
+      io:format(Dev, "~s = sitofp ~s ~s to ~s~n", [sitofp_dst(I),
+          sitofp_src_type(I), sitofp_src(I), sitofp_dst_type(I)]);
     #llvm_ptrtoint{} ->
       io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
           ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
@@ -1015,6 +1056,7 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~s = ~s ~s ~s", [const_decl_dst(I),
           const_decl_decl_type(I), const_decl_type(I), const_decl_value(I)]),
       io:format(Dev, "~n", []);
+    
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
