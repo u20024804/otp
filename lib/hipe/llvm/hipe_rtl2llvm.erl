@@ -695,7 +695,14 @@ trans_move(I) ->
     true -> 
       fix_reg_src(_Src);
     false ->
-      {trans_src(_Src), []}
+      case hipe_rtl:is_const_label(_Src) of
+        true -> 
+          T1 = mk_temp(),
+          {T1, hipe_llvm:mk_ptrtoint(T1, "i8",
+              "@DL"++integer_to_list(hipe_rtl:const_label_label(_Src)), "i64")};
+        false ->
+          {trans_src(_Src), []}
+      end
   end,
   I2 = hipe_llvm:mk_select(Dst, "true", "i64", Src, "i64", "undef"),
   I3 = case isPrecoloured(_Dst) of 
