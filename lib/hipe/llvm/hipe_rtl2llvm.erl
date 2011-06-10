@@ -182,10 +182,10 @@ translate_instr(I) ->
     #fconv{} -> trans_fconv(I);
     #fixnumop{} -> trans_fixnum(I);
     #fload{} -> trans_fload(I);
-    %#fmove{} -> ok;
-    %#fp{} -> ok;
+    #fmove{} -> trans_fmove(I);
+    #fp{} -> trans_fp(I);
     %#fp_unop{} -> ok;
-    %#fstore{} -> ok;
+    #fstore{} -> trans_fstore(I);
     #gctest{} -> trans_gctest(I);
     #goto{} -> trans_goto(I);
     %#goto_index{} -> ok;
@@ -463,6 +463,9 @@ trans_fixnum(I) ->
   I1.
 
 
+%% TODO: fload, fstore, fmove, and fp are almost the same with load,store,move
+%% and alu. Maybe we should join them.
+
 %%
 %% fload
 %% 
@@ -492,6 +495,98 @@ trans_fload(I) ->
   I5 = hipe_llvm:mk_load(Dst, "double", T2, [], [], false),
   [I5, I4, I3, I2, I1].
 
+%%
+%% fmove
+%%
+trans_fmove(I) -> 
+  _Dst = hipe_rtl:fmove_dst(I),
+  _Src = hipe_rtl:fmove_src(I),
+  Dst = case isPrecoloured(_Dst) of
+    true -> mk_temp();
+    false -> trans_dst(_Dst)
+  end,
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      {trans_src(_Src), []}
+  end,
+  I2 = hipe_llvm:mk_select(Dst, "true", "double", Src, "double", "undef"),
+  I3 = case isPrecoloured(_Dst) of 
+    true -> 
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store("double", Dst, "double", Dst2, [], [], false),
+      [Ins2, Ins];
+    false -> []
+  end,
+  [I3, I2, I1].
+
+%%
+%% fp
+%%
+trans_fp(I) ->
+  %% XXX: Just copied trans_alu...think again..
+  _Dst = hipe_rtl:fp_dst(I),
+  _Src1 = hipe_rtl:fp_src1(I),
+  _Src2 = hipe_rtl:fp_src2(I),
+  % Destination is a register and not in SSA Form..
+  Dst = case isPrecoloured(_Dst) of
+    true -> mk_temp();
+    false -> trans_dst(_Dst)
+  end,
+  {Src1, I1} = 
+  case isPrecoloured(_Src1) of
+    true -> 
+      fix_reg_src(_Src1);
+    false ->
+      {trans_src(_Src1), []}
+  end,
+  {Src2, I2} = 
+  case isPrecoloured(_Src2) of
+    true -> 
+      fix_reg_src(_Src2);
+    false ->
+      {trans_src(_Src2), []}
+  end,
+  Type = "double",
+  Op =  trans_fp_op(hipe_rtl:fp_op(I)),
+  I3 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
+  I4 = case isPrecoloured(_Dst) of 
+    true -> 
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store(Type, Dst, "i64", Dst2, [], [], false),
+      [Ins2, Ins];
+    false -> []
+  end,
+  [I4, I3, I2, I1].
+
+%%
+%% fstore
+%%
+trans_fstore(I) ->
+  Base = hipe_rtl:fstore_base(I),
+  I1 = case hipe_rtl_arch:is_precoloured(Base) of
+    true -> trans_fstore_reg(I);
+    false -> exit({?MODULE, trans_fstore ,{"Non Implemened yet", false}})
+  end,
+  I1.
+
+trans_fstore_reg(I) ->
+  B = hipe_rtl:fstore_base(I),
+  Base  = trans_reg(B),
+  D1 = mk_hp(),
+  I1 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
+  D2 = mk_hp(),
+  I2 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "double"),
+  Offset =
+  integer_to_list(list_to_integer(trans_src(hipe_rtl:fstore_offset(I))) div 8), 
+  D3 = mk_hp(),
+  I3 = hipe_llvm:mk_getelementptr(D3, "double", D2, [{"i64", Offset}], false),
+  Value = hipe_rtl:fstore_src(I),
+  I4 = hipe_llvm:mk_store("double", trans_src(Value), "double", D3, [], [],
+                          false),
+  [I4, I3, I2, I1].
 
 %%
 %% gctest
@@ -523,7 +618,7 @@ trans_label(I) ->
 trans_load(I) ->
   _Dst = hipe_rtl:load_dst(I),
   _Src = hipe_rtl:load_src(I),
-  Size = hipe_rtl:load_size(I),
+  _Size = hipe_rtl:load_size(I),
   _Offset = hipe_rtl:load_offset(I),
   Dst = trans_dst(_Dst),
   {Src, I1} = 
@@ -806,10 +901,14 @@ trans_dst(A) ->
         true ->
           trans_reg(A);
         false ->
-          case hipe_rtl:is_const_label(A) of
-            true ->
-              "%DL"++integer_to_list(hipe_rtl:const_label_label(A))++"_var";
-            false -> exit({?MODULE, trans_dst, {"bad RTL arg",A}})
+          case hipe_rtl:is_fpreg(A) of
+            true -> "%f" ++ integer_to_list(hipe_rtl:fpreg_index(A));
+            false ->
+              case hipe_rtl:is_const_label(A) of
+                true ->
+                  "%DL"++integer_to_list(hipe_rtl:const_label_label(A))++"_var";
+                false -> exit({?MODULE, trans_dst, {"bad RTL arg",A}})
+              end
           end
       end
   end.
@@ -867,6 +966,14 @@ pointer_from_reg(RegName, Type, Offset) ->
       {T3, [I3, I2, I1]}.
   
 
+trans_fp_op(Op) ->
+  case Op of
+    fadd -> fadd;
+    fsub -> fsub;
+    fdiv -> fdiv;
+    fmul -> fmul;
+    Other -> exit({?MODULE, trans_fp_op, {"Unknown RTL float Operator",Other}})
+  end.
 
 trans_op(Op) ->
   case Op of
@@ -911,17 +1018,25 @@ trans_prim_op(Op) ->
     suspend_0 -> "suspend_0..";
     gc_1 -> "gc_1..";
     op_exact_eqeq_2 -> "op_exact_eqeq_2..";
+    fwait -> "fwait..";
+    handle_fp_exception -> "handle_fp_exception..";
+    fclearerror_error -> "fclearerror_error..";
+    conv_big_to_float -> "conv_big_to_float..";
     Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
-%% Return the type of arg A (only integers of 32 bits supported).
+%% Return the type of arg A (only integers of 64 bits and floats supported).
 arg_type(A) ->
   case hipe_rtl:is_var(A) of
     true -> "i64";
     false ->
       case hipe_rtl:is_reg(A) of
         true -> "i64";
-        false -> "i64"
+        false -> 
+          case hipe_rtl:is_fpreg(A) of
+            true -> "double";
+            false -> "i64"
+          end
       end
   end.
 
