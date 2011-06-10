@@ -46,6 +46,8 @@
     volatile = false}).
 -record(llvm_getelementptr, {dst, p_type, value, typed_idxs = [], inbounds = false}).
 %% Conversion Operations
+-record(llvm_conversion, {dst, op, src_type, src, dst_type}).
+-record(llvm_sitofp, {dst, src_type, src, dst_type}).
 -record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
 -record(llvm_inttoptr, {dst, src_type, src, dst_type}).
 %% Other Operations
