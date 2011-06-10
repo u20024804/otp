@@ -179,7 +179,7 @@ translate_instr(I) ->
     #call{} -> trans_call(I);
     #comment{} -> trans_comment(I);
     #enter{} -> trans_enter(I);
-    %#fconv{} -> ok;
+    #fconv{} -> trans_fconv(I);
     #fixnumop{} -> trans_fixnum(I);
     %#fload{} -> ok;
     %#fmove{} -> ok;
@@ -427,6 +427,24 @@ trans_enter(I) ->
   ),
   I2 = hipe_rtl:mk_return([Foo]),
   [trans_return(I2), trans_call(I1)].
+
+%%
+%% fconv
+%%
+trans_fconv(I) ->
+  %% XXX: Can a fconv destination be a precoloured reg? 
+  _Dst = hipe_rtl:fconv_dst(I),
+  Dst = trans_dst(_Dst),
+  _Src =hipe_rtl:fconv_src(I),
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      {trans_src(_Src), []}
+  end,
+  I2 = hipe_llvm:mk_sitofp(Dst, "i64", Src, "double"),
+  [I2, I1].
     
       
   
