@@ -46,13 +46,12 @@ translate(RTL) ->
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   file:write_file(atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity) ++ 
     "_constmap.o", erlang:term_to_binary(SC), [binary]),
-%  io:format("--> RTL2LLVM: FINAL CONSTMAP:~n~w~n<--~n", [SC]),
   %% Extract constant labels from Constant Map (remove duplicates)
-  ConstLabels = lists:usort(find_constants(SC)),
-%  io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
+  ConstLabels = lists:ukeysort(1, find_constants(SC)),
+  %% io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
   %% Extract atoms from RTL Code(remove duplicates)
   Atoms = lists:usort(find_atoms(Code)),
-%  io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
+  %% io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, Atoms),
   %% Create code to create local name for atoms
@@ -104,22 +103,46 @@ atom_to_dict(Atom, Dict) ->
   dict:store(Name, {'atom', Atom}, Dict).
 
       
-%% Extracts Constant Labels from ConstMap
+%% Extract Label and Type of Constants from ConstMap
+%% Type is needed to distinquish between float constants
+%% as they have different semantics.
 find_constants(ConstMap) -> find_constants(ConstMap, []).
-find_constants([], ConstLabels) -> ConstLabels;
-find_constants([Label, _, _, _| Rest], ConstLabels) -> find_constants(Rest,
-    [Label|ConstLabels]).
+find_constants([], LabelsAndTypes) -> LabelsAndTypes;
+find_constants([Label, _, _, Const| Rest], LabelsTypes) -> 
+  case is_float(Const) of
+    true -> find_constants(Rest, [{Label, double} | LabelsTypes]);
+    false -> find_constants(Rest, [{Label, i64} | LabelsTypes])
+  end.
 
-declare_constant(Label) -> 
+%% Declare an External Consant. We declare all constants as i8 
+%% in order to be able to calcucate pointers of the form DL+6, with
+%% the getelementptr instruction. Otherwise we have to convert constants form 
+%% pointers to values, add the offset and convert them again to pointers
+declare_constant({Label, _Type}) -> 
   Name = "@DL"++integer_to_list(Label),
-  hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
+  hipe_llvm:mk_const_decl(Name, "external constant", "i8", "").
 
-load_constant(Label) ->
+%% Loading of a constant depends on it's type. Float constants are loaded
+%% to double (with offset 6?), and all other constants are converted from
+%% pointers to 64 integers.
+load_constant({Label, Type}) ->
   Dst = "%DL"++integer_to_list(Label)++"_var",
   Name = "@DL"++integer_to_list(Label),
-  hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
+  case Type of
+    i64 -> hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64");
+    double -> 
+      T1 = mk_temp(),
+      I1 = hipe_llvm:mk_getelementptr(T1, "i8", Name, [{"i8", "6"}],false),
+      T2 = mk_temp(),
+      I2 = hipe_llvm:mk_conversion(T2, bitcast, "i8*", T1, "double*"),
+      I3 = hipe_llvm:mk_load(Dst, "double", T2, [], [], false),
+      [I1, I2, I3];
+    Other -> exit({?MODULE, load_constant, {"Wrong Constant Type", Other}})
+  end.
 
-const_to_dict(Elem, Dict) ->
+
+%% Store external constants and calls to dictionary
+const_to_dict({Elem, _Type}, Dict) ->
   Name = "@DL"++integer_to_list(Elem),
   dict:store(Name, {'constant', Elem}, Dict).
 
