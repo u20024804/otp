@@ -618,8 +618,8 @@ trans_label(I) ->
 trans_load(I) ->
   _Dst = hipe_rtl:load_dst(I),
   _Src = hipe_rtl:load_src(I),
-  _Size = hipe_rtl:load_size(I),
   _Offset = hipe_rtl:load_offset(I),
+  %%XXX: can destination be a precoloured register????
   Dst = trans_dst(_Dst),
   {Src, I1} = 
   case isPrecoloured(_Src) of
@@ -638,12 +638,23 @@ trans_load(I) ->
   Type = arg_type(_Src),
   T1 = mk_temp(),
   I3 = hipe_llvm:mk_operation(T1, add, Type, Src, Offset, []),
-  T2 = mk_temp(),
-  I4 = hipe_llvm:mk_inttoptr(T2, Type, T1, Type),
-  T3 = mk_temp(),
-  I5 = hipe_llvm:mk_load(T3, Type, T2, [], [], false),
-  I6 = hipe_llvm:mk_select(Dst, true, Type, T3, Type, "undef"),
-  [I6, I5, I4, I3, I2, I1].
+  Ins = case hipe_rtl:load_size(I) of 
+    word -> 
+      T2 = mk_temp(),
+      I4 = hipe_llvm:mk_inttoptr(T2, Type, T1, Type),
+      I5 = hipe_llvm:mk_load(Dst, Type, T2, [], [], false),
+      [I5, I4];
+    Size -> 
+      LoadType = type_from_size(Size),
+      T2 = mk_temp(),
+      I4 = hipe_llvm:mk_inttoptr(T2, Type, T1, LoadType),
+      T3 = mk_temp(),
+      I5 = hipe_llvm:mk_load(T3, LoadType, T2, [], [], false),
+      %% XXX: Is Zext always valid here? Maybe depend from the sign
+      I6 = hipe_llvm:mk_conversion(Dst, zext, LoadType, T3, "i64"),
+      [I6, I5, I4]
+  end,
+  [Ins, I3, I2, I1].
 
 %%
 %% load_address
@@ -754,40 +765,63 @@ trans_store(I) ->
   Base = hipe_rtl:store_base(I),
   I1 = case hipe_rtl_arch:is_precoloured(Base) of
     true -> trans_store_reg(I);
-    false -> case hipe_rtl:is_var(Base) of
-      true->  trans_store_var(I);
-      false -> exit({?MODULE, trans_store ,{"Non Implemened yet", I}})
-    end
+    false -> trans_store_var(I)
   end,
   I1.
 
 trans_store_var(I) ->
-  B = hipe_rtl:store_base(I),
-  Base = trans_src(B),
+  Base = trans_src(hipe_rtl:store_base(I)),
   Offset = trans_src(hipe_rtl:store_offset(I)), 
+  _Value = hipe_rtl:store_src(I),
+  {Value, I1} = 
+  case isPrecoloured(_Value) of
+    true -> 
+      fix_reg_src(_Value);
+    false ->
+      {trans_src(_Value), []}
+  end,
   T1 = mk_temp(),
-  I1 = hipe_llvm:mk_operation(T1, add, "i64", Base, Offset, []),
-  T2 = mk_temp(),
-  I2 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "i64"),
-  Value = hipe_rtl:store_src(I),
-  I3 = hipe_llvm:mk_store("i64", trans_src(Value), "i64", T2, [], [], false),
-  [ I3, I2, I1].
+  I2 = hipe_llvm:mk_operation(T1, add, "i64", Base, Offset, []),
+  Ins = case hipe_rtl:store_size(I) of 
+    word -> 
+      T2 = mk_temp(),
+      I3 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "i64"),
+      I4 = hipe_llvm:mk_store("i64", Value, "i64", T2, [], [], false),
+      [I4, I3];
+    Size -> 
+      %% XXX: Not Tested yet..Is trunc correct ?
+      LoadType = type_from_size(Size),
+      T2 = mk_temp(),
+      I3 = hipe_llvm:mk_inttoptr(T2, "i64", T1, LoadType),
+      T3 = mk_temp(),
+      I4 = hipe_llvm:mk_conversion(T3, 'trunc', "i64", Value, LoadType),
+      I5 = hipe_llvm:mk_store(LoadType, T3, LoadType, T2, [], [], false),
+      [I5, I4, I3]
+  end,
+  [Ins, I2, I1].
 
 trans_store_reg(I) ->
-  B = hipe_rtl:store_base(I),
-  Base  = trans_reg(B),
+  Base  = trans_reg(hipe_rtl:store_base(I)),
+  _Value = hipe_rtl:store_src(I),
+  {Value, I1} = 
+  case isPrecoloured(_Value) of
+    true -> 
+      fix_reg_src(_Value);
+    false ->
+      {trans_src(_Value), []}
+  end,
   D1 = mk_hp(),
-  I1 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
+  I2 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
   D2 = mk_hp(),
-  I2 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "i64"),
+  I3 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "i64"),
   Offset =
   integer_to_list(list_to_integer(trans_src(hipe_rtl:store_offset(I))) div 8), 
   D3 = mk_hp(),
-  I3 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
-  Value = hipe_rtl:store_src(I),
-  I4 = hipe_llvm:mk_store("i64", trans_src(Value), "i64", D3, [], [],
+  %% TODO: Fix Size...
+  I4 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
+  I5 = hipe_llvm:mk_store("i64", Value, "i64", D3, [], [],
                           false),
-  [I4, I3, I2, I1].
+  [I5, I4, I3, I2, I1].
 
 %%
 %% switch
@@ -987,6 +1021,13 @@ pointer_from_reg(RegName, Type, Offset) ->
             erlang:integer_to_list(Offset div 8)}], false),
       {T3, [I3, I2, I1]}.
   
+type_from_size(Size) -> 
+  case Size of
+    byte -> "i8";
+    int16 -> "i16";
+    int32 -> "i32";
+    word -> "i64"
+  end.
 
 trans_fp_op(Op) ->
   case Op of
@@ -1037,14 +1078,15 @@ trans_prim_op(Op) ->
     'div' -> "bif_div..";
     '/' -> "bif_div..";
     %'rem' -> "srem';
-    suspend_0 -> "suspend_0..";
-    gc_1 -> "gc_1..";
-    op_exact_eqeq_2 -> "op_exact_eqeq_2..";
-    fwait -> "fwait..";
-    handle_fp_exception -> "handle_fp_exception..";
-    fclearerror_error -> "fclearerror_error..";
-    conv_big_to_float -> "conv_big_to_float..";
-    Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
+    Other -> atom_to_list(Other)++".."
+%    suspend_0 -> "suspend_0..";
+%    gc_1 -> "gc_1..";
+%    op_exact_eqeq_2 -> "op_exact_eqeq_2..";
+%    fwait -> "fwait..";
+%    handle_fp_exception -> "handle_fp_exception..";
+%    fclearerror_error -> "fclearerror_error..";
+%    conv_big_to_float -> "conv_big_to_float..";
+%    Other -> exit({?MODULE, trans_prim_op, {"unknown prim op", Other}})
   end.
 
 %% Return the type of arg A (only integers of 64 bits and floats supported).
