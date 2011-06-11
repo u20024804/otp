@@ -19,6 +19,17 @@
     switch_default_label/1,
     switch_value_label_list/1,
 
+    mk_invoke/9,
+    invoke_dst/1,
+    invoke_cconv/1,
+    invoke_ret_attrs/1,
+    invoke_type/1,
+    invoke_fnptrval/1,
+    invoke_arglist/1,
+    invoke_fn_attrs/1,
+    invoke_to_label/1,
+    invoke_unwind_label/1,
+
     mk_operation/6,
     operation_dst/1,
     operation_op/1,
@@ -329,14 +340,36 @@ br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) -> 
   False_label.
 
+
+%%
+%% invoke
+%%
+mk_invoke(Dst, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs, To_label, Unwind_label) -> 
+  #llvm_invoke{dst=Dst, cconv=Cconv, ret_attrs=Ret_attrs, type=Type,
+    fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs, to_label=To_label, 
+              unwind_label=Unwind_label}.
+invoke_dst(#llvm_invoke{dst=Dst}) -> Dst.
+invoke_cconv(#llvm_invoke{cconv=Cconv}) -> Cconv.
+invoke_ret_attrs(#llvm_invoke{ret_attrs=Ret_attrs}) -> Ret_attrs.
+invoke_type(#llvm_invoke{type=Type}) -> Type.
+invoke_fnptrval(#llvm_invoke{fnptrval=Fnptrval}) -> Fnptrval.
+invoke_arglist(#llvm_invoke{arglist=Arglist}) -> Arglist.
+invoke_fn_attrs(#llvm_invoke{fn_attrs=Fn_attrs}) -> Fn_attrs.
+invoke_to_label(#llvm_invoke{to_label=To_label}) -> To_label.
+invoke_unwind_label(#llvm_invoke{unwind_label=Unwind_label}) -> Unwind_label.
+
 %%
 %% switch
 %%
-mk_switch(Type, Value, Default_label, Value_label_list) -> #llvm_switch{type=Type, value=Value, default_label=Default_label, value_label_list=Value_label_list}.
+mk_switch(Type, Value, Default_label, Value_label_list) -> 
+  #llvm_switch{type=Type, value=Value, default_label=Default_label,
+              value_label_list=Value_label_list}.
 switch_type(#llvm_switch{type=Type}) -> Type.
 switch_value(#llvm_switch{value=Value}) -> Value.
-switch_default_label(#llvm_switch{default_label=Default_label}) -> Default_label.
-switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) -> Value_label_list.
+switch_default_label(#llvm_switch{default_label=Default_label}) -> 
+  Default_label.
+switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) -> 
+  Value_label_list.
 
 %%
 %% operation
@@ -818,6 +851,17 @@ pp_ins(Dev, I) ->
         [switch_type(I), switch_value(I), switch_default_label(I)]),
       pp_switch_value_label_list(Dev, switch_type(I), switch_value_label_list(I)),
       io:format(Dev, "    ]~n", []);
+    #llvm_invoke{} ->
+      io:format(Dev, "~s = ", [invoke_dst(I)]),
+      io:format(Dev, "invoke ", []),
+      io:format(Dev, "~s " , [invoke_cconv(I)]),
+      pp_options(Dev, invoke_ret_attrs(I)),
+      io:format(Dev, "~s ~s(", [invoke_type(I), invoke_fnptrval(I)]),
+      pp_args(Dev, invoke_arglist(I)),
+      io:format(Dev, ") ", []),
+      pp_options(Dev, invoke_fn_attrs(I)),
+      io:format(Dev, " to label ~s unwind label ~s ~n", [invoke_to_label(I),
+          invoke_unwind_label(I)]);
     #llvm_br_cond{} ->
       io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);

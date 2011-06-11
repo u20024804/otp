@@ -13,6 +13,8 @@
 -record(llvm_br, {dst}).
 -record(llvm_br_cond, {'cond', true_label, false_label}).
 -record(llvm_switch, {type, value, default_label, value_label_list=[]}).
+-record(llvm_invoke, {dst, cconv=[], ret_attrs=[], type, fnptrval, arglist=[],
+    fn_attrs=[], to_label, unwind_label}).
 %% Binary Operations
 -record(llvm_operation, {dst, op, type, src1, src2, options=[]}).
 %-record(llvm_add, {dst, type, src1, src2, options=[]}).
