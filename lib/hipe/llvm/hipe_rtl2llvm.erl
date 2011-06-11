@@ -754,9 +754,24 @@ trans_store(I) ->
   Base = hipe_rtl:store_base(I),
   I1 = case hipe_rtl_arch:is_precoloured(Base) of
     true -> trans_store_reg(I);
-    false -> exit({?MODULE, trans_store ,{"Non Implemened yet", I}})
+    false -> case hipe_rtl:is_var(Base) of
+      true->  trans_store_var(I);
+      false -> exit({?MODULE, trans_store ,{"Non Implemened yet", I}})
+    end
   end,
   I1.
+
+trans_store_var(I) ->
+  B = hipe_rtl:store_base(I),
+  Base = trans_src(B),
+  Offset = trans_src(hipe_rtl:store_offset(I)), 
+  T1 = mk_temp(),
+  I1 = hipe_llvm:mk_operation(T1, add, "i64", Base, Offset, []),
+  T2 = mk_temp(),
+  I2 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "i64"),
+  Value = hipe_rtl:store_src(I),
+  I3 = hipe_llvm:mk_store("i64", trans_src(Value), "i64", T2, [], [], false),
+  [ I3, I2, I1].
 
 trans_store_reg(I) ->
   B = hipe_rtl:store_base(I),
