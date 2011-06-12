@@ -322,34 +322,16 @@ trans_branch(I) ->
   I2 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
   [I2, I1].
 
+
 %%
 %% call
 %%
 trans_call(I) ->
-  I1 = case hipe_rtl:call_fun(I) of
-    Prim when is_atom(Prim) ->
-      trans_prim_call(I);
-    {M,F,A} when is_atom(M), is_atom(F), is_integer(A) ->
-      trans_mfa_call(I)
-  end,
-  I2 = case hipe_rtl:call_continuation(I) of
-    [] -> [];
-    CC -> trans_goto(hipe_rtl:mk_goto(CC))
-  end,
-  %% TODO: Fail call continuation
-  case hipe_rtl:call_fail(I) of 
-    [] -> ok;
-    FC when erlang:is_integer(FC)-> exit({?MODULE, trans_call, "Fail Continuation Not Implemented Yet"})
-  end,
-  [I2, I1].
-
-
-%TODO: Fix Return Type of calls.
-trans_prim_call(I) ->
-  Dst = case hipe_rtl:call_dstlist(I) of
+  %% TODO: Fix Destination List
+  Dst =  case hipe_rtl:call_dstlist(I) of
     [] -> mk_temp();
     [Destination] -> trans_dst(Destination);
-    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not i
+    [_D|_Ds] -> exit({?MODULE, trans_prim_call, "Destination list not i
           implemented yet"})
   end,
   Args = fix_args(hipe_rtl:call_arglist(I)),
@@ -359,54 +341,43 @@ trans_prim_call(I) ->
     false -> Args;
     true -> 
       {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
-      ArgsInRegs++lists:reverse(ArgsInStack)
+      ArgsInRegs++ lists:reverse(ArgsInStack)
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
   FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
-  Op = trans_prim_op(hipe_rtl:call_fun(I)),
+  Name = case hipe_rtl:call_fun(I) of
+    PrimOp when is_atom(PrimOp) -> trans_prim_op(PrimOp);
+    {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
+      trans_mfa_name({M,F,A});
+    Other -> exit({?MODULE, trans_call, {"Unimplented Call", Other}})
+  end,
   T1 = mk_temp(),
-  I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
-    i64}", "@"++Op, FinalArgs, []),
-  I3 = store_call_regs(FixedRegs, T1),
-  I4 = case hipe_rtl:call_dstlist(I) of
-    [] -> [];
-    [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
-    i64}", T1, "5", [])
-  end,
-  [I4, I3, I2, I1].
-
-
-trans_mfa_call(I) ->
-  Dst = case hipe_rtl:call_dstlist(I) of
-    [] -> mk_temp();
-    [Destination] -> trans_dst(Destination);
-    [D|Ds] -> exit({?MODULE, trans_prim_call, "Destination list not implemented
-          yet"})
-  end,
-  Args = fix_args(hipe_rtl:call_arglist(I)),
-  %% Reverse arguments that are passed to stack to match with the Erlang
-  %% calling convention
-  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
-    false -> Args;
-    true -> 
-      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
-      ArgsInRegs++lists:reverse(ArgsInStack)
-  end,
-  FixedRegs = fixed_registers(),
-  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
-  Name = trans_mfa_name(hipe_rtl:call_fun(I)),
-  T1 = mk_temp(),
-  I2 = hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64, 
-                        i64}", Name, FinalArgs, []),
-  I3 = store_call_regs(FixedRegs, T1),
-  I4 = case hipe_rtl:call_dstlist(I) of
-    [] -> [];
-    [_] ->  hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64,
-        i64, i64}", T1, "5", [])
-  end,
-  [I4, I3, I2, I1].
+  %% TODO: Fix return type of calls
+  I2 = case hipe_rtl:call_fail(I) of
+    %% Normal Call
+    [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
+        i64}", "@"++Name, FinalArgs, []);
+    %% Call With Exception
+    FailLabelNum -> 
+        TrueLabel = "LC"++mk_num(),
+        I3 = hipe_llvm:mk_label(TrueLabel),
+        FailLabel = mk_jump_label(FailLabelNum),
+        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
+          i64}", "@"++Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
+        [I4, I3]
+    end,
+    I5 = store_call_regs(FixedRegs, T1),
+    I6 = case hipe_rtl:call_dstlist(I) of
+      [] -> [];
+      [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
+          i64}", T1, "5", [])
+    end,
+    I7 = case hipe_rtl:call_continuation(I) of
+      [] -> [];
+      CC -> trans_goto(hipe_rtl:mk_goto(CC))
+    end,
+    [I7, I6, I5, I2, I1].
 
 
 %%
@@ -721,7 +692,7 @@ fix_name(Name) ->
   end.
 
 trans_mfa_name({M,F,A}) ->
-  "@"++atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A).
+  atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A).
 
 mk_num() -> integer_to_list(hipe_gensym:new_var(llvm)).
 
