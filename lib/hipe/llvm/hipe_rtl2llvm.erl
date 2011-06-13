@@ -384,10 +384,10 @@ trans_call(I) ->
     %% Call With Exception
     FailLabelNum -> 
         TrueLabel = "LC"++mk_num(),
-        I3 = hipe_llvm:mk_label(TrueLabel),
         FailLabel = mk_jump_label(FailLabelNum),
-        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
+        I3 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
           i64}", "@"++Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
+        I4 = hipe_llvm:mk_label(TrueLabel),
         [I4, I3]
     end,
     I5 = store_call_regs(FixedRegs, T1),
