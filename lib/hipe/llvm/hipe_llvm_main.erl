@@ -21,8 +21,11 @@ rtl_to_native(RTL, _Options) ->
   ObjBin = elf64_format:open_object_file(Object_filename),
   %% Get relocation info and write to file for loader
   Relocs = elf64_format:get_call_list(ObjBin),
+  io:format("Relocs are ~w", [Relocs]),
   %% Temporary code for creating references needed by  the loader
-  Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
+  _Relocs = lists:filter(fun({A,B}) -> case A of [] -> false; _ -> true end end,
+        Relocs),
+  Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, _Relocs),
   Is_mfa = 
     fun ({Function,_}) ->
       case Function of
