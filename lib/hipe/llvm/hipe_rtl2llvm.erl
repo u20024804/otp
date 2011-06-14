@@ -71,6 +71,8 @@ translate(RTL) ->
   ClosureDecl = lists:map(fun declare_closure/1, Closures),
   %% Create code to create local name for closures
   ClosureLoad = lists:map(fun load_closure/1, Closures),
+  Code2 = fix_invoke_calls(Code),
+  LLVM_Code = translate_instr_list(Code2, []),
   LLVM_Code = translate_instr_list(Code, []),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ClosureLoad++AtomLoad++ConstLoad,
     IsClosure),
@@ -441,7 +443,7 @@ trans_call(I) ->
         i64}", Name, FinalArgs, []);
     %% Call With Exception
     FailLabelNum -> 
-        TrueLabel = "LC"++mk_num(),
+        TrueLabel = "L"++integer_to_list(hipe_rtl:call_normal(I)),
         FailLabel = mk_jump_label(FailLabelNum),
         I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
           i64}", Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
@@ -901,6 +903,47 @@ trans_switch(I) ->
   I2 = hipe_llvm:mk_switch("i64", Src, lists:nth(1, LabelList), ValueLabelList),
   [I2, I1]. 
 %%-----------------------------------------------------------------------------
+
+
+%% When a call has a fail continuation label it must be extended with a normal
+%% continuation label to go with the LLVM's invoke instruction. Also all phi
+%% nodes that are correlated with the block that holds tha call instruction
+%% must be updated
+fix_invoke_calls(Code) -> fix_invoke_calls(Code, []).
+fix_invoke_calls([], Acc) -> lists:reverse(Acc);
+fix_invoke_calls([I|Is], Acc) ->
+  case I of 
+    #call{} ->
+      case hipe_rtl:call_fail(I) of
+        [] -> fix_invoke_calls(Is, [I|Acc]);
+        _Label ->
+          OldLabel = find_first_label(Acc),
+          NewLabel = 9999999999 - hipe_gensym:new_label(rtl),
+          NewCall =  hipe_rtl:call_normal_update(I, NewLabel),
+          Update = fun (X) -> update_phi_nodes(X, {OldLabel, NewLabel}) end,
+          NewIs = lists:map(Update, Is),
+          NewAcc = lists:map(Update, Acc),
+          fix_invoke_calls(NewIs,
+            [NewCall | NewAcc])
+      end;
+    _ -> fix_invoke_calls(Is, [I|Acc])
+  end.
+
+find_first_label([]) -> exit({?MODULE, find_first_label, "No label found"});
+find_first_label([I|Is]) -> 
+  case I of
+    #label{} -> hipe_rtl:label_name(I);
+    Other -> find_first_label(Is)
+  end.
+
+update_phi_nodes(I, {OldPred, NewPred}) ->
+  case I of
+    #phi{} -> hipe_rtl:phi_redirect_pred(I, OldPred, NewPred);
+    _ -> I
+  end.
+
+%%----------------------------------------------------------------------------
+
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 
