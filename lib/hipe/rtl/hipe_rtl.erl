@@ -225,6 +225,7 @@
 	 is_goto/1,
 	 %% goto_label_update/2,
 
+   mk_call/7,
 	 mk_call/6,
 	 call_fun/1,
 	 call_dstlist/1,
@@ -233,6 +234,8 @@
 	 call_continuation/1,
 	 call_fail/1,
 	 call_type/1,
+   call_normal/1,
+   call_normal_update/2,
 	 %% call_continuation_update/2,
 	 %% call_fail_update/2,
 	 is_call/1,
@@ -645,6 +648,21 @@ is_goto(_) -> false.
 %%
 %% call
 %%
+
+%% LLVM: Call with normal continuation
+mk_call(DstList, Fun, ArgList, Continuation, FailContinuation,
+  NormalContinuation, Type) ->
+  case Type of
+    remote -> ok;
+    not_remote -> ok
+  end,
+  #call{dstlist=DstList, 'fun'=Fun, arglist=ArgList, type=Type,
+	continuation=Continuation,
+	failcontinuation=FailContinuation,
+  normalcontinuation=NormalContinuation}.
+call_normal(#call{normalcontinuation=NormalContinuation}) -> NormalContinuation.
+call_normal_update(C, NewNormalContinuation) ->
+  C#call{normalcontinuation=NewNormalContinuation}.
 
 mk_call(DstList, Fun, ArgList, Continuation, FailContinuation, Type) ->
   case Type of
