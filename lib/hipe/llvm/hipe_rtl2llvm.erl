@@ -147,7 +147,12 @@ const_to_dict({Elem, _Type}, Dict) ->
   dict:store(Name, {'constant', Elem}, Dict).
 
 call_to_dict(Elem, Dict) -> 
-  Name = hipe_llvm:call_fnptrval(Elem),
+  Name = case Elem of
+    #llvm_call{} ->
+      hipe_llvm:call_fnptrval(Elem);
+    #llvm_invoke{} ->
+      hipe_llvm:invoke_fnptrval(Elem)
+  end,
   case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
       [global,{capture,all_but_first,list}]) of
     {match, [[BifName, [], []]]} -> 
@@ -176,7 +181,10 @@ translate_instr(I) ->
     #alu{} -> trans_alu(I);
     #alub{} -> trans_alub(I);
     #branch{} -> trans_branch(I);
-    #call{} -> trans_call(I);
+    #call{} -> case hipe_rtl:call_fun(I) of
+        fwait -> io:format("Fwait found~n"),[];
+        _ -> trans_call(I)
+      end;
     #comment{} -> trans_comment(I);
     #enter{} -> trans_enter(I);
     #fconv{} -> trans_fconv(I);
@@ -847,6 +855,7 @@ isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 is_call(I) -> 
   case I of 
     #llvm_call{} -> true;
+    #llvm_invoke{} -> true;
     _ -> false
   end.
 
@@ -856,7 +865,15 @@ is_external_call(I, M, F, A) ->
       Name = hipe_llvm:call_fnptrval(I),
       case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
           [global,{capture,all_but_first,list}]) of
-        {match, [[M,F,A]]} -> %io:format("Yo1"),
+        {match, [[M,F,A]]} -> 
+          false;
+        _ -> true
+      end;
+    #llvm_invoke{} -> 
+      Name = hipe_llvm:invoke_fnptrval(I),
+      case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
+          [global,{capture,all_but_first,list}]) of
+        {match, [[M,F,A]]} -> 
           false;
         _ -> true
       end;
@@ -864,10 +881,19 @@ is_external_call(I, M, F, A) ->
   end.
 
 call_to_decl(A) -> 
-  Cconv = hipe_llvm:call_cconv(A),
-  Type = hipe_llvm:call_type(A),
-  Name = hipe_llvm:call_fnptrval(A),
-  Args_type = lists:map(fun({X,Y}) -> X end, hipe_llvm:call_arglist(A)),
+  case A of
+    #llvm_call{} ->
+      Cconv = hipe_llvm:call_cconv(A),
+      Type = hipe_llvm:call_type(A),
+      Name = hipe_llvm:call_fnptrval(A),
+      Args = hipe_llvm:call_arglist(A);
+    #llvm_invoke{} ->
+      Cconv = hipe_llvm:invoke_cconv(A),
+      Type = hipe_llvm:invoke_type(A),
+      Name = hipe_llvm:invoke_fnptrval(A),
+      Args = hipe_llvm:invoke_arglist(A)
+  end,
+  Args_type = lists:map(fun({X,Y}) -> X end, Args),
     hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, Name, Args_type, []). 
 
 
