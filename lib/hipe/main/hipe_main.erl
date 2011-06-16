@@ -124,10 +124,17 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   end,
   case proplists:get_bool(to_rtl, Options) of
     false ->
-      rtl_to_native(MFA, LinearRTL, Options, DebugState);
+      LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
+             "RTL", Options),
+      case proplists:get_bool(to_rtl, Options) of
+        false ->
+          rtl_to_native(MFA, LinearRTL, Options, DebugState);
+        true ->
+          put(hipe_debug, DebugState),
+          {rtl, LinearRTL}
+      end;
     true ->
-      put(hipe_debug, DebugState),
-      {rtl, LinearRTL}
+      icode_to_llvm(MFA, FinalIcode, Options, Servers)
   end.
 
 %%----------------------------------------------------------------
@@ -344,6 +351,30 @@ icode_ssa_unconvert(IcodeSSA, Options) ->
   ?option_time(hipe_icode_ssa:unconvert(IcodeSSA),
 	       "Icode SSA unconversion", Options).
 
+%% LLVM:
+%% ---------------------------------------------------------------------------
+%% Translate Icode to Binary using LLVM
+%% ---------------------------------------------------------------------------
+icode_to_llvm(MFA, Icode, Options, Servers) ->
+  debug("ICODE -> LLVM: ~w, ~w~n", [MFA, hash(Icode)], Options),
+  LinearRTL = translate_to_rtl(Icode, Options),
+  pp(LinearRTL, MFA, rtl_linear, pp_rtl_linear, Options, Servers),
+  RtlCfg  = initialize_rtl_cfg(LinearRTL, Options),
+  %% hipe_rtl_cfg:pp(RtlCfg),
+  RtlCfg0 = hipe_rtl_cfg:remove_unreachable_code(RtlCfg),
+  RtlCfg1 = hipe_rtl_cfg:remove_trivial_bbs(RtlCfg0),
+  %% hipe_rtl_cfg:pp(RtlCfg1),
+  %% RtlCfg2 = rtl_ssa(RtlCfg1, Options),
+  RtlCfg2 = rtl_symbolic(RtlCfg1, Options),
+  %% hipe_rtl_cfg:pp(RtlCfg2),
+  %%pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
+  %%RtlCfg4 = rtl_lcm(RtlCfg3, Options),
+  %%pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers),
+  %%LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
+  %%LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
+  %% hipe_rtl:pp(standard_io, LinearRTL2),
+  %% LLVM:
+  rtl_to_llvm(RtlCfg1, Options).   %STUB: parse RTL in SSA form
 
 %%=====================================================================
 %%
@@ -394,7 +425,6 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
   LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
-  rtl_llvm(RtlCfg1, Options),   %STUB: parse RTL in SSA form
   LinearRTL2.
 
 translate_to_rtl(Icode, Options) ->
@@ -417,22 +447,18 @@ rtl_symbolic(RtlCfg, Options) ->
 %% We want naive (no-optimized) code to check LLVM optimizations.
 %%
 %%----------------------------------------------------------------------
-rtl_llvm(RtlCfg0, Options) ->
-  case proplists:get_bool(to_llvm, Options) of
-    true ->
-      RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
-      RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
-      LinearRtl = hipe_rtl_cfg:linearize(RtlSSA0),
-      %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
-      %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
-      %% RtlSSA2 = rtl_ssa_dead_code_elimination(RtlSSA1, Options),
-      %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
-      %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
-      %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
-      {_Code, _Relocs} = hipe_llvm_main:rtl_to_native(LinearRtl, Options);
-    false ->
-      ok
-  end.
+rtl_to_llvm(RtlCfg0, Options) ->
+  RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
+  RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
+  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA0),
+  %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
+  %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
+  %% RtlSSA2 = rtl_ssa_dead_code_elimination(RtlSSA1, Options),
+  %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
+  %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
+  %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
+ Binary = hipe_llvm_main:rtl_to_native(LinearRtl, Options),
+ {llvm_binary, Binary}.
 
       
 %%----------------------------------------------------------------------
