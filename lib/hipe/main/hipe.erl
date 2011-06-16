@@ -694,8 +694,97 @@ compiler_return(Res, Client) ->
   Client ! {self(), Res}.
 
 compile_finish({Mod, Exports, Icode}, WholeModule, Options) ->
-  Res = finalize(Icode, Mod, Exports, WholeModule, Options),
+  %% LLVM:
+  case proplists:get_bool(to_llvm, Options) of
+    true -> Res =  llvm_finalize(Icode, Mod, Exports, WholeModule, Options);
+    false -> Res = finalize(Icode, Mod, Exports, WholeModule, Options)
+  end,
   post(Res, Icode, Options).
+
+%%% LLVM:
+%%%
+%%% Finalize Compilation Using LLVM
+%%%
+llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
+  List = icode_multret(OrigList, Mod, Opts, Exports),
+  Closures =
+  [MFA || {MFA, Icode} <- List,
+    hipe_icode:icode_is_closure(Icode)],
+  Bin =
+  case proplists:get_value(use_callgraph, Opts) of
+    true -> 
+      %% Compiling the functions bottom-up by using a call graph
+      CallGraph = hipe_icode_callgraph:construct(List),
+      OrdList = hipe_icode_callgraph:to_list(CallGraph),
+      finalize_fun(OrdList, Exports, Opts);
+    _ -> 
+      %% Compiling the functions bottom-up by reversing the list
+      OrdList = lists:reverse(List),
+      finalize_fun(OrdList, Exports, Opts)
+  end,
+  {_, Bin1} = lists:unzip(Bin),
+  FinalBin = fix_llvm_binary(Bin1), 
+  {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
+  TargetArch = get(hipe_target_arch),
+  {ok, {TargetArch, FinalBin}}.
+
+%% Convert term to binary as expected by the the hipe_unified_loader.
+%% Also In a case where more than one functions are compiled(whole module
+%% compilation or closures), we must pack them all to one term.
+fix_llvm_binary(Bin) ->
+  {CodeSize, ExportMap, Refs, CodeBinary, ConstMap} = merge(Bin),
+  [FirstMFA| _] = Bin,
+  [{Version, CheckSum}, ConstAlign, ConstSize, _, LabelMap, _, _, _, _, _, _] =
+  FirstMFA,
+  term_to_binary(
+    [{Version, CheckSum}, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
+      CodeSize, CodeBinary, Refs, 0,  []]
+  ).
+
+merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0).
+merge([
+    [_, _, _, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
+    | Rest], 
+  Size,  ExportMap, Refs, Code, ConstMap, Base) ->
+  NewRefs = add_offset_to_relocs(Refs1, Size),
+  {NewConstmap, NewRefs2, NewBase} = fix_constmap(MFAConstMap, NewRefs, Base,
+    []),
+  merge(Rest, Size+CodeSize, [[Size, M, F, A, IC, IL]|ExportMap],
+    NewRefs2++Refs, <<Code/binary, Code1/binary>>, NewConstmap++ConstMap,
+    NewBase);
+merge([], Size, ExportMap, Refs, Code, ConstMap, Base) -> {Size, lists:flatten(ExportMap),
+    Refs, Code, ConstMap}.
+
+
+fix_constmap([Label, A, B, Const | Rest], Refs, Base, ConstMap) -> 
+  NewRefs = substitute_const_label(Refs, Label, Base),
+  fix_constmap(Rest, NewRefs, Base+1, [Base, A, B, Const|ConstMap]);
+fix_constmap([], Refs, Base, ConstMap) -> 
+  {ConstMap, Refs, Base}.
+
+add_offset_to_relocs(Refs, Size) ->
+  Update_reloc = fun (X) -> X+Size end,
+  Update_relocs = fun({X, Relocs}) -> {X, lists:map(Update_reloc, Relocs)} end,
+  Update_all = fun ({Type, Relocs}) -> {Type, lists:map(Update_relocs, Relocs)} end,
+  lists:map(Update_all, Refs).
+
+substitute_const_label(Refs, Label, Base) ->
+  Check_Const =
+    fun ({X, List}) ->
+        case X of
+          {constant, Label} -> {{constant, Base}, List};
+          _ -> {X,List}
+        end
+    end,
+  Check_Type = 
+    fun ({X, List}) ->
+        case X of 
+            1 -> {X, lists:map(Check_Const, List)};
+            _ -> {X, List}
+          end
+    end,
+  lists:map(Check_Type, Refs).
+
 
 
 %% -------------------------------------------------------------------------
@@ -707,44 +796,44 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
   List = icode_multret(OrigList, Mod, Opts, Exports),
   {T1Compile,_} = erlang:statistics(runtime),
   CompiledCode =
-    case proplists:get_value(use_callgraph, Opts) of
-      true -> 
-	%% Compiling the functions bottom-up by using a call graph
-	CallGraph = hipe_icode_callgraph:construct(List),
-	OrdList = hipe_icode_callgraph:to_list(CallGraph),
-	finalize_fun(OrdList, Exports, Opts);
-      _ -> 
-	%% Compiling the functions bottom-up by reversing the list
-	OrdList = lists:reverse(List),
-	finalize_fun(OrdList, Exports, Opts)
-    end,
+  case proplists:get_value(use_callgraph, Opts) of
+    true -> 
+      %% Compiling the functions bottom-up by using a call graph
+      CallGraph = hipe_icode_callgraph:construct(List),
+      OrdList = hipe_icode_callgraph:to_list(CallGraph),
+      finalize_fun(OrdList, Exports, Opts);
+    _ -> 
+      %% Compiling the functions bottom-up by reversing the list
+      OrdList = lists:reverse(List),
+      finalize_fun(OrdList, Exports, Opts)
+  end,
   {T2Compile,_} = erlang:statistics(runtime),
   ?when_option(verbose, Opts,
-	       ?debug_msg("Compiled ~p in ~.2f s\n",
-			  [Mod,(T2Compile-T1Compile)/1000])),
+    ?debug_msg("Compiled ~p in ~.2f s\n",
+      [Mod,(T2Compile-T1Compile)/1000])),
   case proplists:get_bool(to_rtl, Opts) of
     true ->
       {ok, CompiledCode};
     false ->
       Closures =
-	[MFA || {MFA, Icode} <- List,
-		hipe_icode:icode_is_closure(Icode)],
+      [MFA || {MFA, Icode} <- List,
+        hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
       try assemble(CompiledCode, Closures, Exports, Opts) of
-	Bin ->
-	  {T2,_} = erlang:statistics(runtime),
-	  ?when_option(verbose, Opts,
-		       ?debug_untagged_msg(" in ~.2f s\n",
-					   [(T2-T1)/1000])),
-	  {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
-	  TargetArch = get(hipe_target_arch),
-	  {ok, {TargetArch,Bin}}
-      catch
-	error:Error ->
-	  {error,Error,erlang:get_stacktrace()}
-      end
-  end.
+        Bin ->
+          {T2,_} = erlang:statistics(runtime),
+          ?when_option(verbose, Opts,
+            ?debug_untagged_msg(" in ~.2f s\n",
+              [(T2-T1)/1000])),
+          {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
+          TargetArch = get(hipe_target_arch),
+          {ok, {TargetArch,Bin}}
+        catch
+          error:Error ->
+            {error,Error,erlang:get_stacktrace()}
+        end
+    end.
 
 finalize_fun(MfaIcodeList, Exports, Opts) ->
   case proplists:get_value(concurrent_comp, Opts) of
@@ -792,7 +881,7 @@ finalize_fun_concurrent(MfaIcodeList, Exports, Opts) ->
 	     set_architecture(Opts),
 	     pre_init(Opts),
 	     init(Opts),
-	     Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
+       Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
 	 end || IcodeFun <- MfaIcodeList],
       lists:foreach(fun (F) -> spawn_link(F) end, CompFuns),
       Final = [receive Res when element(1, Res) =:= MFA -> Res end
@@ -819,6 +908,9 @@ finalize_fun_sequential({MFA, Icode}, Opts, Servers) ->
       ?when_option(verbose, Opts,
 		   ?debug_msg("Compiled ~w in ~.2f s\n", [MFA,(T2-T1)/1000])),
       {MFA, Code};
+    %% LLVM:
+    {llvm_binary, Binary} ->
+      {MFA, Binary};
     {rtl, LinearRtl} ->
       {MFA, LinearRtl}
   catch
