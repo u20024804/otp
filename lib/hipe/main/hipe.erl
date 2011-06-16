@@ -445,65 +445,65 @@ beam_file(Module) when is_atom(Module) ->
 -spec compile(c_unit(), compile_file(), comp_options()) ->
 	 {'ok', compile_ret()} | {'error', term()}.
 
-compile(Name, File, Opts0) ->
-  Opts1 = expand_kt2(Opts0),
-  Opts = 
-    case Name of
-      {_Mod, _Fun, _Arity} ->
-	[no_concurrent_comp|Opts1];
-      _ ->
-	Opts1
-    end,
-  case proplists:get_value(core, Opts) of
-    true when is_binary(File) ->
-      ?error_msg("Cannot get Core Erlang code from BEAM binary.",[]),
-      ?EXIT({cant_compile_core_from_binary});
-    true ->
-      case filename:find_src(filename:rootname(File, ".beam")) of
-	{error, _} ->
-	  ?error_msg("Cannot find source code for ~p.",[File]),
-	  ?EXIT({cant_find_source_code});
-	{Source, CompOpts} ->
-	  CoreOpts = [X || X = {core_transform, _} <- Opts],
-	  %%io:format("Using: ~w\n", [CoreOpts]),
-	  case compile:file(Source, CoreOpts ++ [to_core, binary|CompOpts]) of
-	    {ok, _, Core} ->
-	      compile_core(Name, Core, File, Opts);
-	    Error ->
-	      ?error_msg("Error compiling ~p:\n~p.",[File, Error]),
-	      ?EXIT({cant_compile_source_code})
-	  end
-      end;
-    {src_file, Source} ->
-      CoreOpts1 = [X || X = {core_transform, _} <- Opts],
-      CoreOpts2 = [report_errors, to_core, binary, {i,"../include"}|CoreOpts1],
-      %% io:format("Using: ~w\n", [CoreOpts2]),
-      case compile:file(Source, CoreOpts2) of
-	{ok, _, Core} ->
-	  compile_core(Name, Core, File, Opts);
-	Error ->
-	  ?error_msg("Error compiling ~p:\n~p\n",[Source, Error]),
-	  ?EXIT({cant_compile_source_code, Error})
-      end;
-    Other when Other =:= false; Other =:= undefined ->
-      NewOpts =
-	case proplists:get_value(use_callgraph, Opts) of
-	  No when No =:= false; No =:= undefined -> Opts;
-	  _ ->
-	    case Name of
-	      {_M,_F,_A} ->
-		%% There is no point in using the callgraph or concurrent_comp
-		%% when analyzing just one function.
-		[no_use_callgraph, no_concurrent_comp|Opts];
-	      _ -> Opts
-	    end
-	end,
-      DisasmFun = fun (_) -> disasm(File) end,
-      IcodeFun = fun (Code, Opts_) ->
-		     get_beam_icode(Name, Code, File, Opts_)
-		 end,
-      run_compiler(Name, DisasmFun, IcodeFun, NewOpts)
-  end.
+ compile(Name, File, Opts0) ->
+   Opts1 = expand_kt2(Opts0),
+   Opts = 
+   case Name of
+     {_Mod, _Fun, _Arity} ->
+       [no_concurrent_comp|Opts1];
+     _ ->
+       Opts1
+   end,
+   case proplists:get_value(core, Opts) of
+     true when is_binary(File) ->
+       ?error_msg("Cannot get Core Erlang code from BEAM binary.",[]),
+       ?EXIT({cant_compile_core_from_binary});
+     true ->
+       case filename:find_src(filename:rootname(File, ".beam")) of
+         {error, _} ->
+           ?error_msg("Cannot find source code for ~p.",[File]),
+           ?EXIT({cant_find_source_code});
+         {Source, CompOpts} ->
+           CoreOpts = [X || X = {core_transform, _} <- Opts],
+           %%io:format("Using: ~w\n", [CoreOpts]),
+           case compile:file(Source, CoreOpts ++ [to_core, binary|CompOpts]) of
+             {ok, _, Core} ->
+               compile_core(Name, Core, File, Opts);
+             Error ->
+               ?error_msg("Error compiling ~p:\n~p.",[File, Error]),
+               ?EXIT({cant_compile_source_code})
+           end
+       end;
+     {src_file, Source} ->
+       CoreOpts1 = [X || X = {core_transform, _} <- Opts],
+       CoreOpts2 = [report_errors, to_core, binary, {i,"../include"}|CoreOpts1],
+       %% io:format("Using: ~w\n", [CoreOpts2]),
+       case compile:file(Source, CoreOpts2) of
+         {ok, _, Core} ->
+           compile_core(Name, Core, File, Opts);
+         Error ->
+           ?error_msg("Error compiling ~p:\n~p\n",[Source, Error]),
+           ?EXIT({cant_compile_source_code, Error})
+       end;
+     Other when Other =:= false; Other =:= undefined ->
+     NewOpts =
+     case proplists:get_value(use_callgraph, Opts) of
+       No when No =:= false; No =:= undefined -> Opts;
+     _ ->
+       case Name of
+         {_M,_F,_A} ->
+           %% There is no point in using the callgraph or concurrent_comp
+           %% when analyzing just one function.
+           [no_use_callgraph, no_concurrent_comp|Opts];
+         _ -> Opts
+       end
+   end,
+   DisasmFun = fun (_) -> disasm(File) end,
+   IcodeFun = fun (Code, Opts_) ->
+       get_beam_icode(Name, Code, File, Opts_)
+   end,
+   run_compiler(Name, DisasmFun, IcodeFun, NewOpts)
+end.
 
 -spec compile_core(mod(), cerl:c_module(), compile_file(), comp_options()) ->
 	 {'ok', compile_ret()} | {'error', term()}.
@@ -732,8 +732,97 @@ compiler_return(Res, Client) ->
   Client ! {self(), Res}.
 
 compile_finish({Mod, Exports, Icode}, WholeModule, Options) ->
-  Res = finalize(Icode, Mod, Exports, WholeModule, Options),
+  %% LLVM:
+  case proplists:get_bool(to_llvm, Options) of
+    true -> Res =  llvm_finalize(Icode, Mod, Exports, WholeModule, Options);
+    false -> Res = finalize(Icode, Mod, Exports, WholeModule, Options)
+  end,
   post(Res, Icode, Options).
+
+%%% LLVM:
+%%%
+%%% Finalize Compilation Using LLVM
+%%%
+llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
+  List = icode_multret(OrigList, Mod, Opts, Exports),
+  Closures =
+  [MFA || {MFA, Icode} <- List,
+    hipe_icode:icode_is_closure(Icode)],
+  Bin =
+  case proplists:get_value(use_callgraph, Opts) of
+    true -> 
+      %% Compiling the functions bottom-up by using a call graph
+      CallGraph = hipe_icode_callgraph:construct(List),
+      OrdList = hipe_icode_callgraph:to_list(CallGraph),
+      finalize_fun(OrdList, Exports, Opts);
+    _ -> 
+      %% Compiling the functions bottom-up by reversing the list
+      OrdList = lists:reverse(List),
+      finalize_fun(OrdList, Exports, Opts)
+  end,
+  {_, Bin1} = lists:unzip(Bin),
+  FinalBin = fix_llvm_binary(Bin1), 
+  {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
+  TargetArch = get(hipe_target_arch),
+  {ok, {TargetArch, FinalBin}}.
+
+%% Convert term to binary as expected by the the hipe_unified_loader.
+%% Also In a case where more than one functions are compiled(whole module
+%% compilation or closures), we must pack them all to one term.
+fix_llvm_binary(Bin) ->
+  {CodeSize, ExportMap, Refs, CodeBinary, ConstMap} = merge(Bin),
+  [FirstMFA| _] = Bin,
+  [{Version, CheckSum}, ConstAlign, ConstSize, _, LabelMap, _, _, _, _, _, _] =
+  FirstMFA,
+  term_to_binary(
+    [{Version, CheckSum}, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
+      CodeSize, CodeBinary, Refs, 0,  []]
+  ).
+
+merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0).
+merge([
+    [_, _, _, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
+    | Rest], 
+  Size,  ExportMap, Refs, Code, ConstMap, Base) ->
+  NewRefs = add_offset_to_relocs(Refs1, Size),
+  {NewConstmap, NewRefs2, NewBase} = fix_constmap(MFAConstMap, NewRefs, Base,
+    []),
+  merge(Rest, Size+CodeSize, [[Size, M, F, A, IC, IL]|ExportMap],
+    NewRefs2++Refs, <<Code/binary, Code1/binary>>, NewConstmap++ConstMap,
+    NewBase);
+merge([], Size, ExportMap, Refs, Code, ConstMap, Base) -> {Size, lists:flatten(ExportMap),
+    Refs, Code, ConstMap}.
+
+
+fix_constmap([Label, A, B, Const | Rest], Refs, Base, ConstMap) -> 
+  NewRefs = substitute_const_label(Refs, Label, Base),
+  fix_constmap(Rest, NewRefs, Base+1, [Base, A, B, Const|ConstMap]);
+fix_constmap([], Refs, Base, ConstMap) -> 
+  {ConstMap, Refs, Base}.
+
+add_offset_to_relocs(Refs, Size) ->
+  Update_reloc = fun (X) -> X+Size end,
+  Update_relocs = fun({X, Relocs}) -> {X, lists:map(Update_reloc, Relocs)} end,
+  Update_all = fun ({Type, Relocs}) -> {Type, lists:map(Update_relocs, Relocs)} end,
+  lists:map(Update_all, Refs).
+
+substitute_const_label(Refs, Label, Base) ->
+  Check_Const =
+    fun ({X, List}) ->
+        case X of
+          {constant, Label} -> {{constant, Base}, List};
+          _ -> {X,List}
+        end
+    end,
+  Check_Type = 
+    fun ({X, List}) ->
+        case X of 
+            1 -> {X, lists:map(Check_Const, List)};
+            _ -> {X, List}
+          end
+    end,
+  lists:map(Check_Type, Refs).
+
 
 
 %% -------------------------------------------------------------------------
@@ -745,44 +834,44 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
   List = icode_multret(OrigList, Mod, Opts, Exports),
   {T1Compile,_} = erlang:statistics(runtime),
   CompiledCode =
-    case proplists:get_value(use_callgraph, Opts) of
-      true -> 
-	%% Compiling the functions bottom-up by using a call graph
-	CallGraph = hipe_icode_callgraph:construct(List),
-	OrdList = hipe_icode_callgraph:to_list(CallGraph),
-	finalize_fun(OrdList, Exports, Opts);
-      _ -> 
-	%% Compiling the functions bottom-up by reversing the list
-	OrdList = lists:reverse(List),
-	finalize_fun(OrdList, Exports, Opts)
-    end,
+  case proplists:get_value(use_callgraph, Opts) of
+    true -> 
+      %% Compiling the functions bottom-up by using a call graph
+      CallGraph = hipe_icode_callgraph:construct(List),
+      OrdList = hipe_icode_callgraph:to_list(CallGraph),
+      finalize_fun(OrdList, Exports, Opts);
+    _ -> 
+      %% Compiling the functions bottom-up by reversing the list
+      OrdList = lists:reverse(List),
+      finalize_fun(OrdList, Exports, Opts)
+  end,
   {T2Compile,_} = erlang:statistics(runtime),
   ?when_option(verbose, Opts,
-	       ?debug_msg("Compiled ~p in ~.2f s\n",
-			  [Mod,(T2Compile-T1Compile)/1000])),
+    ?debug_msg("Compiled ~p in ~.2f s\n",
+      [Mod,(T2Compile-T1Compile)/1000])),
   case proplists:get_bool(to_rtl, Opts) of
     true ->
       {ok, CompiledCode};
     false ->
       Closures =
-	[MFA || {MFA, Icode} <- List,
-		hipe_icode:icode_is_closure(Icode)],
+      [MFA || {MFA, Icode} <- List,
+        hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
       try assemble(CompiledCode, Closures, Exports, Opts) of
-	Bin ->
-	  {T2,_} = erlang:statistics(runtime),
-	  ?when_option(verbose, Opts,
-		       ?debug_untagged_msg(" in ~.2f s\n",
-					   [(T2-T1)/1000])),
-	  {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
-	  TargetArch = get(hipe_target_arch),
-	  {ok, {TargetArch,Bin}}
-      catch
-	error:Error ->
-	  {error,Error,erlang:get_stacktrace()}
-      end
-  end.
+        Bin ->
+          {T2,_} = erlang:statistics(runtime),
+          ?when_option(verbose, Opts,
+            ?debug_untagged_msg(" in ~.2f s\n",
+              [(T2-T1)/1000])),
+          {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
+          TargetArch = get(hipe_target_arch),
+          {ok, {TargetArch,Bin}}
+        catch
+          error:Error ->
+            {error,Error,erlang:get_stacktrace()}
+        end
+    end.
 
 finalize_fun(MfaIcodeList, Exports, Opts) ->
   case proplists:get_value(concurrent_comp, Opts) of
@@ -830,7 +919,7 @@ finalize_fun_concurrent(MfaIcodeList, Exports, Opts) ->
 	     set_architecture(Opts),
 	     pre_init(Opts),
 	     init(Opts),
-	     Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
+       Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
 	 end || IcodeFun <- MfaIcodeList],
       lists:foreach(fun (F) -> spawn_link(F) end, CompFuns),
       Final = [receive Res when element(1, Res) =:= MFA -> Res end
@@ -857,6 +946,9 @@ finalize_fun_sequential({MFA, Icode}, Opts, Servers) ->
       ?when_option(verbose, Opts,
 		   ?debug_msg("Compiled ~w in ~.2f s\n", [MFA,(T2-T1)/1000])),
       {MFA, Code};
+    %% LLVM:
+    {llvm_binary, Binary} ->
+      {MFA, Binary};
     {rtl, LinearRtl} ->
       {MFA, LinearRtl}
   catch
