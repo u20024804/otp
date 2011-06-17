@@ -33,9 +33,7 @@ rtl_to_native(RTL, _Options) ->
   %% Get relocation info and write to file for loader
   Relocs = elf64_format:get_call_list(ObjBin),
   %% Temporary code for creating references needed by  the loader
-  _Relocs = lists:filter(fun({A,B}) -> case A of [] -> false; _ -> true end end,
-        Relocs),
-  Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, _Relocs),
+  Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
   Is_mfa = 
     fun ({Function,_}) ->
       case Function of
@@ -51,6 +49,13 @@ rtl_to_native(RTL, _Options) ->
         _ -> false
       end
     end,
+  Is_closure =
+    fun ({A,_}) ->
+        case A of
+          {closure, _} -> true;
+          _ -> false
+        end
+    end,
   Is_atom = 
     fun ({A, _}) ->
       case A of
@@ -60,9 +65,12 @@ rtl_to_native(RTL, _Options) ->
     end,
   {MFAs, Rest} = lists:partition(Is_mfa, Relocs1),
   {Constants, Rest1} = lists:partition(Is_constant, Rest),
-  {Atoms1, BIFs} = lists:partition(Is_atom, Rest1),
+  {Closures, Rest2} = lists:partition(Is_closure, Rest1),
+  {Atoms1, BIFs} = lists:partition(Is_atom, Rest2),
   Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
-  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants}, {0, Atoms}],
+  io:format("Closures Found ~w", [Closures]),
+  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants},{1,Closures}, {0, Atoms}],
+  ok = file:write_file(Filename ++ "_relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
   ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
@@ -147,6 +155,7 @@ map_funs(Name, Dict) ->
     case dict:fetch("@"++Name, Dict) of
       {'constant', Label} -> {'constant', Label};
       {'atom', AtomName} -> {'atom', AtomName};
+      {closure, Closure} -> {closure, Closure};
       {BifName} -> map_bifs(BifName);
       {M,F,A} -> {M,map_bifs(F),A};
       _ -> exit({?MODULE,map_funs,"Unknown call"})
