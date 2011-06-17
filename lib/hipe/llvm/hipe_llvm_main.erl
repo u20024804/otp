@@ -10,7 +10,7 @@
 
 rtl_to_native(RTL, _Options) ->
   %% Get LLVM Instruction List
-  {LLVMCode, RefDict, ConstMap} = hipe_rtl2llvm:translate(RTL),
+  {LLVMCode, RefDict, ConstMap, ConstAlign, ConstSize} = hipe_rtl2llvm:translate(RTL),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
@@ -61,9 +61,6 @@ rtl_to_native(RTL, _Options) ->
   ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   %%--------------------------------------------------------------------------
   %% Create All Information needed by the hipe_unified_loader
-  %% Stadar Values for amd64 ??
-  ConstAlign = 8,
-  ConstSize = 0,
   %% No Labelmap Used yet..
   LabelMap = [],
   ExportMap = {0, Mod_Name, Fun_Name, Arity, IsClosure, IsLeaf},
