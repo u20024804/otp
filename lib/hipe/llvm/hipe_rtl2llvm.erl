@@ -81,7 +81,7 @@ translate(RTL) ->
   I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
   Fun_Declarations = lists:map(fun call_to_decl/1, lists:filter(fun (X) ->
-          string:substr(hipe_llvm:call_fnptrval(X),1,1) /= "%" end,  I2)),
+          string:substr(call_name(X),1,1) /= "%" end,  I2)),
   LLVM_Code3 = ClosureDecl++AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
@@ -196,14 +196,15 @@ call_to_dict(Elem, Dict) ->
     #llvm_invoke{} ->
       hipe_llvm:invoke_fnptrval(Elem)
   end,
-  case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
+  case re:run(Name, "@([a-zA-Z_0-9]*)\.([a-zA-Z_0-9]*)\.([a-zA-Z_0-9]*)",
       [global,{capture,all_but_first,list}]) of
     {match, [[BifName, [], []]]} -> 
       dict:store(Name, {erlang:list_to_atom(BifName)}, Dict);
     {match, [[M,F,A]]} -> 
       case M of
         "llvm" -> Dict;
-        _ -> dict:store(Name, {erlang:list_to_atom(M),
+        _ -> 
+          dict:store(Name, {erlang:list_to_atom(M),
                         erlang:list_to_atom(F),
                         erlang:list_to_integer(A)}, Dict)
                 end;
@@ -453,7 +454,7 @@ trans_call(I) ->
         TrueLabel = "LC"++mk_num(),
         FailLabel = mk_jump_label(FailLabelNum),
         I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
-          i64}", "@"++Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
+          i64}", Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
         I5 = hipe_llvm:mk_label(TrueLabel),
         [I5, I4]
     end,
@@ -927,6 +928,15 @@ is_call(I) ->
     _ -> false
   end.
 
+call_name(I) ->
+  case I of 
+    #llvm_call{} ->
+      hipe_llvm:call_fnptrval(I);
+    #llvm_invoke{} ->
+      hipe_llvm:invoke_fnptrval(I);
+    Other -> exit({?MODULE, call_name, {"Not a call", Other}})
+  end.
+
 is_external_call(I, M, F, A) -> 
   case I of
     #llvm_call{} -> 
@@ -1004,6 +1014,7 @@ store_call_regs(RegList, Name) ->
 
 fix_name(Name) ->
   case Name of
+    '+' -> unary_plus;
     '++' -> concat;
     Other -> Other
   end.
@@ -1011,9 +1022,9 @@ fix_name(Name) ->
 fix_closure_name(ClosureName) ->
   CN = atom_to_list(ClosureName),
   %% TODO: User regular expression
-  [Parent, "fun", Arity] = string:tokens(CN, "-"),
+  [Parent, Name, Arity] = string:tokens(CN, "-"),
   [ParentName, ParentArity] = string:tokens(Parent, "/"),
-  FCN = ParentName++"_"++ParentArity++"_"++"fun"++"_"++Arity,
+  FCN = ParentName++"_"++ParentArity++"_"++Name++"_"++Arity,
   list_to_atom(FCN).
 
 trans_mfa_name({M,F,A}) ->

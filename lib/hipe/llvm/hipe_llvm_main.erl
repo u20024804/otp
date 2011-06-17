@@ -15,13 +15,13 @@ rtl_to_native(RTL, _Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
   IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
-  {Mod_Name, Fun_Name, Arity} = 
+  {Mod_Name, FN, Arity} =  Fun,
+  Fun_Name =
   case IsClosure of
     false ->
-      Fun;
+      FN;
     true ->
-      {M, ClosureName, A} = Fun,
-      {M, hipe_rtl2llvm:fix_closure_name(ClosureName), A}
+      hipe_rtl2llvm:fix_closure_name(FN)
   end,
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
@@ -68,7 +68,6 @@ rtl_to_native(RTL, _Options) ->
   {Closures, Rest2} = lists:partition(Is_closure, Rest1),
   {Atoms1, BIFs} = lists:partition(Is_atom, Rest2),
   Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
-  io:format("Closures Found ~w", [Closures]),
   FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants},{1,Closures}, {0, Atoms}],
   ok = file:write_file(Filename ++ "_relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
@@ -78,7 +77,8 @@ rtl_to_native(RTL, _Options) ->
   %% Create All Information needed by the hipe_unified_loader
   %% No Labelmap Used yet..
   LabelMap = [],
-  ExportMap = {0, Mod_Name, Fun_Name, Arity, IsClosure, IsLeaf},
+  %% As Fun Name we must pass the original name
+  ExportMap = {0, Mod_Name, FN, Arity, IsClosure, IsLeaf},
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
   Refs = FinalRelocs, 
@@ -158,7 +158,7 @@ map_funs(Name, Dict) ->
       {closure, Closure} -> {closure, Closure};
       {BifName} -> map_bifs(BifName);
       {M,F,A} -> {M,map_bifs(F),A};
-      _ -> exit({?MODULE,map_funs,"Unknown call"})
+      Other -> exit({?MODULE,map_funs,{"Unknown call", Other}})
     end.
 
 %% Ugly..Just for testing reasons
