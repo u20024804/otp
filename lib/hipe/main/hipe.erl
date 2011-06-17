@@ -755,7 +755,7 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
       finalize_fun(OrdList, Exports, Opts)
   end,
   {_, Bin1} = lists:unzip(Bin),
-  FinalBin = fix_llvm_binary(Bin1), 
+  FinalBin = fix_llvm_binary(Bin1, Closures, Exports), 
   {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
   TargetArch = get(hipe_target_arch),
   {ok, {TargetArch, FinalBin}}.
@@ -763,15 +763,23 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
 %% Convert term to binary as expected by the the hipe_unified_loader.
 %% Also In a case where more than one functions are compiled(whole module
 %% compilation or closures), we must pack them all to one term.
-fix_llvm_binary(Bin) ->
-  {CodeSize, ExportMap, Refs, CodeBinary, ConstMap, ConstSize} = merge(Bin),
+fix_llvm_binary(Bin, Closures, Exports) ->
+  {CodeSize, ExportMap1, Refs, CodeBinary, ConstMap, ConstSize} = merge(Bin),
   [FirstMFA| _] = Bin,
+  ExportMap = fix_exportmap(ExportMap1, Closures, Exports),
   [{Version, CheckSum}, ConstAlign, _, _, LabelMap, _, _, _, _, _, _] =
   FirstMFA,
   term_to_binary(
     [{Version, CheckSum}, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
       CodeSize, CodeBinary, Refs, 0,  []]
   ).
+
+fix_exportmap([Addr,M,F,A, IC, IL|Rest], Closures, Exports) ->
+  IsClosure = lists:member({M,F,A}, Closures),
+  IsExported = is_exported(F, A, Exports),
+  [Addr,M,F,A,IsClosure,IsExported | fix_exportmap(Rest, Closures, Exports)];
+fix_exportmap([],_,_) -> [].
+is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
 
 merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0, 0).
 merge([
