@@ -50,7 +50,6 @@ translate(RTL) ->
   %% Create constant map and write it to file for loader
   {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
-  io:format("Const Size is ~w~n", [ConstSize]),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:ukeysort(1, find_constants(SC)),
@@ -66,25 +65,63 @@ translate(RTL) ->
   ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
+  %% Extract closures from RTL Code(remove duplicates)
+  Closures = find_closures(Code),
+  %% Create code to declare closures
+  ClosureDecl = lists:map(fun declare_closure/1, Closures),
+  %% Create code to create local name for closures
+  ClosureLoad = lists:map(fun load_closure/1, Closures),
   LLVM_Code = translate_instr_list(Code, []),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, AtomLoad++ConstLoad, IsClosure),
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ClosureLoad++AtomLoad++ConstLoad,
+    IsClosure),
   %% Find function calls in code
   Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
         atom_to_list(Fun_Name), integer_to_list(Arity)) end,
   I1 = lists:filter(fun is_call/1, LLVM_Code),
   I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
-  Fun_Declarations = lists:map(fun call_to_decl/1, I2),
-  LLVM_Code3 = AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
+  Fun_Declarations = lists:map(fun call_to_decl/1, lists:filter(fun (X) ->
+          string:substr(hipe_llvm:call_fnptrval(X),1,1) /= "%" end,  I2)),
+  LLVM_Code3 = ClosureDecl++AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
   CallDict = dict:new(),
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
   CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
   CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
   %% Temporary Store inc_stack to Dictionary
   CallDict5 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict4),
-  {LLVM_Code3, CallDict5, SC, ConstAlign, ConstSize}.
+  CallDict6 = lists:foldl(fun closure_to_dict/2, CallDict5, Closures),
+  {LLVM_Code3, CallDict6, SC, ConstAlign, ConstSize}.
 
 %%-----------------------------------------------------------------------------
+
+%% Extract Closures from RTL CODE
+find_closures(Code) -> find_closures(Code, []).
+find_closures([], Closures) -> Closures;
+find_closures([I|Is], Closures) ->
+    case I of
+      #load_address{} ->
+        case hipe_rtl:load_address_type(I) of
+          closure -> 
+            Closure  = hipe_rtl:load_address_addr(I),
+            find_closures(Is, [Closure | Closures]);
+          _ -> find_closures(Is, Closures)
+        end;
+        _ -> find_closures(Is, Closures)
+      end.
+
+declare_closure({{_, ClosureName, _}, _, _})->
+  FixedName = "@"++atom_to_list(fix_closure_name(ClosureName)),
+  hipe_llvm:mk_const_decl(FixedName, "external constant", "i8", "").
+
+load_closure({{_, ClosureName, _}, _, _})->
+  FixedName = atom_to_list(fix_closure_name(ClosureName)),
+  Dst = "%"++FixedName++"_var",
+  Name = "@"++FixedName,
+  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
+
+closure_to_dict({{_, ClosureName, _}, _, _}=Closure, Dict)->
+  FixedName = "@"++atom_to_list(fix_closure_name(ClosureName)),
+  dict:store(FixedName, {closure, Closure}, Dict).
 
 %% Extract Atoms from RTL Code
 find_atoms(Code) -> find_atoms(Code, []).
@@ -172,7 +209,11 @@ call_to_dict(Elem, Dict) ->
                 end;
     {match, _} -> Dict;
     nomatch -> 
+      case string:substr(Name,1,1) of
+      "%" -> Dict;
+          _ ->
       exit({?MODULE, call_to_dict, {"Unknown call",Name}})
+  end
   end.
 
 translate_instr_list([], Acc) -> 
@@ -384,9 +425,9 @@ trans_call(I) ->
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
   FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
   {Name, I2} = case hipe_rtl:call_fun(I) of
-    PrimOp when is_atom(PrimOp) -> {trans_prim_op(PrimOp), []};
+    PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      {trans_mfa_name({M,F,A}), []};
+      {"@"++trans_mfa_name({M,F,A}), []};
  		Reg ->
       case hipe_rtl:is_reg(Reg) of
         true -> 
@@ -406,7 +447,7 @@ trans_call(I) ->
   I3 = case hipe_rtl:call_fail(I) of
     %% Normal Call
     [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
-        i64}", "@"++Name, FinalArgs, []);
+        i64}", Name, FinalArgs, []);
     %% Call With Exception
     FailLabelNum -> 
         TrueLabel = "LC"++mk_num(),
