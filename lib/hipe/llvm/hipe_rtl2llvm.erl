@@ -383,15 +383,27 @@ trans_call(I) ->
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
   FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
-  Name = case hipe_rtl:call_fun(I) of
-    PrimOp when is_atom(PrimOp) -> trans_prim_op(PrimOp);
+  {Name, I2} = case hipe_rtl:call_fun(I) of
+    PrimOp when is_atom(PrimOp) -> {trans_prim_op(PrimOp), []};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      trans_mfa_name({M,F,A});
+      {trans_mfa_name({M,F,A}), []};
+ 		Reg ->
+      case hipe_rtl:is_reg(Reg) of
+        true -> 
+          TT1 = mk_temp(),
+          II1 = hipe_llvm:mk_conversion(TT1, inttoptr, "i64", trans_src(Reg),
+            "i64*"),
+          TT2 = mk_temp(),
+          II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
+            "{i64,i64,i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
+          {TT2, [II2, II1]};
+        false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
+      end;
     Other -> exit({?MODULE, trans_call, {"Unimplented Call", Other}})
   end,
   T1 = mk_temp(),
   %% TODO: Fix return type of calls
-  I2 = case hipe_rtl:call_fail(I) of
+  I3 = case hipe_rtl:call_fail(I) of
     %% Normal Call
     [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
         i64}", "@"++Name, FinalArgs, []);
@@ -399,23 +411,28 @@ trans_call(I) ->
     FailLabelNum -> 
         TrueLabel = "LC"++mk_num(),
         FailLabel = mk_jump_label(FailLabelNum),
-        I3 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
+        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
           i64}", "@"++Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
-        I4 = hipe_llvm:mk_label(TrueLabel),
-        [I4, I3]
+        I5 = hipe_llvm:mk_label(TrueLabel),
+        [I5, I4]
     end,
-    I5 = store_call_regs(FixedRegs, T1),
-    I6 = case hipe_rtl:call_dstlist(I) of
+    I6 = store_call_regs(FixedRegs, T1),
+    I7 = case hipe_rtl:call_dstlist(I) of
       [] -> [];
       [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
           i64}", T1, "5", [])
     end,
-    I7 = case hipe_rtl:call_continuation(I) of
+    I8 = case hipe_rtl:call_continuation(I) of
       [] -> [];
       CC -> trans_goto(hipe_rtl:mk_goto(CC))
     end,
-    [I7, I6, I5, I2, I1].
+    [I8, I7, I6, I3, I2, I1].
 
+args_to_type(Args) -> 
+  Args1 = lists:map(fun (A) -> "i64" end, Args),
+  Args2 = lists:foldl(fun (A,B) -> A++","++B end, "", Args1),
+  {Args3,_} =lists:split(erlang:length(Args2)-1, Args2),
+  Args3.
 
 %%
 %% trans_comment
@@ -683,8 +700,12 @@ trans_load_address(I) ->
   end,
   Addr = case hipe_rtl:load_address_type(I) of
     constant -> "%DL"++integer_to_list(_Addr)++"_var";
-    _ -> exit({?MODULE,trans_load_address, "Type not implemented in
-          load_address"})
+    closure  -> 
+      {Closure, _, _} = _Addr,
+      {_, ClosureName, _} = Closure,
+      "%"++atom_to_list(fix_closure_name(ClosureName))++"_var";
+    type -> exit({?MODULE,trans_load_address, {"Type not implemented in
+          load_address", _Addr}})
       end,
   Type = "i64",
   I1 = hipe_llvm:mk_select(Dst, true, Type, Addr, Type, "undef"),
