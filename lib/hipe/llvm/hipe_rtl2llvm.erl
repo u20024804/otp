@@ -145,10 +145,10 @@ atom_to_dict(Atom, Dict) ->
   Name = "@"++atom_to_list(Atom),
   dict:store(Name, {'atom', Atom}, Dict).
 
-      
 %% Extract Label and Type of Constants from ConstMap
 %% Type is needed to distinquish between float constants
 %% as they have different semantics.
+%% TODO:: Type of consts are no longed needed. Remove Them!
 find_constants(ConstMap) -> find_constants(ConstMap, []).
 find_constants([], LabelsAndTypes) -> LabelsAndTypes;
 find_constants([Label, _, _, Const| Rest], LabelsTypes) -> 
@@ -171,17 +171,7 @@ declare_constant({Label, _Type}) ->
 load_constant({Label, Type}) ->
   Dst = "%DL"++integer_to_list(Label)++"_var",
   Name = "@DL"++integer_to_list(Label),
-  case Type of
-    i64 -> hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64");
-    double -> 
-      T1 = mk_temp(),
-      I1 = hipe_llvm:mk_getelementptr(T1, "i8", Name, [{"i8", "6"}],false),
-      T2 = mk_temp(),
-      I2 = hipe_llvm:mk_conversion(T2, bitcast, "i8*", T1, "double*"),
-      I3 = hipe_llvm:mk_load(Dst, "double", T2, [], [], false),
-      [I1, I2, I3];
-    Other -> exit({?MODULE, load_constant, {"Wrong Constant Type", Other}})
-  end.
+  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
 
 
 %% Store external constants and calls to dictionary
@@ -514,7 +504,7 @@ trans_fconv(I) ->
     true -> 
       fix_reg_src(_Src);
     false ->
-      {trans_src(_Src), []}
+      trans_float_src(_Src)
   end,
   I2 = hipe_llvm:mk_sitofp(Dst, "i64", Src, "double"),
   [I2, I1].
@@ -552,14 +542,14 @@ trans_fload(I) ->
     true -> 
       fix_reg_src(_Src);
     false ->
-      {trans_src(_Src), []}
+      trans_float_src(_Src)
   end,
   {Offset, I2} = 
   case isPrecoloured(_Offset) of
     true -> 
       fix_reg_src(_Offset);
     false ->
-      {trans_src(_Offset), []}
+      trans_float_src(_Offset)
   end,
   T1 = mk_temp(),
   I3 = hipe_llvm:mk_operation(T1, add, "i64", Src, Offset, []),
@@ -583,7 +573,7 @@ trans_fmove(I) ->
     true -> 
       fix_reg_src(_Src);
     false ->
-      {trans_src(_Src), []}
+      trans_float_src(_Src)
   end,
   I2 = hipe_llvm:mk_select(Dst, "true", "double", Src, "double", "undef"),
   I3 = case isPrecoloured(_Dst) of 
@@ -613,14 +603,14 @@ trans_fp(I) ->
     true -> 
       fix_reg_src(_Src1);
     false ->
-      {trans_src(_Src1), []}
+      trans_float_src(_Src1)
   end,
   {Src2, I2} = 
   case isPrecoloured(_Src2) of
     true -> 
       fix_reg_src(_Src2);
     false ->
-      {trans_src(_Src2), []}
+      trans_float_src(_Src2)
   end,
   Type = "double",
   Op =  trans_fp_op(hipe_rtl:fp_op(I)),
@@ -783,14 +773,7 @@ trans_move(I) ->
     true -> 
       fix_reg_src(_Src);
     false ->
-      case hipe_rtl:is_const_label(_Src) of
-        true -> 
-          T1 = mk_temp(),
-          {T1, hipe_llvm:mk_ptrtoint(T1, "i8",
-              "@DL"++integer_to_list(hipe_rtl:const_label_label(_Src)), "i64")};
-        false ->
-          {trans_src(_Src), []}
-      end
+      {trans_src(_Src), []}
   end,
   I2 = hipe_llvm:mk_select(Dst, "true", "i64", Src, "i64", "undef"),
   I3 = case isPrecoloured(_Dst) of 
@@ -1053,6 +1036,21 @@ mk_hp() ->
   "%hp_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
 mk_hp(N) ->
   "%hp_var_" ++ integer_to_list(N).
+
+trans_float_src(Src) -> 
+  case hipe_rtl:is_const_label(Src) of
+    true ->
+      Name = "@DL"++integer_to_list(hipe_rtl:const_label_label(Src)),
+      T1 = mk_temp(),
+      I1 = hipe_llvm:mk_getelementptr(T1, "i8", Name, [{"i8", "6"}],false),
+      T2 = mk_temp(),
+      I2 = hipe_llvm:mk_conversion(T2, bitcast, "i8*", T1, "double*"),
+      T3 = mk_temp(),
+      I3 = hipe_llvm:mk_load(T3, "double", T2, [], [], false),
+      {T3, [I1, I2, I3]};
+    false -> {trans_src(Src), []}
+  end.
+
 
 %% Translate source and destination arguments
 trans_src(A) ->
