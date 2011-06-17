@@ -764,28 +764,28 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
 %% Also In a case where more than one functions are compiled(whole module
 %% compilation or closures), we must pack them all to one term.
 fix_llvm_binary(Bin) ->
-  {CodeSize, ExportMap, Refs, CodeBinary, ConstMap} = merge(Bin),
+  {CodeSize, ExportMap, Refs, CodeBinary, ConstMap, ConstSize} = merge(Bin),
   [FirstMFA| _] = Bin,
-  [{Version, CheckSum}, ConstAlign, ConstSize, _, LabelMap, _, _, _, _, _, _] =
+  [{Version, CheckSum}, ConstAlign, _, _, LabelMap, _, _, _, _, _, _] =
   FirstMFA,
   term_to_binary(
     [{Version, CheckSum}, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
       CodeSize, CodeBinary, Refs, 0,  []]
   ).
 
-merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0).
+merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0, 0).
 merge([
-    [_, _, _, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
+    [_, _, ConstSize1, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
     | Rest], 
-  Size,  ExportMap, Refs, Code, ConstMap, Base) ->
+  Size,  ExportMap, Refs, Code, ConstMap, Base, ConstSize) ->
   NewRefs = add_offset_to_relocs(Refs1, Size),
   {NewConstmap, NewRefs2, NewBase} = fix_constmap(MFAConstMap, NewRefs, Base,
     []),
   merge(Rest, Size+CodeSize, [[Size, M, F, A, IC, IL]|ExportMap],
     NewRefs2++Refs, <<Code/binary, Code1/binary>>, NewConstmap++ConstMap,
-    NewBase);
-merge([], Size, ExportMap, Refs, Code, ConstMap, Base) -> {Size, lists:flatten(ExportMap),
-    Refs, Code, ConstMap}.
+    NewBase, erlang:max(ConstSize1, ConstSize));
+merge([], Size, ExportMap, Refs, Code, ConstMap, Base, ConstSize) -> {Size, lists:flatten(ExportMap),
+    Refs, Code, ConstMap, ConstSize}.
 
 
 fix_constmap([Label, A, B, Const | Rest], Refs, Base, ConstMap) -> 

@@ -43,6 +43,7 @@ translate(RTL) ->
   %% Create constant map and write it to file for loader
   {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
+  io:format("Const Size is ~w~n", [ConstSize]),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:ukeysort(1, find_constants(SC)),
@@ -74,7 +75,7 @@ translate(RTL) ->
   CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
   %% Temporary Store inc_stack to Dictionary
   CallDict5 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict4),
-  {LLVM_Code3, CallDict5, SC}.
+  {LLVM_Code3, CallDict5, SC, ConstAlign, ConstSize}.
 
 %%-----------------------------------------------------------------------------
 
