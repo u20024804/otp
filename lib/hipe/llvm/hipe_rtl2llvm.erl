@@ -5,7 +5,7 @@
 -include("../rtl/hipe_rtl.hrl").
 -include("hipe_llvm.hrl").
 -include("../rtl/hipe_literals.hrl").
--export([translate/1]).
+-export([translate/1,fix_closure_name/1]).
 
 -define(HP, "hp").
 -define(P, "p").
@@ -32,10 +32,17 @@ translate(RTL) ->
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
   %% To be used later
-  _IsClosure = hipe_rtl:rtl_is_closure(RTL),
+  IsClosure = hipe_rtl:rtl_is_closure(RTL),
   _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
 %  io:format("Geia sou llvm!~n"),
-  {Mod_Name, Fun_Name, Arity} = Fun,
+  {Mod_Name, Fun_Name, Arity} = 
+  case IsClosure of
+    false ->
+      Fun;
+    true ->
+      {M, Closure_Name, A} = Fun,
+      {M, fix_closure_name(Closure_Name), A}
+  end,
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -60,7 +67,7 @@ translate(RTL) ->
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   LLVM_Code = translate_instr_list(Code, []),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, AtomLoad++ConstLoad),
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, AtomLoad++ConstLoad, IsClosure),
   %% Find function calls in code
   Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
         atom_to_list(Fun_Name), integer_to_list(Arity)) end,
@@ -939,6 +946,14 @@ fix_name(Name) ->
     Other -> Other
   end.
 
+fix_closure_name(ClosureName) ->
+  CN = atom_to_list(ClosureName),
+  %% TODO: User regular expression
+  [Parent, "fun", Arity] = string:tokens(CN, "-"),
+  [ParentName, ParentArity] = string:tokens(Parent, "/"),
+  FCN = ParentName++"_"++ParentArity++"_"++"fun"++"_"++Arity,
+  list_to_atom(FCN).
+
 trans_mfa_name({M,F,A}) ->
   atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A).
 
@@ -1133,10 +1148,14 @@ arg_type(A) ->
 
 %% Create Header for Function 
 
-create_header(Name, Params, Code, ConstLoad) ->
+create_header(Name, Params, Code, ConstLoad, IsClosure) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
-  {Mod_Name,Fun_Name,Arity} = Name,
+  {Mod_Name,FN,Arity} = Name,
+  Fun_Name = case IsClosure of 
+    true -> fix_closure_name(FN);
+    false -> FN
+  end,
   N = atom_to_list(Mod_Name) ++ "." ++ atom_to_list(Fun_Name) ++ "." ++
   integer_to_list(Arity),
 

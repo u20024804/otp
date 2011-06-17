@@ -15,7 +15,14 @@ rtl_to_native(RTL, _Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
   IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
-  {Mod_Name, Fun_Name, Arity} = Fun,
+  {Mod_Name, Fun_Name, Arity} = 
+  case IsClosure of
+    false ->
+      Fun;
+    true ->
+      {M, ClosureName, A} = Fun,
+      {M, hipe_rtl2llvm:fix_closure_name(ClosureName), A}
+  end,
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
