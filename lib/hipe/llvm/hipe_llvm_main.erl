@@ -81,7 +81,13 @@ rtl_to_native(RTL, _Options) ->
   ExportMap = {0, Mod_Name, FN, Arity, IsClosure, IsLeaf},
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
-  Refs = FinalRelocs, 
+  Refs = lists:filter(
+        fun ({_, X}) -> 
+            case X of [] -> false;
+                _ -> true 
+              end 
+        end,
+      FinalRelocs), 
   [{?VERSION_STRING(),?HIPE_SYSTEM_CRC},
    ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
    CodeSize,  CodeBinary,  Refs,
