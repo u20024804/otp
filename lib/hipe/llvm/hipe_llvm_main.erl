@@ -169,6 +169,7 @@ map_bifs(Name) ->
     bif_mul -> '*';
     bif_div -> 'div';
     concat -> '++';
+    unary_plus -> '+';
     Other -> Other
   end.
 
