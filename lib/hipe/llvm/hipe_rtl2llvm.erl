@@ -73,7 +73,6 @@ translate(RTL) ->
   ClosureLoad = lists:map(fun load_closure/1, Closures),
   Code2 = fix_invoke_calls(Code),
   LLVM_Code = translate_instr_list(Code2, []),
-  LLVM_Code = translate_instr_list(Code, []),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ClosureLoad++AtomLoad++ConstLoad,
     IsClosure),
   %% Find function calls in code
@@ -232,7 +231,7 @@ translate_instr(I) ->
     #fload{} -> trans_fload(I);
     #fmove{} -> trans_fmove(I);
     #fp{} -> trans_fp(I);
-    %#fp_unop{} -> ok;
+    #fp_unop{} -> trans_fp_unop(I);
     #fstore{} -> trans_fstore(I);
     #gctest{} -> trans_gctest(I);
     #goto{} -> trans_goto(I);
@@ -625,6 +624,45 @@ trans_fp(I) ->
     false -> []
   end,
   [I4, I3, I2, I1].
+
+%%
+%% fp_unop
+%%
+trans_fp_unop(I) ->
+  _Dst = hipe_rtl:fp_unop_dst(I),
+  _Src = hipe_rtl:fp_unop_src(I),
+  % Destination is a register and not in SSA Form..
+  Dst = case isPrecoloured(_Dst) of
+    true -> mk_temp();
+    false -> trans_dst(_Dst)
+  end,
+  {Src, I1} = 
+  case isPrecoloured(_Src) of
+    true -> 
+      fix_reg_src(_Src);
+    false ->
+      trans_float_src(_Src)
+  end,
+  Type = "double",
+  Op =  trans_fp_op(hipe_rtl:fp_unop_op(I)),
+  I2 = hipe_llvm:mk_operation(Dst, Op, Type, "0.0", Src, []),
+  I3 = case isPrecoloured(_Dst) of 
+    true -> 
+      {Dst2, Ins} = fix_reg_dst(_Dst),
+      Ins2 = hipe_llvm:mk_store(Type, Dst, "i64", Dst2, [], [], false),
+      [Ins2, Ins];
+    false -> []
+  end,
+  [I3, I2, I1].
+%% TODO: Fix fp_unop in a way like the following. You must change trans_dest,
+%% in order to call float_to_list in a case of float constant. Maybe the type
+%% check is expensive...
+% Dst = hipe_rtl:fp_unop_dst(I),
+% Src = hipe_rtl:fp_unop_src(I),
+% Op = hipe_rtl:fp_unop_op(I),
+% Zero = hipe_rtl:mk_imm(0.0),
+% I1 = hipe_rtl:mk_fp(Dst, Zero, Op, Src),
+% trans_fp(I1).
 
 %%
 %% fstore
@@ -1090,7 +1128,7 @@ trans_float_src(Src) ->
       I2 = hipe_llvm:mk_conversion(T2, bitcast, "i8*", T1, "double*"),
       T3 = mk_temp(),
       I3 = hipe_llvm:mk_load(T3, "double", T2, [], [], false),
-      {T3, [I1, I2, I3]};
+      {T3, [I3, I2, I1]};
     false -> {trans_src(Src), []}
   end.
 
@@ -1189,6 +1227,7 @@ trans_fp_op(Op) ->
     fsub -> fsub;
     fdiv -> fdiv;
     fmul -> fmul;
+    fchs -> fsub;
     Other -> exit({?MODULE, trans_fp_op, {"Unknown RTL float Operator",Other}})
   end.
 
