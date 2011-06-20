@@ -52,7 +52,7 @@ translate(RTL) ->
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
-  ConstLabels = lists:ukeysort(1, find_constants(SC)),
+  ConstLabels = lists:usort(find_constants(SC)),
   %% io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
   %% Extract atoms from RTL Code(remove duplicates)
   Atoms = lists:usort(find_atoms(Code)),
@@ -146,37 +146,31 @@ atom_to_dict(Atom, Dict) ->
   Name = "@"++atom_to_list(Atom),
   dict:store(Name, {'atom', Atom}, Dict).
 
-%% Extract Label and Type of Constants from ConstMap
-%% Type is needed to distinquish between float constants
-%% as they have different semantics.
-%% TODO:: Type of consts are no longed needed. Remove Them!
+%% Extract Type of Constants from ConstMap
 find_constants(ConstMap) -> find_constants(ConstMap, []).
-find_constants([], LabelsAndTypes) -> LabelsAndTypes;
-find_constants([Label, _, _, Const| Rest], LabelsTypes) -> 
-  case is_float(Const) of
-    true -> find_constants(Rest, [{Label, double} | LabelsTypes]);
-    false -> find_constants(Rest, [{Label, i64} | LabelsTypes])
-  end.
+find_constants([], LabelAcc) -> LabelAcc;
+find_constants([Label, _, _, _| Rest], LabelAcc) -> 
+  find_constants(Rest, [Label| LabelAcc]).
 
 %% Declare an External Consant. We declare all constants as i8 
 %% in order to be able to calcucate pointers of the form DL+6, with
 %% the getelementptr instruction. Otherwise we have to convert constants form 
 %% pointers to values, add the offset and convert them again to pointers
-declare_constant({Label, _Type}) -> 
+declare_constant(Label) -> 
   Name = "@DL"++integer_to_list(Label),
   hipe_llvm:mk_const_decl(Name, "external constant", "i8", "").
 
 %% Loading of a constant depends on it's type. Float constants are loaded
 %% to double (with offset 6?), and all other constants are converted from
 %% pointers to 64 integers.
-load_constant({Label, Type}) ->
+load_constant(Label) ->
   Dst = "%DL"++integer_to_list(Label)++"_var",
   Name = "@DL"++integer_to_list(Label),
   hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
 
 
 %% Store external constants and calls to dictionary
-const_to_dict({Elem, _Type}, Dict) ->
+const_to_dict(Elem, Dict) ->
   Name = "@DL"++integer_to_list(Elem),
   dict:store(Name, {'constant', Elem}, Dict).
 
@@ -947,24 +941,22 @@ trans_switch(I) ->
 %% continuation label to go with the LLVM's invoke instruction. Also all phi
 %% nodes that are correlated with the block that holds tha call instruction
 %% must be updated
-fix_invoke_calls(Code) -> fix_invoke_calls(Code, []).
-fix_invoke_calls([], Acc) -> lists:reverse(Acc);
-fix_invoke_calls([I|Is], Acc) ->
+fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], []).
+fix_invoke_calls([], Acc, SubstMap) -> 
+  Update = fun (X) -> update_phi_nodes(X, SubstMap) end,
+  lists:reverse(lists:map(Update, Acc));
+fix_invoke_calls([I|Is], Acc, SubstMap) ->
   case I of 
     #call{} ->
       case hipe_rtl:call_fail(I) of
-        [] -> fix_invoke_calls(Is, [I|Acc]);
+        [] -> fix_invoke_calls(Is, [I|Acc], SubstMap);
         _Label ->
           OldLabel = find_first_label(Acc),
           NewLabel = 9999999999 - hipe_gensym:new_label(rtl),
           NewCall =  hipe_rtl:call_normal_update(I, NewLabel),
-          Update = fun (X) -> update_phi_nodes(X, {OldLabel, NewLabel}) end,
-          NewIs = lists:map(Update, Is),
-          NewAcc = lists:map(Update, Acc),
-          fix_invoke_calls(NewIs,
-            [NewCall | NewAcc])
+          fix_invoke_calls(Is, [NewCall|Acc], [{OldLabel, NewLabel}|SubstMap])
       end;
-    _ -> fix_invoke_calls(Is, [I|Acc])
+    _ -> fix_invoke_calls(Is, [I|Acc], SubstMap)
   end.
 
 find_first_label([]) -> exit({?MODULE, find_first_label, "No label found"});
@@ -974,11 +966,16 @@ find_first_label([I|Is]) ->
     Other -> find_first_label(Is)
   end.
 
-update_phi_nodes(I, {OldPred, NewPred}) ->
+update_phi_nodes(I, SubstMap) ->
   case I of
-    #phi{} -> hipe_rtl:phi_redirect_pred(I, OldPred, NewPred);
+    #phi{} -> update_phi_node(I, SubstMap);
     _ -> I
   end.
+
+update_phi_node(I, []) -> I;
+update_phi_node(I, [{OldPred, NewPred} | SubstMap]) ->
+  I1 = hipe_rtl:phi_redirect_pred(I, OldPred, NewPred),
+  update_phi_node(I1, SubstMap).
 
 %%----------------------------------------------------------------------------
 
