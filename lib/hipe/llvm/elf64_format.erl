@@ -1,6 +1,6 @@
 %% -*- erlang-indent-level: 2 -*-
 %%% Copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
-%%% Chris Stavrakakis <hydralisk.r@gmail.com>
+%%%                     Chris Stavrakakis <hydralisk.r@gmail.com>
 %%%
 %%% This file is part of elf64_format.
 %%%
@@ -15,18 +15,18 @@
 %%% GNU General Public License for more details.
 %%%
 %%% You should have received a copy of the GNU General Public License
-%%% along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+%%% along with elf64_format.  If not, see <http://www.gnu.org/licenses/>.
 
 %%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
-%%% Chris Stavrakakis <hydralisk.r@gmail.com>
+%%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
 %%% @version {@version}
 %%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
 
 %%% @doc This module contains functions for extracting various information from
-%%% an ELF-64 formated Object file. To fully understand the ELF-64 format and 
-%%% the use of these functions please read 
-%%% "[http://www.linuxjournal.com/article/1060?page=0,0]" carefully. I warned 
-%%% you! :)
+%%%      an ELF-64 formated Object file. To fully understand the ELF-64 format
+%%%      and the use of these functions please read 
+%%%      "[http://www.linuxjournal.com/article/1060?page=0,0]" carefully. I
+%%%      warned you! :)
 -module(elf64_format).
 
 -export([
@@ -34,6 +34,9 @@
 	 open_object_file/1, 
 	 get_binary_segment/2,
 	 extract_segment_by_name/2,
+	 get_field/2,
+	 flatten_list/1,
+	 leb128_decode/1,
 	 %%
 	 %% Extract information from ELF-64 Object File Format
 	 %%
@@ -57,8 +60,14 @@
 	 get_rela_entry/3,
 	 get_rela_entry_field/2,
 	 get_call_list/1,
+	 %% Note
+	 extract_note/2,
 	 %% Executable code
-	 extract_text/1
+	 extract_text/1,
+	 %% GCC Exception Table
+	 extract_gcc_exn_table/1,
+	 get_gcc_exn_table_info/1,
+	 get_exn_labels/1
 	]).
 
 -include("elf64_format.hrl").
@@ -81,16 +90,16 @@ open_object_file(ObjFile) ->
 
 
 %% @spec get_binary_segment( binary(), {integer(), integer()} ) -> binary()
-%% @doc Returns the binary segment starting at Offset with length Size (bytes)
-%%      from a binary file. If Offset is bigger than the byte size of the ELF-64
-%%      binary, an empty binary is returned.
+%% @doc Returns the binary segment starting at `Offset' with length `Size' 
+%%      (bytes) from a binary file. If `Offset' is bigger than the byte size of
+%%      the binary, an empty binary is returned.
 
 -spec get_binary_segment( binary(), {integer(), integer()} ) -> binary().
-get_binary_segment(Elf, {Offset, _Size}) when Offset > byte_size(Elf) ->
+get_binary_segment(Bin, {Offset, _Size}) when Offset > byte_size(Bin) ->
   <<>>;
-get_binary_segment(Elf, {Offset, Size}) ->
-  <<_Hdr:Offset/binary, Bin:Size/binary, _More/binary>> = Elf,
-  Bin.
+get_binary_segment(Bin, {Offset, Size}) ->
+  <<_Hdr:Offset/binary, BinSeg:Size/binary, _More/binary>> = Bin,
+  BinSeg.
 
 
 %% @spec extract_segment_by_name( binary(), string() ) -> binary()
@@ -128,10 +137,10 @@ extract_header(Elf) ->
 %% @spec get_header_field( binary(), {integer(), integer()} ) -> 
 %%                           binary() | integer()
 %% @doc Extracts information from an ELF-64 File Header. This function takes
-%%      as arguments: a FileHeader binary and a tuple of {Size, Offset} (see 
-%%      elf64_format.hrl for very handy macros!) and returns a <b>binary</b> when
-%%      e_ident information is requested or else an <b>integer</b> with the value
-%%      of the field.
+%%      as arguments: a `FileHeader' binary and a tuple of {`Size', `Offset'}
+%%      (see  elf64_format.hrl for very handy macros!) and returns a
+%%      <b>binary</b> when e_ident information is requested or else an
+%%      <b>integer</b> with the value of the field.
 
 -spec get_header_field( binary(), {integer(), integer()} ) -> 
 			  binary() | integer().
@@ -164,9 +173,9 @@ extract_shdrtab(Elf) ->
 
 %% @spec get_shdrtab_entry( binary(), integer(), integer() ) -> binary()
 %% @doc Extracts a specific Entry of a Section Header Table. This function
-%%      takes as argument the Section Header Table (SHdrTab) and the size of an
-%%      entry (EntrySize) along with the entry's serial number (EntryNum) and 
-%%      returns the entry in binary.  
+%%      takes as argument the Section Header Table (`SHdrTab') and the size of
+%%      an entry (`EntrySize') along with the entry's serial number (`EntryNum')
+%%      and returns the entry in binary.  
 
 -spec get_shdrtab_entry( binary(), integer(), integer() ) -> binary().
 get_shdrtab_entry(SHdrTab, EntrySize, EntryNum) -> 
@@ -216,10 +225,11 @@ get_shdrtab_entry_by_name(SHdrTable, Shnum, ShStr, EntryName, Index) ->
   end.
 
   
-%% @spec get_shdrtab_entry_field( binary(), {integer(), integer()} ) -> integer()
+%% @spec get_shdrtab_entry_field( binary(), {integer(), integer()} ) -> 
+%%                integer()
 %% @doc Extracts information from a Section entry of a Section Entry Table. The
-%%      function takes as arguments the Section Header Table (SHdrTab) and a 
-%%      tuple of {Offset, Size} of the wanted field (see elf64_format.hrl for 
+%%      function takes as arguments the Section Header Table (`SHdrTab') and a 
+%%      tuple of `{Offset, Size}' of the wanted field (see elf64_format.hrl for 
 %%      very very very useful macros!).
 
 -spec get_shdrtab_entry_field( binary(), {integer(), integer()} ) -> integer().
@@ -231,7 +241,6 @@ get_shdrtab_entry_field(SHdrEntry, {FieldOffset, FieldSize}) ->
 %% Functions to manipulate Symbol Table
 %%------------------------------------------------------------------------------
 
-
 %% @spec extract_symtab( binary() ) -> binary()
 %% @doc Function that extracts Symbol Table from an ELF-64 Object file.
 
@@ -242,7 +251,7 @@ extract_symtab(Elf) ->
 
 %% @spec get_symtab_entry( binary(), integer(), integer() ) -> binary()
 %% @doc Extracts a specific entry from the Symbol Table (as binary). This 
-%%      function takes as arguments the Symbol Table (SymTab), the size of a 
+%%      function takes as arguments the Symbol Table (`SymTab'), the size of a
 %%      Symbol Table entry and the serial number (counting from zero) of a 
 %%      specific entry and returns that entry as binary.
 
@@ -252,11 +261,11 @@ get_symtab_entry(SymTab, EntrySize, EntryNum) ->
   get_field(SymTab, {binary, {EntryOffset, EntrySize}}).
 
 
-%% @spec get_symtab_entry_field( binary(), {integer(), integer()} ) -> integer() 
+%% @spec get_symtab_entry_field( binary(), {integer(), integer()} ) -> integer()
 %% @doc Extracts specific field from a Symbol Table entry binary. The function
 %%      takes as its arguments a Symbol Table entry binary and a tuple of the 
-%%      form {FieldOffset, FieldSize} with the offset inside the binary and the 
-%%      size of the wanted field and returns that field's value.
+%%      form {`FieldOffset', `FieldSize'} with the offset inside the binary and
+%%      the size of the wanted field and returns that field's value.
 
 -spec get_symtab_entry_field( binary(), {integer(), integer()} ) -> integer().
 get_symtab_entry_field(SymTabEntry, {FieldOffset, FieldSize}) -> 
@@ -277,8 +286,8 @@ extract_strtab(Elf) ->
 
 %% @spec get_strtab_subfield( binary(), integer() ) -> binary()
 %% @doc Extracts a part of a String Table binary. The function takes as arguments
-%%      a String Table binary (StrTab) and an Offset and returns the sub-binary
-%%      starting at that offset.
+%%      a String Table binary (`StrTab') and an `Offset' and returns the
+%%      sub-binary starting at that offset.
 
 -spec get_strtab_subfield( binary(), integer() ) -> binary().
 get_strtab_subfield(StrTab, Offset) -> 
@@ -291,7 +300,7 @@ get_strtab_subfield(StrTab, Offset) ->
 %%------------------------------------------------------------------------------
 
 %% @spec extract_rela( binary(), string() ) -> binary()
-%% @doc Extract the Relocations segment for section "Name" (that is passed as 
+%% @doc Extract the Relocations segment for section `Name' (that is passed as 
 %%      second argument) from an ELF-64 formated Object file binary.
 
 -spec extract_rela( binary(), string() ) -> binary().
@@ -300,7 +309,8 @@ extract_rela(Elf, Name) ->
 
 
 %% @spec get_rela_entry( binary(), integer(), integer() ) -> binary()
-%% @doc
+%% @doc Extract the `EntryNum' (serial number) Reloacation Entry of fixed-size
+%%      `EntrySize'. Returns a binary.
 
 -spec get_rela_entry( binary(), integer(), integer() ) -> binary().
 get_rela_entry(Rela, EntrySize, EntryNum) ->
@@ -309,26 +319,33 @@ get_rela_entry(Rela, EntrySize, EntryNum) ->
 
 
 %% @spec get_rela_entry_field( binary(), {integer(), integer()} ) -> integer()
-%% @ doc
+%% @ doc Extract a specific field `{FieldOffset, FieldSize}' of a `Relocation'
+%%       entry.
 
 -spec get_rela_entry_field( binary(), {integer(), integer()} ) -> integer().
-get_rela_entry_field(Relocations, {FieldOffset, FieldSize}) -> 
-  get_field(Relocations, {integer, {FieldOffset, FieldSize}}).
+get_rela_entry_field(Relocation, {FieldOffset, FieldSize}) -> 
+  get_field(Relocation, {integer, {FieldOffset, FieldSize}}).
 
 
 %% @spec get_call_list( binary() ) -> [ {string(), [integer()]} ]
-%% @doc
+%% @doc Create a call list of the form `[ {FunName, [Offset]} ]` with all 
+%%      Function names and offsets of the calls in the binary. Very useful in
+%%      many cases that you might want to extract that kind of information from
+%%      an object file.
 
 -spec get_call_list( binary() ) -> [ {string(), [integer()]} ].
 get_call_list(Elf) ->
-  %% 
-  SymTab = extract_symtab(Elf),
-  StrTab = extract_strtab(Elf),
-  Rela   = extract_rela(Elf, ?TEXT),
-  %%
+  %% Extract Symbol, String and Relocation Tables
+  Rela   = extract_rela(Elf, ?TEXT), % All calls are Relocatable data indexing
+				     %   Symbol Table
+  SymTab = extract_symtab(Elf),      % Holds the offsets in Str Table of all 
+				     %   symbols
+  StrTab = extract_strtab(Elf),      % Str Table holds all symbols' string names
+  %% Do the magic!
   NumOfEntries = byte_size(Rela) div ?ELF64_RELA_SIZE,
   L = get_call_list(SymTab, StrTab, Rela, NumOfEntries, []),
-  flatten_call_list(L).
+  %% Merge identical function calls to one tuple and a list of offsets
+  flatten_list(L).
 
 -spec get_call_list( binary(), binary(), binary(), integer(), 
 		     [{string(), integer()}] ) -> [{string(), integer()}].
@@ -351,6 +368,21 @@ get_call_list(SymTab, StrTab, Rela, N, Acc) ->
   
 
 %%------------------------------------------------------------------------------
+%% Functions to manipulate Note Section
+%%------------------------------------------------------------------------------
+
+%% @spec extract_note( binary(), string() ) -> binary()
+%% @doc Extract specific Note Section from an ELF-64 Object file. The function
+%%      takes as first argument the object file (`Elf') and the `Name' of the
+%%      wanted Note Section (<b>without</b> the ".note." prefix!). It returns
+%%      the specified binary segment or an empty binary if no such section 
+%%      exists.
+-spec extract_note( binary(), string() ) -> binary().
+extract_note(Elf, Name) ->
+  extract_segment_by_name(Elf, ?NOTE(Name)).
+
+
+%%------------------------------------------------------------------------------
 %% Functions to manipulate Executable Code segment
 %%------------------------------------------------------------------------------
 
@@ -365,12 +397,100 @@ extract_text(Elf) ->
 
 
 %%------------------------------------------------------------------------------
+%% Functions to manipulate GCC Exception Table segment
+%%------------------------------------------------------------------------------
+
+%% A description for the C++ exception table formats can be found at Exception
+%% Handling Tables (http://www.codesourcery.com/cxx-abi/exceptions.pdf).
+
+%% @spec extract_gcc_exn_table( binary() ) -> binary()
+%% @doc This function gets as argument an ELF64 binary file and returns the
+%%      GCC Exception Table (".gcc_except_table") section or an empty binary if
+%%      it is not found.
+
+-spec extract_gcc_exn_table( binary() ) -> binary().
+extract_gcc_exn_table(Elf) ->
+  extract_segment_by_name(Elf, ?GCC_EXN_TAB).
+
+
+%% @spec get_gcc_exn_table_info( binary() ) -> binary()
+%% @doc
+
+-spec get_gcc_exn_table_info( binary() ) -> binary().
+get_gcc_exn_table_info(GCCExnTab) ->
+  %% First byte of LSDA is Landing Pad base encoding.
+  <<LBenc:8, More/binary>> = GCCExnTab,
+  %% Second byte is the Landing Pad base (if it encoding is note DW_EH_PE_omit).
+  {LPBase, LSDACont} = 
+    case LBenc == ?DW_EH_PE_omit of
+      true ->  % No landing pad base byte.
+	{0, More};
+      false -> % Landing pad base.
+	<<Base:8, More2/binary>> = More,
+	{Base, More2}
+    end,
+  %% Third byte of LSDA is the encoding of the Type Table.
+  <<TTenc:8, More3/binary>> = LSDACont,
+  %% Forth byte is the Types Table offset encoded in U-LEB128 (if it exists).
+  {TTOff, LSDACont2} =
+    case TTenc == ?DW_EH_PE_omit of
+      true ->  % There is no Types Table pointer.
+	{0, More3};
+      false -> % The byte offset from this field to the start of the Types Table
+	       % used for exception matching.
+	leb128_decode(More3)
+    end,
+  %% Fifth byte of LSDA is the encoding of the fields in the Call-site Table.
+  <<CSenc:8, More4/binary>> = LSDACont2,
+  %% Sixth byte is the size (in bytes) of the Call-site Table encoded in 
+  %% U-LEB128.
+  %{CSTabSize, CallSiteTab} = 
+  leb128_decode(More4).
+  
+
+%% @spec get_exn_labels( binary() ) -> [{integer(), integer()}]
+%% @doc 
+	 
+-spec get_exn_labels( binary() ) -> [{integer(), integer()}].
+get_exn_labels(Elf) ->
+  %% Extract the GCC Exception Table
+  case extract_gcc_exn_table(Elf) of
+    <<>> -> % There is no .gcc_except_table section in object file.
+      [];
+    GCCExnTab -> 
+      %% Extract information about Call-site Table
+      {CSTabSize, CSTab} = get_gcc_exn_table_info(GCCExnTab),
+      %% Extract the Exception labels list
+      get_exn_labels(CSTab, CSTabSize, [])
+  end.
+
+-spec get_exn_labels( binary(), integer(), [{integer(), integer()}] ) -> 
+			[{integer(), integer()}].
+get_exn_labels(_CSTab, 0, Acc) ->
+  lists:reverse(Acc);
+get_exn_labels(CSTab, CSTabSize, Acc) ->
+  %% We are only interested in the Landing pad of every entry.
+  <<Start:32/integer-little, _Length:32, 
+    LP:32/integer-little, _Act:8, More/binary>> = CSTab,
+  case LP == 0 of
+    true -> % Not interested in that call-site (FIXME: Hardcoded entry size!).
+      get_exn_labels(More, CSTabSize-13, Acc);
+    false -> % Store LP of current call-site and continue.
+      get_exn_labels(More, CSTabSize-13, [ {Start, LP} | Acc])
+  end.
+			        
+
+%%------------------------------------------------------------------------------
 %% Utility functions
 %%------------------------------------------------------------------------------
 
 %% @spec get_field( binary(), {atom(), {integer(), integer()}} ) -> 
 %%                         integer() | binary()
-%% @doc
+%% @doc Helper function that returns a field of a binary starting at `Offset' 
+%%      with size `Size'. It returns either an little-endian integer or a binary
+%%      depending on the atom it takes as first element of the tuple (second 
+%%      argument). It can easily be extended to return more information such as
+%%      big-endian integer, float, bitstring etc.
 
 -spec get_field( binary(), {atom(), {integer(), integer()}} ) -> 
 		   integer() | binary().
@@ -383,8 +503,8 @@ get_field(BinSegment, {binary, {Offset, Size}}) ->
 
 
 %% @spec bin_reverse( binary() ) -> binary()
-%% @doc A function that byte-reverses a binary. This is needed because of little
-%%      (fucking!) endianess.
+%% @doc A function that byte-reverses a binary. This might be needed because of
+%%      little (fucking!) endianess.
 
 -spec bin_reverse( binary() ) -> binary().
 bin_reverse(Bin) when is_binary(Bin) ->
@@ -394,7 +514,7 @@ bin_reverse(Bin) when is_binary(Bin) ->
 bin_reverse(<<>>, Acc) ->
   Acc;
 bin_reverse(<<Head, More/binary>>, Acc) ->
-  bin_reverse(More, << Head, Acc/binary>>).
+  bin_reverse(More, <<Head, Acc/binary>>).
 
 
 %% @spec bin_get_string( binary() ) -> string()
@@ -407,8 +527,8 @@ bin_get_string(Bin) ->
 
 -spec bin_get_string( binary(), binary() ) -> binary().
 bin_get_string(<<>>, BinAcc) ->
-  %% In case of no lists module found! (not loaded yet)
-  %% [ bin_reverse(Name) || Name <- Acc ]
+  %% In case of no lists module found (not loaded yet):
+  %%   [ bin_reverse(Name) || Name <- Acc ]
   Bin = bin_reverse(BinAcc), % little endian!
   binary_to_list(Bin);
 bin_get_string(<<0, _Tail/binary>>, BinAcc) ->
@@ -418,25 +538,56 @@ bin_get_string(<<Letter, Tail/binary>>, BinAcc) ->
   bin_get_string(Tail, <<Letter, BinAcc/binary>>).
 
 
-%% @spec flatten_call_list( [{ string(), integer() }] ) -> 
-%%			   [{ string(), [integer()] }]
-%% @doc 
+%% @spec flatten_list( [{ atom(), atom() }] ) -> 
+%%			   [{ atom(), [atom()] }]
+%% @doc Magic function that compacts a list of tuples based on the first 
+%%      element of each tuple.
 
--spec flatten_call_list( [{ string(), integer() }] ) -> 
-			   [{ string(), [integer()] }].
-flatten_call_list(L) ->
-  L1 = lists:keysort(1,L),
-  L2 = lists:foldl(fun flatten_call_list/2 , [], L1),
+-spec flatten_list( [{ atom(), atom() }] ) -> 
+			   [{ atom(), [atom()] }].
+flatten_list(L) ->
+  %% Sort the list of tuples based on the first element
+  L1 = lists:keysort(1,L), 
+  %% Fold the list with "compresser" function
+  L2 = lists:foldl(fun flatten_list/2 , [], L1),
   L2.
 
--spec flatten_call_list( [{ string(), integer() }], [{ string(), [integer()] }] ) -> 
-			   [{ string(), [integer()] }].
-flatten_call_list({Fun, Off}, []) ->
-  [{Fun, [Off]}];
-flatten_call_list({Fun, Off}, [{PrevFun,Offs} | T]) ->
-  case Fun == PrevFun of
+-spec flatten_list( [{ atom(), atom() }], [{ atom(), [atom()] }] ) -> 
+			   [{ atom(), [atom()] }].
+flatten_list({Key, Val}, []) ->
+  [{Key, [Val]}];
+flatten_list({Key, Val}, [{PrevKey,Vals} | T]) ->
+  case Key == PrevKey of 
+    %% If the current key is the same with the prev key in sorted list:
     true ->
-      [{PrevFun, [Off|Offs]} | T];
-    false ->
-      [{Fun, [Off]}, {PrevFun, Offs} | T]
+      [{PrevKey, [Val|Vals]} | T]; % collapse the values of the key to a list
+    %% Else:
+    false ->  
+      [{Key, [Val]}, {PrevKey, Vals} | T] % just insert the tuple
+  end.
+
+
+%% @spec leb128_decode( binary() ) -> {integer(), binary()}
+%% @oc Little-Endian Base 128 (LEB128) Decoder
+%%     This function extracts the <b>first</b> LEB128-encoded integer in a 
+%%     binary and returns that integer along with the remaining binary. This is
+%%     done because a LEB128 number has variable bit-size and that is a way of
+%%     extracting only one number in a binary and continuing parsing the binary
+%%     for other kind of data (e.g. different encoding). 
+
+% FIXME: Only decodes unsigned data!
+-spec leb128_decode( binary() ) -> {integer(), binary()}.
+leb128_decode(LebNum) ->
+  leb128_decode(LebNum, 0, <<>>).
+
+-spec leb128_decode( binary(), integer(), binary() ) -> {integer(), binary()}.
+leb128_decode(LebNum, NoOfBits, Acc) ->
+  <<Sentinel:1/bits, NextBundle:7/bits, MoreLebNums/bits>> = LebNum,
+  case Sentinel of
+    <<1:1>> -> % more bytes to follow
+      leb128_decode(MoreLebNums, NoOfBits+7, <<NextBundle:7/bits, Acc/bits>>);
+    <<0:1>> -> % byte bundle stop
+      Size = NoOfBits+7,
+      <<Num:Size/integer>> = <<NextBundle:7/bits, Acc/bits>>,
+      {Num, MoreLebNums}
   end.

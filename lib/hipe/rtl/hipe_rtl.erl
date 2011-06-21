@@ -29,7 +29,7 @@
 %%   <li> {alu, Dst, Src1, Op, Src2} </li>
 %%   <li> {alub, Dst, Src1, Op, Src2, RelOp, TrueLabel, FalseLabel, P} </li>
 %%   <li> {branch, Src1, Src2, RelOp, TrueLabel, FalseLabel, P} </li>
-%%   <li> {call, DsListt, Fun, ArgList, Type, Continuation, FailContinuation}
+%%   <li> {call, DstList, Fun, ArgList, Type, Continuation, FailContinuation}
 %%           Type is one of {local, remote, primop, closure} </li>
 %%   <li> {comment, Text} </li>
 %%   <li> {enter, Fun, ArgList, Type}

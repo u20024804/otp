@@ -42,14 +42,15 @@ ifdef HIPE_ENABLED
 HIPE_MODULES = hipe_rtl2llvm \
 							 hipe_llvm \
 							 elf64_format \
-							 hipe_llvm_main 
+							 note_erlgc \
+							 hipe_llvm_main
 else
 HIPE_MODULES =
 endif
 
 MODULES = $(HIPE_MODULES)
 
-HRL_FILES= elf64_format.hrl hipe_llvm.hrl
+HRL_FILES= elf64_format.hrl note_erlgc.hrl hipe_llvm.hrl
 ERL_FILES= $(MODULES:%=%.erl)
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 

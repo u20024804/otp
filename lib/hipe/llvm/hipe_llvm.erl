@@ -995,7 +995,10 @@ pp_ins(Dev, I) ->
           select_val2(I)]),
       io:format(Dev, "~n", []);
     #llvm_call{} ->
-      io:format(Dev, "~s = ", [call_dst(I)]),
+      case call_dst(I) of
+        [] -> ok;
+        Dst ->  io:format(Dev, "~s = ", [Dst])
+      end,
       case call_is_tail(I) of
         true -> io:format(Dev, "tail ", []);
         false -> ok
