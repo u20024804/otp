@@ -32,6 +32,8 @@ rtl_to_native(RTL, _Options) ->
   ObjBin = elf64_format:open_object_file(Object_filename),
   %% Get relocation info and write to file for loader
   Relocs = elf64_format:get_call_list(ObjBin),
+  %% Get stack descriptors
+  SDescs = note_erlgc:get_sdesc_list(ObjBin), 
   %% Temporary code for creating references needed by  the loader
   Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
   Is_mfa = 
@@ -68,7 +70,8 @@ rtl_to_native(RTL, _Options) ->
   {Closures, Rest2} = lists:partition(Is_closure, Rest1),
   {Atoms1, BIFs} = lists:partition(Is_atom, Rest2),
   Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
-  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants},{1,Closures}, {0, Atoms}],
+  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants},{1,Closures}, {0, Atoms},
+                  {4, SDescs}],
   ok = file:write_file(Filename ++ "_relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
   %% Get binary code and write to file for loader
   BinCode = elf64_format:extract_text(ObjBin),
@@ -126,7 +129,7 @@ opt(Fun_Name, Opts) ->
 
 %% LLC wrapper (.ll -> .s)
 llc(Opt_filename, Fun_Name) ->
-  Options = ["-O3", "-code-model=medium"],
+  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so"],
   llc(Opt_filename, Fun_Name, Options).
 
 llc(Opt_filename, Fun_Name, Opts) ->
