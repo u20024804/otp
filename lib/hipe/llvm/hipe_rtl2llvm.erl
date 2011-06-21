@@ -71,14 +71,18 @@ translate(RTL) ->
   ClosureDecl = lists:map(fun declare_closure/1, Closures),
   %% Create code to create local name for closures
   ClosureLoad = lists:map(fun load_closure/1, Closures),
+  %% Collect gc roots
+  GCRoots = collect_gc_roots(Code),
+  GCRootDeclare = declare_gc_roots(GCRoots),
   Code2 = fix_invoke_calls(Code),
   LLVM_Code = translate_instr_list(Code2, []),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code, ClosureLoad++AtomLoad++ConstLoad,
+  LLVM_Code2 = create_header(Fun, Params, LLVM_Code,
+    ClosureLoad++AtomLoad++ConstLoad++GCRootDeclare,
     IsClosure),
   %% Find function calls in code
   Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
         atom_to_list(Fun_Name), integer_to_list(Arity)) end,
-  I1 = lists:filter(fun is_call/1, LLVM_Code),
+  I1 = lists:filter(fun is_call/1, LLVM_Code++GCRootDeclare),
   I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
   Fun_Declarations = lists:map(fun call_to_decl/1, lists:filter(fun (X) ->
@@ -94,6 +98,34 @@ translate(RTL) ->
   {LLVM_Code3, CallDict6, SC, ConstAlign, ConstSize}.
 
 %%-----------------------------------------------------------------------------
+collect_gc_roots(Code) -> collect_gc_roots(Code, []).
+
+collect_gc_roots([], Roots) -> Roots;
+collect_gc_roots([I|Is], Roots) ->
+  Dst = insn_dst(I),
+  case Dst of 
+    [] ->  collect_gc_roots(Is, Roots);
+    _ -> 
+      case hipe_rtl:is_var(Dst) of
+        true -> collect_gc_roots(Is, [Dst|Roots]);
+        false -> collect_gc_roots(Is, Roots)
+      end
+  end.
+
+declare_gc_roots(Roots) -> declare_gc_roots(Roots, []).
+
+declare_gc_roots([], Ins) -> Ins;
+declare_gc_roots([Root|Rest], Ins) -> 
+  GCRootName = trans_dst(Root) ++ "_gcroot",
+  I1 = hipe_llvm:mk_alloca(GCRootName, "i64*", [], []),
+  T1 = mk_temp(),
+  I2 = hipe_llvm:mk_conversion(T1, bitcast, "i64**", GCRootName, "i8**"),
+  I3 = hipe_llvm:mk_call([], false, [], [], void, "@llvm.gcroot", 
+    [{"i8**",T1}, {"i8*", "null"}], []),
+  declare_gc_roots(Rest, [I1, I2, I3 | Ins]).
+
+%%----------------------------------------------------------------------------
+
 
 %% Extract Closures from RTL CODE
 find_closures(Code) -> find_closures(Code, []).
@@ -1210,6 +1242,29 @@ pointer_from_reg(RegName, Type, Offset) ->
             erlang:integer_to_list(Offset div 8)}], false),
       {T3, [I3, I2, I1]}.
   
+
+insn_dst(I) ->
+  case I of
+    #alu{} -> hipe_rtl:alu_dst(I);
+    #alub{} -> hipe_rtl:alub_dst(I);
+    #call{} -> 
+      case hipe_rtl:call_dstlist(I) of
+        [] -> [];
+        [_, _ |[]] -> exit({?MODULE, insn_dst, {"Call destination list
+                      not implemented yet", hipe_rtl:call_dstlist(I)}});
+        [Dst] -> Dst
+      end;
+    #load{} -> hipe_rtl:load_dst(I);
+    #load_address{} -> hipe_rtl:load_address_dst(I);
+    #load_atom{} -> hipe_rtl:load_atom_dst(I);
+    %#load_word_index{} -> ok;
+    #move{} -> hipe_rtl:move_dst(I);
+    %#multimove{} -> ok;
+    #phi{} -> hipe_rtl:phi_dst(I);
+    %#switch{} -> hipe_rtl:switch(I);
+    _ -> []
+  end.
+
 type_from_size(Size) -> 
   case Size of
     byte -> "i8";
@@ -1331,7 +1386,9 @@ create_header(Name, Params, Code, ConstLoad, IsClosure) ->
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
-                        Args1++Args2, [nounwind], [], Final_Code).
+                        Args1++Args2, 
+                        [nounwind, list_to_atom("gc \"erlang_gc\"")],
+                        [], Final_Code).
 
 fixed_registers() ->
   case get(hipe_target_arch) of

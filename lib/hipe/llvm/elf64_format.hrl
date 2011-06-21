@@ -1,6 +1,6 @@
 %% -*- erlang-indent-level: 2 -*-
 %%% Copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
-%%% Chris Stavrakakis <hydralisk.r@gmail.com>
+%%%                     Chris Stavrakakis <hydralisk.r@gmail.com>
 %%%
 %%% This file is part of elf64_format.
 %%%
@@ -15,12 +15,13 @@
 %%% GNU General Public License for more details.
 %%%
 %%% You should have received a copy of the GNU General Public License
-%%% along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+%%% along with elf64_format.  If not, see <http://www.gnu.org/licenses/>.
 
 %%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
-%%% Chris Stavrakakis <hydralisk.r@gmail.com>
+%%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
 %%% @version {@version}
 %%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
+
 %%% @doc This header file contains very very useful macros for manipulating
 %%%      various segments of an ELF-64 formated object file, such as sizes,
 %%%      offsets and predefined constants. For further information about 
@@ -237,6 +238,7 @@
 -define(SHSTRTAB,   ".shstrtab").
 -define(STRTAB,     ".strtab").
 -define(SYMTAB,     ".symtab").
+-define(GCC_EXN_TAB, ".gcc_except_table").
 
 
 %%------------------------------------------------------------------------------
@@ -315,6 +317,12 @@
 -define(ELF64_R_SYM(I),     (I bsr 32) ).
 -define(ELF64_R_TYPE(I),    (I band 16#ffffffff) ).
 -define(ELF64_R_INFO(S, T), ((S bsl 32) + (T band 16#ffffffff)) ).
+
+
+%%------------------------------------------------------------------------------
+%% ELF-64 Note Section
+%%------------------------------------------------------------------------------
+-define(NOTE(Name), (".note." ++ Name)).
 
 
 %%------------------------------------------------------------------------------
@@ -425,6 +433,33 @@
 -define(DT_HIOS,         16#6FFFFFFF).
 -define(DT_LOPROC,       16#700000000).
 -define(DT_HIPROC,       16#7FFFFFFFF).
+
+
+%%------------------------------------------------------------------------------
+%% ELF-64 GCC Exception Table 
+%%------------------------------------------------------------------------------
+
+%% The DWARF Exception Header Encoding is used to describe the type of data used
+%% in the .eh_frame_hdr (and .gcc_except_table) section. The upper 4 bits 
+%% indicate how the value is to be applied. The lower 4 bits indicate the format
+%% of the data.
+
+%% DWARF Exception Header value format
+-define(DW_EH_PE_omit,    16#ff). % No value is present.
+-define(DW_EH_PE_uleb128, 16#01). % Unsigned value encoded using LEB128.
+-define(DW_EH_PE_udata2,  16#02). % A 2 bytes unsigned value.
+-define(DW_EH_PE_udata4,  16#03). % A 4 bytes unsigned value.
+-define(DW_EH_PE_udata8,  16#04). % An 8 bytes unsigned value.
+-define(DW_EH_PE_sleb128, 16#09). % Signed value encoded using LEB128.
+-define(DW_EH_PE_sdata2,  16#0a). % A 2 bytes signed value.
+-define(DW_EH_PE_sdata4,  16#0b). % A 4 bytes signed value.
+-define(DW_EH_PE_sdata8,  16#0c). % An 8 bytes signed value.
+
+%% DWARF Exception Header application
+-define(DW_EH_PE_absptr,  16#00). % Value is used with no modification.
+-define(DW_EH_PE_pcrel,   16#10). % Value is relative to the current PC.
+-define(DW_EH_PE_datarel, 16#30). % Value is relative to the beginning of the 
+                                  %   section.
 
 
 %%------------------------------------------------------------------------------
