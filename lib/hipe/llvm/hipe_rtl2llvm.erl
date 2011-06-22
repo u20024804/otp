@@ -1387,7 +1387,7 @@ create_header(Name, Params, Code, ConstLoad, IsClosure) ->
   Type = "{"++Typ++",i64"++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
                         Args1++Args2, 
-                        [nounwind, list_to_atom("gc \"erlang_gc\"")],
+                        [nounwind, noredzone, list_to_atom("gc \"erlang_gc\"")],
                         [], Final_Code).
 
 fixed_registers() ->
