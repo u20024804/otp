@@ -772,7 +772,15 @@ fix_constmap([], Refs, Base, ConstMap) ->
 
 add_offset_to_relocs(Refs, Size) ->
   Update_reloc = fun (X) -> X+Size end,
-  Update_relocs = fun({X, Relocs}) -> {X, lists:map(Update_reloc, Relocs)} end,
+  Update_exn_label = fun (X) -> 
+      case X of
+        {[], _, _, _} = A -> A;
+        {ExnLabel,FrameSize,Arity,BitMap} -> {ExnLabel+Size, FrameSize, Arity,
+            BitMap};
+        Other -> Other
+      end
+  end,
+  Update_relocs = fun({X, Relocs}) -> {Update_exn_label(X), lists:map(Update_reloc, Relocs)} end,
   Update_all = fun ({Type, Relocs}) -> {Type, lists:map(Update_relocs, Relocs)} end,
   lists:map(Update_all, Refs).
 
