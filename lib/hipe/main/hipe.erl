@@ -749,7 +749,9 @@ fix_exportmap([Addr,M,F,A, IC, IL|Rest], Closures, Exports) ->
 fix_exportmap([],_,_) -> [].
 is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
 
-merge(Bin) -> merge(Bin, 0 ,[], [], <<>>, [], 0, 0).
+merge(Bin) -> 
+  %% Fix Base Size. Set it equal to length of all constants
+  merge(Bin, 0 ,[], [], <<>>, [], 2000, 0).
 merge([
     [_, _, ConstSize1, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
     | Rest], 
