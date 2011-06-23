@@ -243,25 +243,40 @@ get_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
 %% Utility functions
 %%------------------------------------------------------------------------------
 
-%% @spec combine_ras_and_exns( [{integer(), integer()}], [integer()] ) -> 
-%%                            [{integer() | [], integer()}]
+%% @spec combine_ras_and_exns( [{integer(), integer(), integer()}], 
+%%                   [integer()] ) -> [{integer() | [], integer()}]
 %% @doc 
 
--spec combine_ras_and_exns( [{integer(), integer()}], [integer()] ) -> 
-			      [{integer() | [], integer()}].
+-spec combine_ras_and_exns( [{integer(), integer(), integer()}], 
+			    [integer()] ) 
+			  -> [{integer() | [], integer()}].
 combine_ras_and_exns(ExnHandlers, RAOffs) ->
   combine_ras_and_exns(ExnHandlers, RAOffs, []).
 
--spec combine_ras_and_exns( [{integer(), integer()}], [integer()], 
+-spec combine_ras_and_exns( [{integer(), integer(), integer()}], [integer()], 
 			    [{integer() | [], integer()}] ) -> 
 			    [{integer() | [], integer()}].
-combine_ras_and_exns([], RAOffs, Acc) ->
-  lists:reverse(Acc) ++ [{[], RA} || RA <- RAOffs];
-combine_ras_and_exns([{Start, Handler} | MoreExnHandlers] = ExnHandlers, 
-		     [RA | MoreRAs], Acc) ->
-  case (RA < Start) of
+combine_ras_and_exns(_, [], Acc) ->
+  lists:reverse(Acc);
+combine_ras_and_exns(ExnHandlers, [RA | MoreRAs], Acc) ->
+  %% FIXME: do something better than O(n^2) by taking advantage of the property
+  %% ||ExnHandlers|| <= ||RAs||
+  Handler = find_exn_handler(RA, ExnHandlers), 
+  combine_ras_and_exns(ExnHandlers, MoreRAs, [{Handler, RA} | Acc]).
+
+
+%% @spec find_exn_handler( integer(), [{integer(), integer(), integer()}] ) ->
+%%			  [] | integer().
+%% @doc
+
+-spec find_exn_handler( integer(), [{integer(), integer(), integer()}] ) ->
+			  [] | integer().
+find_exn_handler(_, []) ->
+  [];
+find_exn_handler(RA, [{Start, End, Handler} | MoreExnHandlers]) ->
+  case (RA > Start andalso RA < End) of
     true ->
-      combine_ras_and_exns(ExnHandlers, MoreRAs, [{[], RA} | Acc]);
+      Handler;
     false ->
-      combine_ras_and_exns(MoreExnHandlers, MoreRAs, [{Handler, RA} | Acc])
+      find_exn_handler(RA, MoreExnHandlers)
   end.
