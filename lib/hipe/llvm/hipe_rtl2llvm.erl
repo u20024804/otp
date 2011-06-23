@@ -72,17 +72,17 @@ translate(RTL) ->
   %% Create code to create local name for closures
   ClosureLoad = lists:map(fun load_closure/1, Closures),
   %% Collect gc roots
-  GCRoots = collect_gc_roots(Code),
-  GCRootDeclare = declare_gc_roots(GCRoots),
+ % GCRoots = collect_gc_roots(Code),
+%  GCRootDeclare = declare_gc_roots(GCRoots),
   Code2 = fix_invoke_calls(Code),
   LLVM_Code = translate_instr_list(Code2, []),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code,
-    ClosureLoad++AtomLoad++ConstLoad++GCRootDeclare,
+    ClosureLoad++AtomLoad++ConstLoad,
     IsClosure),
   %% Find function calls in code
   Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
         atom_to_list(Fun_Name), integer_to_list(Arity)) end,
-  I1 = lists:filter(fun is_call/1, LLVM_Code++GCRootDeclare),
+  I1 = lists:filter(fun is_call/1, LLVM_Code),
   I2 = lists:filter(Is_call, I1),
   %% Create code to declare external function
   Fun_Declarations = lists:map(fun call_to_decl/1, lists:filter(fun (X) ->
@@ -168,14 +168,17 @@ find_atoms([I|Is], Atoms) ->
   end.
 
 declare_atom(Atom) ->
-  Name = "@"++atom_to_list(Atom),
+  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
+  Name = "@"++LLVM_Name,
   hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
 load_atom(Atom) ->
-  Dst = "%"++atom_to_list(Atom)++"_var",
-  Name = "@"++atom_to_list(Atom),
+  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
+  Dst = "%"++LLVM_Name++"_var",
+  Name = "@"++LLVM_Name,
   hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
 atom_to_dict(Atom, Dict) ->
-  Name = "@"++atom_to_list(Atom),
+  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
+  Name = "@"++LLVM_Name,
   dict:store(Name, {'atom', Atom}, Dict).
 
 %% Extract Type of Constants from ConstMap
@@ -821,7 +824,7 @@ trans_load_address(I) ->
 trans_load_atom(I) ->
   _Dst = hipe_rtl:load_atom_dst(I),
   _Atom = hipe_rtl:load_atom_atom(I),
-  Atom_Name = "%"++atom_to_list(_Atom)++"_var",
+  Atom_Name = "%"++make_llvm_id(atom_to_list(_Atom))++"_var",
   Dst = trans_dst(_Dst),
   hipe_llvm:mk_select(Dst, true, "i64", Atom_Name, "i64", "undef").
 %%
@@ -1105,6 +1108,16 @@ store_call_regs(RegList, Name) ->
           "%"++Y++"_var", [], [], false) end, Names2, RegList2),
   [I2, I1].
 
+
+make_llvm_id(Name) -> 
+  case Name of 
+    "" -> "Empty";
+    Other -> lists:flatten(lists:map(fun llvm_id/1, Other))
+  end.
+llvm_id(C) when C==46; C>47 andalso C<58; C>64 andalso C<91; C==95; C>96 andalso
+           C<123 -> C;
+llvm_id(C) ->
+ io_lib:format("_~2.16.0B_",[C]).
 fix_name(Name) ->
   case Name of
     '+' -> unary_plus;
@@ -1114,14 +1127,11 @@ fix_name(Name) ->
 
 fix_closure_name(ClosureName) ->
   CN = atom_to_list(ClosureName),
-  %% TODO: User regular expression
-  [Parent, Name, Arity] = string:tokens(CN, "-"),
-  [ParentName, ParentArity] = string:tokens(Parent, "/"),
-  FCN = ParentName++"_"++ParentArity++"_"++Name++"_"++Arity,
-  list_to_atom(FCN).
+  list_to_atom(make_llvm_id(CN)).
 
 trans_mfa_name({M,F,A}) ->
-  atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A).
+  N = atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A),
+  make_llvm_id(N).
 
 mk_num() -> integer_to_list(hipe_gensym:new_var(llvm)).
 
