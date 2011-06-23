@@ -448,10 +448,11 @@ get_gcc_exn_table_info(GCCExnTab) ->
   leb128_decode(More4).
   
 
-%% @spec get_exn_labels( binary() ) -> [{integer(), integer()}]
-%% @doc 
+%% @spec get_exn_labels( binary() ) -> [{integer(), integer(), integer()}]
+%% @doc Extracts a list with {`Start', `End', `HandlerOffset'} for all Exception
+%%      Handlers that appear in the code.
 	 
--spec get_exn_labels( binary() ) -> [{integer(), integer()}].
+-spec get_exn_labels( binary() ) -> [{integer(), integer(), integer()}].
 get_exn_labels(Elf) ->
   %% Extract the GCC Exception Table
   case extract_gcc_exn_table(Elf) of
@@ -465,18 +466,18 @@ get_exn_labels(Elf) ->
   end.
 
 -spec get_exn_labels( binary(), integer(), [{integer(), integer()}] ) -> 
-			[{integer(), integer()}].
+			[{integer(), integer(), integer()}].
 get_exn_labels(_CSTab, 0, Acc) ->
   lists:reverse(Acc);
 get_exn_labels(CSTab, CSTabSize, Acc) ->
   %% We are only interested in the Landing pad of every entry.
-  <<Start:32/integer-little, _Length:32, 
+  <<Start:32/integer-little, Length:32/integer-little, 
     LP:32/integer-little, _Act:8, More/binary>> = CSTab,
   case LP == 0 of
     true -> % Not interested in that call-site (FIXME: Hardcoded entry size!).
       get_exn_labels(More, CSTabSize-13, Acc);
     false -> % Store LP of current call-site and continue.
-      get_exn_labels(More, CSTabSize-13, [ {Start, LP} | Acc])
+      get_exn_labels(More, CSTabSize-13, [ {Start, Start+Length, LP} | Acc])
   end.
 			        
 
