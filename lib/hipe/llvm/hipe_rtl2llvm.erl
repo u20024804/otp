@@ -50,7 +50,7 @@ translate(RTL) ->
   %% Create constant map and write it to file for loader
   {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
   hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
-  SC = hipe_pack_constants:slim_constmap(ConstMap),
+  SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SC)),
   %% io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),

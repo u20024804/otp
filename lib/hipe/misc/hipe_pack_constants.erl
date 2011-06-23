@@ -20,7 +20,8 @@
 %%
 
 -module(hipe_pack_constants).
--export([pack_constants/2, slim_refs/1, slim_constmap/1]).
+-export([pack_constants/2, slim_refs/1, slim_constmap/1, 
+        llvm_slim_constmap/1]).
 
 -include("hipe_consttab.hrl").
 -include("../../kernel/src/hipe_ext_format.hrl").
@@ -209,3 +210,19 @@ slim_constmap([#pcm_entry{const_num=ConstNo, start=Offset,
       slim_constmap(Rest, NewInserted, [ConstNo, Offset, Type, Term|Acc])
   end;
 slim_constmap([], _Inserted, Acc) -> Acc.
+
+%%----------------------------------------------------------------------------
+%% LLVM:
+%% llvm_slim_constmap/1 takes a packed ConstMap, as produced by pack_labels
+%% called from hipe_pack_constants:pack_constants/2, and converts it
+%% to the slimmed and flattened format ConstMap which is to be returned
+%% to the hipe_unified_loader
+%%
+llvm_slim_constmap(Map) ->
+  llvm_slim_constmap(Map, []).
+
+llvm_slim_constmap([], Acc) -> Acc;
+llvm_slim_constmap([#pcm_entry{label=Label, start=Offset, type=Type,
+      raw_data = Term}|Rest], Acc) ->
+  llvm_slim_constmap(Rest, [Label, Offset, Type, Term | Acc]).
+%%----------------------------------------------------------------------------
