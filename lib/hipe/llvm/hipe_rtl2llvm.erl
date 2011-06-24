@@ -782,8 +782,11 @@ trans_load(I) ->
       I4 = hipe_llvm:mk_inttoptr(T2, Type, T1, LoadType),
       T3 = mk_temp(),
       I5 = hipe_llvm:mk_load(T3, LoadType, T2, [], [], false),
-      %% XXX: Is Zext always valid here? Maybe depend from the sign
-      I6 = hipe_llvm:mk_conversion(Dst, zext, LoadType, T3, "i64"),
+      Conversion = case hipe_rtl:load_sign(I) of
+        signed -> sext;
+        unsigned -> zext
+      end,
+      I6 = hipe_llvm:mk_conversion(Dst, Conversion, LoadType, T3, "i64"),
       [I6, I5, I4]
   end,
   [Ins, I3, I2, I1].
