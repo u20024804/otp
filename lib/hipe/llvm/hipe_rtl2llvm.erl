@@ -652,7 +652,10 @@ trans_fp(I) ->
       [Ins2, Ins];
     false -> []
   end,
-  [I4, I3, I2, I1].
+  I5 = hipe_llvm:mk_store("double", Dst, "double", "%exception_sync", [] ,[], true),
+  T1 = mk_temp(),
+  I6 = hipe_llvm:mk_load(T1, "double", "%exception_sync", [], [] ,true),
+  [I6, I5, I4, I3, I2, I1].
 
 %%
 %% fp_unop
@@ -1391,17 +1394,18 @@ create_header(Name, Params, Code, ConstLoad, IsClosure) ->
     end, ReversedParams),
   
   I1 = hipe_llvm:mk_label("Entry"),
+  Exception_Sync = hipe_llvm:mk_alloca("%exception_sync", "double", [], []),
   RegList = lists:filter(fun reg_not_undef/1, Fixed_regs),
   I2 = load_regs(RegList),
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
-  Final_Code = lists:flatten([I1,I2,ConstLoad,I3])++Code,
+  Final_Code = lists:flatten([I1,Exception_Sync,I2,ConstLoad,I3])++Code,
   [_|[_|Typ]] = lists:foldl(fun(X,Y) -> Y++", i64" end, [],
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
   hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
                         Args1++Args2, 
                         [nounwind, noredzone, list_to_atom("gc \"erlang_gc\"")],
-                        [], Final_Code).
+                        [],Final_Code).
 
 fixed_registers() ->
   case get(hipe_target_arch) of
