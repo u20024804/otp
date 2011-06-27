@@ -67,7 +67,10 @@
 	 %% GCC Exception Table
 	 extract_gcc_exn_table/1,
 	 get_gcc_exn_table_info/1,
-	 get_exn_labels/1
+	 get_exn_labels/1,
+	 %% RO Data (constants, labels etc.)
+	 extract_rodata/1,
+	 get_label_list/1
 	]).
 
 -include("elf64_format.hrl").
@@ -444,7 +447,6 @@ get_gcc_exn_table_info(GCCExnTab) ->
   <<CSenc:8, More4/binary>> = LSDACont2,
   %% Sixth byte is the size (in bytes) of the Call-site Table encoded in 
   %% U-LEB128.
-  %{CSTabSize, CallSiteTab} = 
   leb128_decode(More4).
   
 
@@ -480,6 +482,50 @@ get_exn_labels(CSTab, CSTabSize, Acc) ->
       get_exn_labels(More, CSTabSize-13, [ {Start, Start+Length, LP} | Acc])
   end.
 			        
+
+%%------------------------------------------------------------------------------
+%% Functions to manipulate .rodata Section
+%%------------------------------------------------------------------------------
+
+%% @spec extract_rodata( binary() ) -> binary()
+%% @doc This function gets as argument an ELF64 formated binary file and
+%%      returns the Read-only Data (".rodata" segment) or an empty binary if it
+%%      is not found.
+
+-spec extract_rodata( binary() ) -> binary().
+extract_rodata(Elf) ->
+  extract_segment_by_name(Elf, ?RODATA).
+
+
+%% @spec get_label_list( binary() ) -> [integer()]
+%% @doc This function get as argument an ELF64 binary file and returns a list
+%%      with all .rela.rodata labels (that is constants and literals in code)
+%%      or an empty list if no .rela.rodata section exists in code.
+
+-spec get_label_list( binary() ) -> [integer()].
+get_label_list(Elf) ->
+  %% Extract relocation entries for .rodata segment
+  %Rodata = extract_rodata(Elf),
+  case extract_rela(Elf, ?RODATA) of
+    <<>> ->
+      [];
+    RelaRodata ->
+      NumOfEntries = byte_size(RelaRodata) div ?ELF64_RELA_SIZE,
+      get_label_list(RelaRodata, NumOfEntries, [])
+  end.
+
+-spec get_label_list( binary(), integer(), [integer()] ) -> integer().
+get_label_list(_RelaRodata, 0, Acc) ->
+  lists:reverse(Acc);
+get_label_list(RelaRodata, N, Acc) ->
+  %% Get relocation entry information
+  _Offset = get_rela_entry_field(RelaRodata, ?R_OFFSET),
+  _Info = get_rela_entry_field(RelaRodata, ?R_INFO),
+  Addend = get_rela_entry_field(RelaRodata, ?R_ADDEND),
+  %% Store addend (offset in .text segment) and continue with more entries
+  <<_Head:?ELF64_RELA_SIZE/binary, MoreRodata/binary>> = RelaRodata,
+  get_label_list(MoreRodata, N-1, [Addend | Acc]).
+
 
 %%------------------------------------------------------------------------------
 %% Utility functions
