@@ -192,6 +192,15 @@
 -define(SH_ADDRALIGN, {?SH_ADDRALIGN_OFFSET, ?SH_ADDRALIGN_SIZE}).
 -define(SH_ENTSIZE,   {?SH_ENTSIZE_OFFSET, ?SH_ENTSIZE_SIZE}).
 
+%% Section Indices
+-define(SHN_UNDEF,    0).
+-define(SHN_LOPROC,   16#FF00).
+-define(SHN_HIPROC,   16#FF1F).
+-define(SHN_LOOS,     16#FF20).
+-define(SHN_HIOS,     16#FF3F).
+-define(SHN_ABS,      16#FFF1).
+-define(SHN_COMMON,   16#FFF2).
+
 %% Section Types (sh_type)
 -define(SHT_NULL,     0).
 -define(SHT_PROGBITS, 1).
