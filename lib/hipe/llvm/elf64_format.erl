@@ -45,6 +45,7 @@
 	 get_header_field/2,
 	 %% Section Header Table
 	 extract_shdrtab/1,
+	 extract_shstrtab/1, % Section Header String Table
 	 get_shdrtab_entry/3,
 	 get_shdrtab_entry_by_name/2,
 	 get_shdrtab_entry_field/2,
@@ -174,6 +175,26 @@ extract_shdrtab(Elf) ->
   get_binary_segment(Elf, {ShOff, SizeOfSHTable}).
 
 
+%% @spec extract_shstrtab( binary() ) -> binary()
+%% @doc Extracts the Section Header String Table. This section is not a known
+%%      ELF64 Object File section. It is just a "hidden" table storing the
+%%      names of all sections that exist in current object file.
+
+-spec extract_shstrtab( binary() ) -> binary().
+extract_shstrtab(Elf) ->
+  %% Extract Section Name String Table index
+  FileHeader = extract_header(Elf),
+  ShStrNdx   = get_header_field(FileHeader, ?E_SHSTRNDX),
+  %% Extract Section Header Table from binary
+  SHdrTable  = extract_shdrtab(Elf),
+  %% Extract the actual Section Header String Name Table from binary (not a
+  %% known section! Usualy located near the end of the object file.)
+  ShStrSHTEntry = get_shdrtab_entry(SHdrTable, ?ELF64_SHDRENTRY_SIZE, ShStrNdx),
+  ShStrOffset   = get_shdrtab_entry_field(ShStrSHTEntry, ?SH_OFFSET),
+  ShStrSize     = get_shdrtab_entry_field(ShStrSHTEntry, ?SH_SIZE),
+  get_binary_segment(Elf, {ShStrOffset, ShStrSize}).
+
+
 %% @spec get_shdrtab_entry( binary(), integer(), integer() ) -> binary()
 %% @doc Extracts a specific Entry of a Section Header Table. This function
 %%      takes as argument the Section Header Table (`SHdrTab') and the size of
@@ -195,36 +216,31 @@ get_shdrtab_entry_by_name(Elf, EntryName) ->
   %% Extract Section Name String Table index and number of entries in Section 
   %% Header Table from File Header.
   FileHeader = extract_header(Elf),
-  ShStrNdx   = get_header_field(FileHeader, ?E_SHSTRNDX),
   ShNum      = get_header_field(FileHeader, ?E_SHNUM),
-  %% Extract Section Header Table from binary
+  %% Extract Section Header Table and Section Header String Table from binary
   SHdrTable  = extract_shdrtab(Elf),
-  %% Extract String Name Table from binary
-  ShStrSHTEntry = get_shdrtab_entry(SHdrTable, ?ELF64_SHDRENTRY_SIZE, ShStrNdx),
-  ShStrOffset   = get_shdrtab_entry_field(ShStrSHTEntry, ?SH_OFFSET),
-  ShStrSize     = get_shdrtab_entry_field(ShStrSHTEntry, ?SH_SIZE),
-  ShStr         = get_binary_segment(Elf, {ShStrOffset, ShStrSize}),
+  ShStrTab   = extract_shstrtab(Elf),
   %% Find Section Header Table entry by name
-  get_shdrtab_entry_by_name(SHdrTable, ShNum, ShStr, EntryName, 0).
+  get_shdrtab_entry_by_name(SHdrTable, ShNum, ShStrTab, EntryName, 0).
 
 -spec get_shdrtab_entry_by_name( binary(), integer(), binary(), string(),
 				 integer() ) -> binary().
-get_shdrtab_entry_by_name(_SHdrTable, Shnum, _ShStr, _EntryName, Index) 
+get_shdrtab_entry_by_name(_SHdrTable, Shnum, _ShStrTab, _EntryName, Index)
   when Index >= Shnum ->
   <<>>; % Iterated Shnum entries and couldn't find an entry with EntryName.
-get_shdrtab_entry_by_name(SHdrTable, Shnum, ShStr, EntryName, Index) ->
+get_shdrtab_entry_by_name(SHdrTable, Shnum, ShStrTab, EntryName, Index) ->
   %% Extract next Section Header Table entry 
   SHeader = get_shdrtab_entry(SHdrTable, ?ELF64_SHDRENTRY_SIZE, Index),
   %% Get offset in String Name Table
   ShName  = get_header_field(SHeader, ?SH_NAME),
   %% Extract Names from String Name Table starting at offset ShName  
-  <<_Hdr:ShName/binary, Names/binary>> = ShStr,
+  <<_Hdr:ShName/binary, Names/binary>> = ShStrTab,
   Name = bin_get_string(Names),
   case (EntryName =:= Name) of 
     true -> 
       SHeader;
     false ->
-      get_shdrtab_entry_by_name(SHdrTable, Shnum, ShStr, EntryName, Index+1)
+      get_shdrtab_entry_by_name(SHdrTable, Shnum, ShStrTab, EntryName, Index+1)
   end.
 
   
@@ -344,30 +360,46 @@ get_call_list(Elf) ->
   SymTab = extract_symtab(Elf),      % Holds the offsets in Str Table of all 
 				     %   symbols
   StrTab = extract_strtab(Elf),      % Str Table holds all symbols' string names
+  %% But we *also* need (in case of a section header index in R_SYM):
+  SHdrTab = extract_shdrtab(Elf),    % Section Header Table
+  ShStrTab= extract_shstrtab(Elf),   % Section Header string table (not apparent
+				     %   even with readelf!)
   %% Do the magic!
   NumOfEntries = byte_size(Rela) div ?ELF64_RELA_SIZE,
-  L = get_call_list(SymTab, StrTab, Rela, NumOfEntries, []),
+  L = get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, NumOfEntries, []),
   %% Merge identical function calls to one tuple and a list of offsets
   flatten_list(L).
 
--spec get_call_list( binary(), binary(), binary(), integer(), 
+-spec get_call_list( binary(), binary(), binary(), binary(), binary(), integer(),
 		     [{string(), integer()}] ) -> [{string(), integer()}].
-get_call_list(_SymTab, _StrTab, _Rela, 0, Acc) ->
+%% XXX: Maybe iterate on Rela binary (get rid of N).
+get_call_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, _Rela, 0, Acc) ->
   Acc;
-get_call_list(SymTab, StrTab, Rela, N, Acc) ->
+get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, N, Acc) ->
   %% Get Offset and Information about name
   Offset   = get_rela_entry_field(Rela, ?R_OFFSET),
   Info     = get_rela_entry_field(Rela, ?R_INFO),
   SymIndex = ?ELF64_R_SYM(Info),
   %% Get name (offset) from Symbol Table
   SymTabEntry = get_symtab_entry(SymTab, ?ELF64_SYM_SIZE, SymIndex),
+  Shndx       = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
   SymName     = get_symtab_entry_field(SymTabEntry, ?ST_NAME),
-  %% Get name from String Table
-  <<_Hdr:SymName/binary, Names/binary>> = StrTab,
-  FunctionName = bin_get_string(Names),
+  %% Extract symbol's name
+  FunctionName =
+    case Shndx of
+      ?SHN_UNDEF -> %% Get name from String Table (undefined symbol)
+	<<_Hdr:SymName/binary, Names/binary>> = StrTab,
+	bin_get_string(Names);
+      Ni -> %% Get name from Section Header Table (name of section)
+	SHeader = get_shdrtab_entry(SHdrTab, ?ELF64_SHDRENTRY_SIZE, Ni),
+	ShName = get_header_field(SHeader, ?SH_NAME),
+	<<_Hdr:ShName/binary, Names2/binary>> = ShStrTab,
+	bin_get_string(Names2)
+    end,
   %% Continue with next entries in Relocation "table"
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
-  get_call_list(SymTab, StrTab, More, N-1, [{FunctionName, Offset} | Acc]).
+  get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, More, N-1,
+		[{FunctionName, Offset} | Acc]).
   
 
 %%------------------------------------------------------------------------------
@@ -417,7 +449,7 @@ extract_gcc_exn_table(Elf) ->
 
 
 %% @spec get_gcc_exn_table_info( binary() ) -> binary()
-%% @doc
+%% @doc 
 
 -spec get_gcc_exn_table_info( binary() ) -> binary().
 get_gcc_exn_table_info(GCCExnTab) ->
