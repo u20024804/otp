@@ -231,7 +231,7 @@
 -define(DYNSTR,     ".dynstr").
 -define(GOT,        ".got").
 -define(HASH,       ".hash").
--define(NOTE,       ".note").
+-define(NOTE(Name), (".note." ++ Name)).
 -define(PLT,        ".plt").
 -define(REL(Name),  (".rel" ++ Name) ).
 -define(RELA(Name), (".rela" ++ Name) ).
@@ -317,12 +317,6 @@
 -define(ELF64_R_SYM(I),     (I bsr 32) ).
 -define(ELF64_R_TYPE(I),    (I band 16#ffffffff) ).
 -define(ELF64_R_INFO(S, T), ((S bsl 32) + (T band 16#ffffffff)) ).
-
-
-%%------------------------------------------------------------------------------
-%% ELF-64 Note Section
-%%------------------------------------------------------------------------------
--define(NOTE(Name), (".note." ++ Name)).
 
 
 %%------------------------------------------------------------------------------
@@ -461,6 +455,12 @@
 -define(DW_EH_PE_datarel, 16#30). % Value is relative to the beginning of the 
                                   %   section.
 
+
+%%------------------------------------------------------------------------------
+%% ELF-64 Read-only data (constants, literlas etc.)
+%%------------------------------------------------------------------------------
+
+-define(RO_ENTRY_SIZE, 8). % 8 bytes
 
 %%------------------------------------------------------------------------------
 %% Misc.
