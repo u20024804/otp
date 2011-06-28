@@ -280,6 +280,10 @@
 -define(ST_VALUE, {?ST_VALUE_OFFSET, ?ST_VALUE_SIZE}).
 -define(ST_SIZE,  {?ST_SIZE_OFFSET, ?ST_SIZE_SIZE}).
 
+%% Macros to extract information from st_type
+-define(ELF64_ST_BIND(I), (I bsr 4) ).
+-define(ELF64_ST_TYPE(I), (I band 16#0f) ).
+
 %% Symbol Bindings
 -define(STB_LOCAL,  0).
 -define(STB_GLOBAL, 1).

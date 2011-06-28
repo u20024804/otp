@@ -365,40 +365,43 @@ get_call_list(Elf) ->
   ShStrTab= extract_shstrtab(Elf),   % Section Header string table (not apparent
 				     %   even with readelf!)
   %% Do the magic!
-  NumOfEntries = byte_size(Rela) div ?ELF64_RELA_SIZE,
-  L = get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, NumOfEntries, []),
+  L = get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, []),
   %% Merge identical function calls to one tuple and a list of offsets
   flatten_list(L).
 
--spec get_call_list( binary(), binary(), binary(), binary(), binary(), integer(),
+-spec get_call_list( binary(), binary(), binary(), binary(), binary(),
 		     [{string(), integer()}] ) -> [{string(), integer()}].
-%% XXX: Maybe iterate on Rela binary (get rid of N).
-get_call_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, _Rela, 0, Acc) ->
+get_call_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc) ->
   Acc;
-get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, N, Acc) ->
+get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
   %% Get Offset and Information about name
   Offset   = get_rela_entry_field(Rela, ?R_OFFSET),
   Info     = get_rela_entry_field(Rela, ?R_INFO),
-  SymIndex = ?ELF64_R_SYM(Info),
-  %% Get name (offset) from Symbol Table
+  SymIndex = ?ELF64_R_SYM(Info), % Index in Symbol Table (.symtab)
+  %% Get appropriate entry from Symbol Table
   SymTabEntry = get_symtab_entry(SymTab, ?ELF64_SYM_SIZE, SymIndex),
-  Shndx       = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
-  SymName     = get_symtab_entry_field(SymTabEntry, ?ST_NAME),
+  %% Extract entry's type (it might be a section, function, notype etc.)
+  SInfo = get_symtab_entry_field(SymTabEntry, ?ST_INFO),
+  SType = ?ELF64_ST_TYPE(SInfo),
   %% Extract symbol's name
   FunctionName =
-    case Shndx of
-      ?SHN_UNDEF -> %% Get name from String Table (undefined symbol)
-	<<_Hdr:SymName/binary, Names/binary>> = StrTab,
+    case SType of
+      ?STT_SECTION -> %% Get name from Section Header Table (name of section)
+	Shndx = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
+	SHdrEntry = get_shdrtab_entry(SHdrTab, ?ELF64_SHDRENTRY_SIZE, Shndx),
+	SHdrName  = get_header_field(SHdrEntry, ?SH_NAME),
+	<<_Hdr:SHdrName/binary, Names/binary>> = ShStrTab,
 	bin_get_string(Names);
-      Ni -> %% Get name from Section Header Table (name of section)
-	SHeader = get_shdrtab_entry(SHdrTab, ?ELF64_SHDRENTRY_SIZE, Ni),
-	ShName = get_header_field(SHeader, ?SH_NAME),
-	<<_Hdr:ShName/binary, Names2/binary>> = ShStrTab,
-	bin_get_string(Names2)
+      %% XXX: Maybe only catch STT_FUNC and STT_NOTYPE?
+      _ -> %%Get name from String Table (undefined symbol)
+	%% Extract SName (contains  offset of name in StrTab)
+	SymName = get_symtab_entry_field(SymTabEntry, ?ST_NAME),
+	<<_Hdr:SymName/binary, Names/binary>> = StrTab,
+	bin_get_string(Names)
     end,
   %% Continue with next entries in Relocation "table"
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
-  get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, More, N-1,
+  get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, More,
 		[{FunctionName, Offset} | Acc]).
   
 
@@ -456,7 +459,7 @@ get_gcc_exn_table_info(GCCExnTab) ->
   %% First byte of LSDA is Landing Pad base encoding.
   <<LBenc:8, More/binary>> = GCCExnTab,
   %% Second byte is the Landing Pad base (if it encoding is note DW_EH_PE_omit).
-  {LPBase, LSDACont} = 
+  {_LPBase, LSDACont} = 
     case LBenc == ?DW_EH_PE_omit of
       true ->  % No landing pad base byte.
 	{0, More};
@@ -467,7 +470,7 @@ get_gcc_exn_table_info(GCCExnTab) ->
   %% Third byte of LSDA is the encoding of the Type Table.
   <<TTenc:8, More3/binary>> = LSDACont,
   %% Forth byte is the Types Table offset encoded in U-LEB128 (if it exists).
-  {TTOff, LSDACont2} =
+  {_TTOff, LSDACont2} =
     case TTenc == ?DW_EH_PE_omit of
       true ->  % There is no Types Table pointer.
 	{0, More3};
@@ -476,7 +479,7 @@ get_gcc_exn_table_info(GCCExnTab) ->
 	leb128_decode(More3)
     end,
   %% Fifth byte of LSDA is the encoding of the fields in the Call-site Table.
-  <<CSenc:8, More4/binary>> = LSDACont2,
+  <<_CSenc:8, More4/binary>> = LSDACont2,
   %% Sixth byte is the size (in bytes) of the Call-site Table encoded in 
   %% U-LEB128.
   leb128_decode(More4).
