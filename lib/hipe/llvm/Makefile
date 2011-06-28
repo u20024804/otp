@@ -43,7 +43,8 @@ HIPE_MODULES = hipe_rtl2llvm \
 							 hipe_llvm \
 							 elf64_format \
 							 note_erlgc \
-							 hipe_llvm_main
+							 hipe_llvm_main \
+							 hipe_llvm_bin
 else
 HIPE_MODULES =
 endif
