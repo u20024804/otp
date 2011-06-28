@@ -723,86 +723,10 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
       finalize_fun(OrdList, Exports, Opts)
   end,
   {_, Bin1} = lists:unzip(Bin),
-  FinalBin = fix_llvm_binary(Bin1, Closures, Exports), 
+  FinalBin = hipe_llvm_bin:join_binaries(Bin1, Closures, Exports),
   {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
   TargetArch = get(hipe_target_arch),
   {ok, {TargetArch, FinalBin}}.
-
-%% Convert term to binary as expected by the the hipe_unified_loader.
-%% Also In a case where more than one functions are compiled(whole module
-%% compilation or closures), we must pack them all to one term.
-fix_llvm_binary(Bin, Closures, Exports) ->
-  {CodeSize, ExportMap1, Refs, CodeBinary, ConstMap, ConstSize} = merge(Bin),
-  [FirstMFA| _] = Bin,
-  ExportMap = fix_exportmap(ExportMap1, Closures, Exports),
-  [{Version, CheckSum}, ConstAlign, _, _, LabelMap, _, _, _, _, _, _] =
-  FirstMFA,
-  term_to_binary(
-    [{Version, CheckSum}, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
-      CodeSize, CodeBinary, Refs, 0,  []]
-  ).
-
-fix_exportmap([Addr,M,F,A, IC, IL|Rest], Closures, Exports) ->
-  IsClosure = lists:member({M,F,A}, Closures),
-  IsExported = is_exported(F, A, Exports),
-  [Addr,M,F,A,IsClosure,IsExported | fix_exportmap(Rest, Closures, Exports)];
-fix_exportmap([],_,_) -> [].
-is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
-
-merge(Bin) -> 
-  %% Fix Base Size. Set it equal to length of all constants
-  merge(Bin, 0 ,[], [], <<>>, [], 2000, 0).
-merge([
-    [_, _, ConstSize1, MFAConstMap, _, {0, M, F, A, IC, IL}, CodeSize, Code1, Refs1, _, _] 
-    | Rest], 
-  Size,  ExportMap, Refs, Code, ConstMap, Base, ConstSize) ->
-  NewRefs = add_offset_to_relocs(Refs1, Size),
-  {NewConstmap, NewRefs2, NewBase} = fix_constmap(MFAConstMap, NewRefs, Base,
-    []),
-  merge(Rest, Size+CodeSize, [[Size, M, F, A, IC, IL]|ExportMap],
-    NewRefs2++Refs, <<Code/binary, Code1/binary>>, NewConstmap++ConstMap,
-    NewBase, erlang:max(ConstSize1, ConstSize));
-merge([], Size, ExportMap, Refs, Code, ConstMap, Base, ConstSize) -> {Size, lists:flatten(ExportMap),
-    Refs, Code, ConstMap, ConstSize}.
-
-
-fix_constmap([Label, A, B, Const | Rest], Refs, Base, ConstMap) -> 
-  NewRefs = substitute_const_label(Refs, Label, Base),
-  fix_constmap(Rest, NewRefs, Base+1, [Base, A, B, Const|ConstMap]);
-fix_constmap([], Refs, Base, ConstMap) -> 
-  {ConstMap, Refs, Base}.
-
-add_offset_to_relocs(Refs, Size) ->
-  Update_reloc = fun (X) -> X+Size end,
-  Update_exn_label = fun (X) -> 
-      case X of
-        {[], _, _, _} = A -> A;
-        {ExnLabel,FrameSize,Arity,BitMap} -> {ExnLabel+Size, FrameSize, Arity,
-            BitMap};
-        Other -> Other
-      end
-  end,
-  Update_relocs = fun({X, Relocs}) -> {Update_exn_label(X), lists:map(Update_reloc, Relocs)} end,
-  Update_all = fun ({Type, Relocs}) -> {Type, lists:map(Update_relocs, Relocs)} end,
-  lists:map(Update_all, Refs).
-
-substitute_const_label(Refs, Label, Base) ->
-  Check_Const =
-    fun ({X, List}) ->
-        case X of
-          {constant, Label} -> {{constant, Base}, List};
-          _ -> {X,List}
-        end
-    end,
-  Check_Type = 
-    fun ({X, List}) ->
-        case X of 
-            1 -> {X, lists:map(Check_Const, List)};
-            _ -> {X, List}
-          end
-    end,
-  lists:map(Check_Type, Refs).
-
 
 
 %% -------------------------------------------------------------------------
