@@ -81,21 +81,28 @@ rtl_to_native(RTL, _Options) ->
   %% No Labelmap Used yet..
   LabelMap = [],
   %% As Fun Name we must pass the original name
-  ExportMap = {0, Mod_Name, FN, Arity, IsClosure, IsLeaf},
+  ExportMap = {Mod_Name, FN, Arity},
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
   Refs = lists:filter(
-        fun ({_, X}) -> 
-            case X of [] -> false;
-                _ -> true 
-              end 
-        end,
-      FinalRelocs), 
-  [{?VERSION_STRING(),?HIPE_SYSTEM_CRC},
-   ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
-   CodeSize,  CodeBinary,  Refs,
-   0,[] % ColdSize, CRrefs
-  ].
+    fun ({_, X}) -> 
+        case X of [] -> false;
+          _ -> true 
+        end 
+    end,
+    FinalRelocs), 
+  Bin = hipe_llvm_bin:mk_llvm_bin(
+    ?VERSION_STRING(),
+    ?HIPE_SYSTEM_CRC,
+    ConstAlign,
+    ConstSize,
+    ConstMap,
+    LabelMap,
+    ExportMap,
+    CodeSize,
+    CodeBinary,
+    Refs),
+  Bin.
 
 
 fix_opts(Opts) ->
