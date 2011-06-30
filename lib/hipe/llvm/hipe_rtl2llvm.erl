@@ -47,9 +47,11 @@ translate(RTL) ->
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
   file:close(File_rtl),
+  %% Create NewData which containts also data for switches
+  {NewData, SortedBy} = data_from_switches(Code, Data, []),
   %% Create constant map and write it to file for loader
   {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
-  hipe_pack_constants:pack_constants([{Fun, [], Data}], ?HIPE_X86_REGISTERS:alignment()),
+  hipe_pack_constants:pack_constants([{Fun, [], NewData}], ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SC)),
@@ -71,9 +73,11 @@ translate(RTL) ->
   ClosureDecl = lists:map(fun declare_closure/1, Closures),
   %% Create code to create local name for closures
   ClosureLoad = lists:map(fun load_closure/1, Closures),
+  %% Create LabelMap 
+  TempLabelMap = lists:map(fun create_label_map/1, SortedBy),
   %% Collect gc roots
- % GCRoots = collect_gc_roots(Code),
-%  GCRootDeclare = declare_gc_roots(GCRoots),
+  %%GCRoots = collect_gc_roots(Code),
+  %%GCRootDeclare = declare_gc_roots(GCRoots),
   Code2 = fix_invoke_calls(Code),
   LLVM_Code = translate_instr_list(Code2, []),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code,
@@ -92,12 +96,53 @@ translate(RTL) ->
   CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
   CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
   CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
+  CallDict5 = labels_to_dict(TempLabelMap, CallDict4),
   %% Temporary Store inc_stack to Dictionary
-  CallDict5 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict4),
-  CallDict6 = lists:foldl(fun closure_to_dict/2, CallDict5, Closures),
-  {LLVM_Code3, CallDict6, SC, ConstAlign, ConstSize}.
+  CallDict6 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict5),
+  CallDict7 = lists:foldl(fun closure_to_dict/2, CallDict6, Closures),
+  {LLVM_Code3, CallDict7, SC, ConstAlign, ConstSize, TempLabelMap}.
 
 %%-----------------------------------------------------------------------------
+
+%% Create NewData which contains blocks for JumpTables. Also
+%% return necessary information to create LabelMap
+data_from_switches([], NewData, SortedBy) -> {NewData, SortedBy};
+data_from_switches([I|Is], Data, Sorted) ->
+  case I of
+    #switch{} ->
+      Labels = hipe_rtl:switch_labels(I),
+      LMap = [{label,L} || L <- Labels],
+      {NewData, JTabLab} =
+      case hipe_rtl:switch_sort_order(I) of
+        [] ->
+          hipe_consttab:insert_block(Data, word, LMap);
+        SortOrder ->
+          hipe_consttab:insert_sorted_block(
+            Data, word, LMap, SortOrder)
+      end,
+      io:format("J Tab Lab ~w ~n", [JTabLab]),
+      data_from_switches(Is, NewData, [{JTabLab, hipe_rtl:switch_sort_order(I)}|Sorted]);
+    _ -> data_from_switches(Is, Data, Sorted)
+  end.
+
+create_label_map([]) -> [];
+create_label_map({_, []}=LM) -> LM;
+create_label_map({ConstNumber, SortOrder}) -> {ConstNumber, sorted,
+    length(SortOrder)*8,SortOrder}.
+
+labels_to_dict(TempLabelMap, Dict) ->
+  labels_to_dict(TempLabelMap, Dict, 0).
+
+labels_to_dict([], Dict,_) -> Dict;
+labels_to_dict([{ConstNumber, []}|Rest], Dict, RodataNumber) ->
+  Dict1 = dict:store("@.rodata"++integer_to_list(RodataNumber), {constant,
+      ConstNumber}, Dict),
+  labels_to_dict(Rest, Dict1, RodataNumber+1);
+labels_to_dict([{ConstNumber, _, _, _}|Rest], Dict, RodataNumber) -> 
+  Dict1 = dict:store("@.rodata"++integer_to_list(RodataNumber), {constant,
+      ConstNumber}, Dict),
+  labels_to_dict(Rest, Dict1, RodataNumber+1).
+
 collect_gc_roots(Code) -> collect_gc_roots(Code, []).
 
 collect_gc_roots([], Roots) -> Roots;
@@ -971,9 +1016,10 @@ trans_switch(I) ->
       {trans_src(_Src), []}
   end,
   LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
-  ValueList = lists:map(fun integer_to_list/1, hipe_rtl:switch_sort_order(I)),
+  ValueList = lists:map(fun integer_to_list/1, lists:seq(0,
+      length(LabelList)-1)),
   ValueLabelList = lists:zip(ValueList, LabelList),
-  I2 = hipe_llvm:mk_switch("i64", Src, lists:nth(1, LabelList), ValueLabelList),
+  I2 = hipe_llvm:mk_switch("i64", Src, lists:nth(length(LabelList)-1, LabelList), ValueLabelList),
   [I2, I1]. 
 %%-----------------------------------------------------------------------------
 
@@ -1095,7 +1141,7 @@ load_call_regs(RegList) ->
   RegList2 = lists:filter(fun reg_not_undef/1, RegList),
   Names = lists:map(fun mk_temp_reg/1, RegList),
   Names2 = lists:filter(fun reg_not_undef/1, Names), 
-  Ins = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_load(X, "i64", "%"++Y++"_var", [], 
+  Ins = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_load(X, "i64", "%"++Y++"_reg_var", [], 
                   [], false) end, Names2, RegList2),
   {Names, Ins}.
 
@@ -1111,7 +1157,7 @@ store_call_regs(RegList, Name) ->
           integer_to_list(Y), [])
     end, Names2, Indexes),
   I2 = lists:zipwith(fun (X,Y) -> hipe_llvm:mk_store("i64", X, "i64",
-          "%"++Y++"_var", [], [], false) end, Names2, RegList2),
+          "%"++Y++"_reg_var", [], [], false) end, Names2, RegList2),
   [I2, I1].
 
 
@@ -1159,9 +1205,9 @@ mk_temp_reg(Name) ->
   end.
 
 mk_hp() ->
-  "%hp_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
+  "%hp_reg_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
 mk_hp(N) ->
-  "%hp_var_" ++ integer_to_list(N).
+  "%hp_reg_var_" ++ integer_to_list(N).
 
 trans_float_src(Src) -> 
   case hipe_rtl:is_const_label(Src) of
@@ -1218,10 +1264,10 @@ trans_reg(Arg) ->
 map_precoloured_reg(Index) ->
   %TODO : Works only for amd64 architecture and only for register r15
   case hipe_rtl_arch:reg_name(Index) of
-    "%r15" -> "%hp_var";
-    "%rbp" -> "%p_var";
-    "%fcalls" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:fcalls())};
-    "%hplim" -> {"%p_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:heap_limit())};
+    "%r15" -> "%hp_reg_var";
+    "%rbp" -> "%p_reg_var";
+    "%fcalls" -> {"%p_reg_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:fcalls())};
+    "%hplim" -> {"%p_reg_var", hipe_amd64_registers:proc_offset(hipe_amd64_registers:heap_limit())};
     _ ->  exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
   end.
@@ -1433,8 +1479,8 @@ load_regs(Regs) -> load_regs(Regs, []).
 
 load_regs([], Acc) -> Acc;
 load_regs([R | Rs], Acc) ->
-  I1 = hipe_llvm:mk_alloca("%"++R++"_var", "i64", [], []),
-  I2 = hipe_llvm:mk_store("i64", "%"++R++"_in", "i64", "%"++R++"_var", [], [], false),
+  I1 = hipe_llvm:mk_alloca("%"++R++"_reg_var", "i64", [], []),
+  I2 = hipe_llvm:mk_store("i64", "%"++R++"_in", "i64", "%"++R++"_reg_var", [], [], false),
   load_regs(Rs, [I1,I2,Acc]).
 
 
