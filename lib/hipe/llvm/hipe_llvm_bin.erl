@@ -73,8 +73,11 @@ join_binaries(Binaries, Closures, Exports) ->
   {ConstMap, Refs} = join_relocations(Binaries, ExportMap),
 %  io:format("ConstMap ~w ~nRefs ~wn",[ConstMap, Refs]),
   FinalExportMap =  fix_exportmap(ExportMap, Closures, Exports),
+  ConstMap1 = filter_empty_list(ConstMap),
+  LabelMap1= filter_empty_list(LabelMap),
+  {FinalConstMap, FinalLabelMap} = compute_const_size(ConstMap1, LabelMap1),
   term_to_binary([{Version, CheckSum},
-   ConstAlign, ConstSize, ConstMap, LabelMap, FinalExportMap,
+   ConstAlign, ConstSize, FinalConstMap, FinalLabelMap, FinalExportMap,
    CodeSize,  CodeBinary,  Refs,
    0,[] % ColdSize, CRrefs
  ]).
@@ -118,7 +121,7 @@ add_offset_to_labels(LabelMap, Offset) ->
   AddOffset =
     fun (X) ->
         case X of
-          {Val, Off} -> {Val, Off+Offset};
+          {unsorted, UnSorted} -> {unsorted, lists:map(fun ({A,B}) -> {A,B+Offset} end, UnSorted)};
           {sorted, Num, Sorted} -> 
             {sorted, Num, lists:map(fun ({A,B}) -> {A,B+Offset} end, Sorted)}
         end
@@ -139,13 +142,27 @@ correct_align_size(Binaries) ->
 
 %%----------------------------------------------------------------------------
 
+%% Remove Empty Lists from a list
+filter_empty_list(List) -> filter_empty_list(List, []).
+
+filter_empty_list([], Acc) -> lists:reverse(Acc);
+filter_empty_list([E|Es], Acc) -> 
+  case E of 
+    [] -> filter_empty_list(Es, Acc);
+    Other -> filter_empty_list(Es, [Other|Acc])
+  end.
+
 %% Give unique labels to constants, and update them in Refs.
 %% Also add correct offset to each relocation in Refs.
 join_relocations(Binaries, ExportMap) ->
   join_relocations(Binaries, ExportMap, [] ,[], 10000).
 
 join_relocations([], [], ConstAcc, RefAcc, _) ->
-  {ConstAcc, RefAcc};
+  ConstAcc1= tuplify_4(ConstAcc),
+  ConstAcc2 = lists:reverse(ConstAcc1),
+  ConstAcc3= un_tuplify_4(ConstAcc2),
+  {ConstAcc3, RefAcc};
+
 
 join_relocations([Bin|Bs], [Export|Es], ConstAcc, RefAcc, BaseLabel) ->
   {Offset, _, _, _} = Export,
@@ -162,7 +179,7 @@ unique_const_labels(ConstMap, Refs, BaseLabel) ->
   ConstLength = length(ConstMap1),
   ConstMap2 = lists:map(fun({Label,A,B,Const}) -> {Label+BaseLabel,A,B,Const}
     end, ConstMap1),
-  ConstMap3 = un_tuplify_4(ConstMap2),
+  ConstMap3 = un_tuplify_4(lists:reverse(ConstMap2)),
   NewRefs = substitute_const_label(Refs, BaseLabel),
   {ConstMap3, NewRefs, BaseLabel+ConstLength}.
 
@@ -217,4 +234,44 @@ fix_exportmap([{Addr,M,F,A}|Rest], Closures, Exports) ->
   [Addr,M,F,A,IsClosure,IsExported | fix_exportmap(Rest, Closures, Exports)];
 fix_exportmap([],_,_) -> [].
 is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
+
+%%----------------------------------------------------------------------------
+
+%% Fix Constant offsets in Constmap. Also update corresponding
+%% offsets in LabelMap
+compute_const_size(ConstMap, LabelMap) ->
+  ConstMap1 = tuplify_4(ConstMap),
+  {ConstMap2, LabelMap2} = compute_const_size(lists:reverse(ConstMap1), LabelMap, 0, [], []),
+  %io:format("--> ConstMap2 ~w~n", [ConstMap2]),
+  %ConstMap4= lists:reverse(ConstMap3),
+  ConstMap3 = un_tuplify_4(ConstMap2),
+  {ConstMap3, LabelMap2}.
+
+compute_const_size([], [], _, ConstAcc, LabelAcc) -> 
+  {ConstAcc, lists:reverse(LabelAcc)};
+compute_const_size([{Label, Offset, Type, Constant}|Rest], LabelMap,
+  Base, ConstAcc, LabelAcc) ->
+  case Type of
+    0 -> compute_const_size(Rest, LabelMap, Base, [{Label, Offset, Type,
+            Constant}|ConstAcc], LabelAcc);
+    1 -> 
+      %% In this case there should be an entry in LabelMap for this constant
+      %% block
+      case LabelMap of
+        [] -> 
+          compute_const_size(Rest, LabelMap, Base+length(Constant), [{Label, Base, Type,
+                Constant}|ConstAcc], LabelAcc);
+        Other -> 
+          [L|Ls] =LabelMap,
+          NewLabel = fix_label_offset(L, Base),
+          compute_const_size(Rest, Ls, Base+length(Constant), [{Label, Base, Type,
+                Constant}|ConstAcc], NewLabel++LabelAcc)
+    end;
+  2 -> compute_const_size(Rest, LabelMap, Base+8*length(Constant), [{Label, Base, Type,
+          Constant}|ConstAcc], LabelAcc)
+end.
+
+fix_label_offset({sorted, _, Sorted}, Offset) -> [{sorted,Offset,Sorted}];
+fix_label_offset( {unsorted, Unsorted}, Offset) -> lists:map(fun({A,B}) ->
+        {A+Offset,B} end, Unsorted).
 

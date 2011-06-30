@@ -8,13 +8,21 @@
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
 
+patch_labels([],[])->[];
+patch_labels([M|_], Labels) ->
+  case M of
+    {_, []} ->
+      [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
+    {_, sorted, Length, SortedBy} ->
+      [{sorted, Length, lists:zip(SortedBy,Labels)}]
+  end.
+
 rtl_to_native(RTL, _Options) ->
   %% Get LLVM Instruction List
-  {LLVMCode, RefDict, ConstMap, ConstAlign, ConstSize} = hipe_rtl2llvm:translate(RTL),
+  {LLVMCode, RefDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} = hipe_rtl2llvm:translate(RTL),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
-  IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
   {Mod_Name, FN, Arity} =  Fun,
   Fun_Name =
   case IsClosure of
@@ -34,6 +42,9 @@ rtl_to_native(RTL, _Options) ->
   Relocs = elf64_format:get_call_list(ObjBin),
   %% Get stack descriptors
   SDescs = note_erlgc:get_sdesc_list(ObjBin), 
+  %% Get Labels info
+  Labels = elf64_format:get_label_list(ObjBin),
+  LabelMap = patch_labels(TempLabelMap, Labels),
   %% Temporary code for creating references needed by  the loader
   Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
   Is_mfa = 
@@ -79,7 +90,6 @@ rtl_to_native(RTL, _Options) ->
   %%--------------------------------------------------------------------------
   %% Create All Information needed by the hipe_unified_loader
   %% No Labelmap Used yet..
-  LabelMap = [],
   %% As Fun Name we must pass the original name
   ExportMap = {Mod_Name, FN, Arity},
   CodeSize = byte_size(BinCode),
@@ -167,15 +177,18 @@ llvmc(Fun_Name, Opts) ->
 
 
 map_funs(Name, Dict) ->
-    B = 
-    case dict:fetch("@"++Name, Dict) of
-      {'constant', Label} -> {'constant', Label};
-      {'atom', AtomName} -> {'atom', AtomName};
-      {closure, Closure} -> {closure, Closure};
-      {BifName} -> map_bifs(BifName);
-      {M,F,A} -> {M,map_bifs(F),A};
-      Other -> exit({?MODULE,map_funs,{"Unknown call", Other}})
-    end.
+  FName = case Name of
+    ".rodata" -> ".rodata0";
+    _ -> Name
+  end,
+  case dict:fetch("@"++FName, Dict) of
+    {'constant', Label} -> {'constant', Label};
+    {'atom', AtomName} -> {'atom', AtomName};
+    {closure, Closure} -> {closure, Closure};
+    {BifName} -> map_bifs(BifName);
+    {M,F,A} -> {M,map_bifs(F),A};
+    Other -> exit({?MODULE,map_funs,{"Unknown call", Other}})
+  end.
 
 %% Ugly..Just for testing reasons
 map_bifs(Name) ->
