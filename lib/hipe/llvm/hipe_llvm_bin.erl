@@ -263,9 +263,16 @@ compute_const_size([{Label, Offset, Type, Constant}|Rest], LabelMap,
                 Constant}|ConstAcc], LabelAcc);
         Other -> 
           [L|Ls] =LabelMap,
-          NewLabel = fix_label_offset(L, Base),
-          compute_const_size(Rest, Ls, Base+length(Constant), [{Label, Base, Type,
-                Constant}|ConstAcc], NewLabel++LabelAcc)
+          %% Check whether the sizes of the constant and the label match
+          case check_sizes(Constant, L) of
+            match -> 
+              NewLabel = fix_label_offset(L, Base),
+              compute_const_size(Rest, Ls, Base+length(Constant), [{Label, Base, Type,
+                    Constant}|ConstAcc], NewLabel++LabelAcc);
+            no_match ->
+              compute_const_size(Rest, LabelMap, Base+length(Constant), [{Label, Base, Type,
+                    Constant}|ConstAcc], LabelAcc)
+          end
     end;
   2 -> compute_const_size(Rest, LabelMap, Base+8*length(Constant), [{Label, Base, Type,
           Constant}|ConstAcc], LabelAcc)
@@ -275,3 +282,16 @@ fix_label_offset({sorted, _, Sorted}, Offset) -> [{sorted,Offset,Sorted}];
 fix_label_offset( {unsorted, Unsorted}, Offset) -> lists:map(fun({A,B}) ->
         {A+Offset,B} end, Unsorted).
 
+check_sizes(Constant, Label) ->
+  LabelSize = 
+  case Label of
+    {sorted,_, Sorted} -> length(Sorted)*8;
+    {unsorted,Unsorted} -> length(Unsorted)*8
+  end,
+  case length(Constant) of
+    LabelSize -> 
+      match;
+    Other ->
+      io:format("No Constant/Label match:~nconst_size~w~nlabel_size:~w~n", [length(Constant),LabelSize]),
+      no_match
+  end.
