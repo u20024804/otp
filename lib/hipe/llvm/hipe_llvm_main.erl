@@ -39,7 +39,7 @@ rtl_to_native(RTL, _Options) ->
   %% Extract information from object file
   ObjBin = elf64_format:open_object_file(Object_filename),
   %% Get relocation info and write to file for loader
-  Relocs = elf64_format:get_call_list(ObjBin),
+  Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
   SDescs = note_erlgc:get_sdesc_list(ObjBin), 
   %% Get Labels info
