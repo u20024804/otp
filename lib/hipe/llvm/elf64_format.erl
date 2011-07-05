@@ -36,6 +36,7 @@
 	 extract_segment_by_name/2,
 	 get_field/2,
 	 flatten_list/1,
+	 split_list/2,
 	 leb128_decode/1,
 	 %%
 	 %% Extract information from ELF-64 Object File Format
@@ -60,7 +61,7 @@
 	 extract_rela/2,
 	 get_rela_entry/3,
 	 get_rela_entry_field/2,
-	 get_call_list/1,
+	 get_text_symbol_list/1,
 	 %% Note
 	 extract_note/2,
 	 %% Executable code
@@ -346,14 +347,14 @@ get_rela_entry_field(Relocation, {FieldOffset, FieldSize}) ->
   get_field(Relocation, {integer, {FieldOffset, FieldSize}}).
 
 
-%% @spec get_call_list( binary() ) -> [ {string(), [integer()]} ]
-%% @doc Create a call list of the form `[ {FunName, [Offset]} ]` with all 
-%%      Function names and offsets of the calls in the binary. Very useful in
+%% @spec get_text_symbol_list( binary() ) -> [ {string(), [integer()]} ]
+%% @doc Create a list of the form [ {`SymbolName', [`Offset']} ] with all
+%%      symbol names and offsets of the code in the binary. Very useful in
 %%      many cases that you might want to extract that kind of information from
 %%      an object file.
 
--spec get_call_list( binary() ) -> [ {string(), [integer()]} ].
-get_call_list(Elf) ->
+-spec get_text_symbol_list( binary() ) -> [ {string(), [integer()]} ].
+get_text_symbol_list(Elf) ->
   %% Extract Symbol, String and Relocation Tables
   Rela   = extract_rela(Elf, ?TEXT), % All calls are Relocatable data indexing
 				     %   Symbol Table
@@ -365,15 +366,15 @@ get_call_list(Elf) ->
   ShStrTab= extract_shstrtab(Elf),   % Section Header string table (not apparent
 				     %   even with readelf!)
   %% Do the magic!
-  L = get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, []),
+  L = get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, []),
   %% Merge identical function calls to one tuple and a list of offsets
   flatten_list(L).
 
--spec get_call_list( binary(), binary(), binary(), binary(), binary(),
+-spec get_text_symbol_list( binary(), binary(), binary(), binary(), binary(),
 		     [{string(), integer()}] ) -> [{string(), integer()}].
-get_call_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc) ->
+get_text_symbol_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc) ->
   Acc;
-get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
+get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
   %% Get Offset and Information about name
   Offset   = get_rela_entry_field(Rela, ?R_OFFSET),
   Info     = get_rela_entry_field(Rela, ?R_INFO),
@@ -384,7 +385,7 @@ get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
   SInfo = get_symtab_entry_field(SymTabEntry, ?ST_INFO),
   SType = ?ELF64_ST_TYPE(SInfo),
   %% Extract symbol's name
-  FunctionName =
+  SymbolName =
     case SType of
       ?STT_SECTION -> %% Get name from Section Header Table (name of section)
 	Shndx = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
@@ -401,8 +402,8 @@ get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
     end,
   %% Continue with next entries in Relocation "table"
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
-  get_call_list(SymTab, StrTab, SHdrTab, ShStrTab, More,
-		[{FunctionName, Offset} | Acc]).
+  get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, More,
+		[{SymbolName, Offset} | Acc]).
   
 
 %%------------------------------------------------------------------------------
@@ -459,7 +460,7 @@ get_gcc_exn_table_info(GCCExnTab) ->
   %% First byte of LSDA is Landing Pad base encoding.
   <<LBenc:8, More/binary>> = GCCExnTab,
   %% Second byte is the Landing Pad base (if it encoding is note DW_EH_PE_omit).
-  {_LPBase, LSDACont} = 
+  {_LPBase, LSDACont} =
     case LBenc == ?DW_EH_PE_omit of
       true ->  % No landing pad base byte.
 	{0, More};
@@ -532,34 +533,32 @@ extract_rodata(Elf) ->
   extract_segment_by_name(Elf, ?RODATA).
 
 
-%% @spec get_label_list( binary() ) -> [integer()]
-%% @doc This function get as argument an ELF64 binary file and returns a list
-%%      with all .rela.rodata labels (that is constants and literals in code)
-%%      or an empty list if no .rela.rodata section exists in code.
+%% @spec get_label_list( binary() ) -> [{integer(), [integer()]}]
+%% @doc This function gets as argument an ELF64 binary file and returns a list
+%%      of tuples with all .rela.rodata labels (that is constants and literals
+%%      in code) or an empty list if no .rela.rodata section exists in code. The
+%%      tuples separate the labels corresponding to different (most often)
+%%      switch statements e.g. [{0, [...]}, {1, [...]}].
 
--spec get_label_list( binary() ) -> [integer()].
+-spec get_label_list( binary() ) -> [{integer(), [integer()]}].
 get_label_list(Elf) ->
   %% Extract relocation entries for .rodata segment
-  %Rodata = extract_rodata(Elf),
   case extract_rela(Elf, ?RODATA) of
     <<>> ->
       [];
     RelaRodata ->
-      NumOfEntries = byte_size(RelaRodata) div ?ELF64_RELA_SIZE,
-      get_label_list(RelaRodata, NumOfEntries, [])
+      get_label_list(RelaRodata, [])
   end.
 
--spec get_label_list( binary(), integer(), [integer()] ) -> integer().
-get_label_list(_RelaRodata, 0, Acc) ->
+-spec get_label_list( binary(), [integer()] ) -> integer().
+get_label_list(<<>>, Acc) ->
   lists:reverse(Acc);
-get_label_list(RelaRodata, N, Acc) ->
+get_label_list(RelaRodata, Acc) ->
   %% Get relocation entry information
-  _Offset = get_rela_entry_field(RelaRodata, ?R_OFFSET),
-  _Info = get_rela_entry_field(RelaRodata, ?R_INFO),
   Addend = get_rela_entry_field(RelaRodata, ?R_ADDEND),
   %% Store addend (offset in .text segment) and continue with more entries
   <<_Head:?ELF64_RELA_SIZE/binary, MoreRodata/binary>> = RelaRodata,
-  get_label_list(MoreRodata, N-1, [Addend | Acc]).
+  get_label_list(MoreRodata, [Addend | Acc]).
 
 
 %%------------------------------------------------------------------------------
@@ -647,6 +646,26 @@ flatten_list({Key, Val}, [{PrevKey,Vals} | T]) ->
     false ->  
       [{Key, [Val]}, {PrevKey, Vals} | T] % just insert the tuple
   end.
+
+
+%% @spec split_list( [atom()], [integer()] ) -> [{integer(), [integer()]}]
+%% @doc Function that takes as arguments a list of atoms and a list with
+%%      numbers indicating how many items should each tuple have and splits
+%%      the original list to a list of tuples of the form {`Id', `SubList'}
+%%      where `Id' is just a positive integer and `SubList' a sublist of
+%%      atoms (with the specified number of elements).
+
+-spec split_list([atom()], [integer()]) -> [{integer(), [integer()]}].
+split_list(List, ElemsPerTuple) ->
+  split_list(List, ElemsPerTuple, 0, []).
+
+-spec split_list([atom()], [integer()], integer(),
+		 [{integer(), [atom()]}]) -> [{integer(), [atom()]}].
+split_list(List, [], NextId, Acc) ->
+  lists:reverse([{NextId, List} | Acc]);
+split_list(List, [NumOfElems | MoreNums], NextId, Acc) ->
+  {L1, L2} = lists:split(NumOfElems, List),
+  split_list(L2, MoreNums, NextId+1, [{NextId, L1} | Acc]).
 
 
 %% @spec leb128_decode( binary() ) -> {integer(), binary()}
