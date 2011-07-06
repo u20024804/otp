@@ -553,18 +553,42 @@ trans_comment(I) ->
 %% enter
 %%
 trans_enter(I) ->
-  %For now treat it as normal call
-  Foo = hipe_rtl:mk_new_var(),
-  I1 = hipe_rtl:mk_call(
-    [Foo],
-    hipe_rtl:enter_fun(I),
-    hipe_rtl:enter_arglist(I),
-    [],
-    [],
-    hipe_rtl:enter_type(I)
-  ),
-  I2 = hipe_rtl:mk_return([Foo]),
-  [trans_return(I2), trans_call(I1)].
+  Args = fix_args(hipe_rtl:enter_arglist(I)),
+  %% Reverse arguments that are passed to stack to match with the Erlang
+  %% calling convention(Propably not needed in prim calls).
+  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
+    false -> Args;
+    true -> 
+      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
+      ArgsInRegs++ lists:reverse(ArgsInStack)
+  end,
+  FixedRegs = fixed_registers(),
+  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
+  {Name, I2} = case hipe_rtl:enter_fun(I) of
+    PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
+    {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
+      {"@"++trans_mfa_name({M,F,A}), []};
+    Reg ->
+      case hipe_rtl:is_reg(Reg) of
+        true -> 
+          TT1 = mk_temp(),
+          II1 = hipe_llvm:mk_conversion(TT1, inttoptr, "i64", trans_src(Reg),
+            "i64*"),
+          TT2 = mk_temp(),
+          II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
+            "{i64,i64,i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
+          {TT2, [II2, II1]};
+        false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
+      end;
+    Other -> exit({?MODULE, trans_call, {"Unimplented Call", Other}})
+  end,
+  %% TODO: Fix return type of calls
+  T1 = mk_temp(),
+  I3 = hipe_llvm:mk_call(T1, true, "cc 11", [], "{i64, i64, i64, i64, i64,
+    i64}", Name, FinalArgs, []),
+  I4 = hipe_llvm:mk_ret([{"{i64,i64,i64,i64,i64,i64}", T1}]),
+  [I4, I3, I2, I1].
 
 %%
 %% fconv

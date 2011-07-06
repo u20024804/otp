@@ -146,7 +146,8 @@ opt(Fun_Name, Opts) ->
 
 %% LLC wrapper (.ll -> .s)
 llc(Opt_filename, Fun_Name) ->
-  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so"],
+  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so",
+    "-tailcallopt"],
   llc(Opt_filename, Fun_Name, Options).
 
 llc(Opt_filename, Fun_Name, Opts) ->
