@@ -526,7 +526,9 @@ patch_sdesc(?STACK_DESC(SymExnRA, FSize, Arity, Live),
       [] -> 0; % No catch
       LabelOffset -> CodeAddress + LabelOffset
     end,
-  ?ASSERT(assert_local_patch(Address)),
+    %% LLVM: Temporary remove assert. We must remove the stack descriptor
+    %% for tail calls.
+    % ?ASSERT(assert_local_patch(Address)),
   hipe_bifs:enter_sdesc({Address, ExnRA, FSize, Arity, Live}).
 
 %%----------------------------------------------------------------
