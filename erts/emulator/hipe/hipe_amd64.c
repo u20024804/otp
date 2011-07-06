@@ -57,12 +57,9 @@ int hipe_patch_insn(void *address, Uint64 value, Eterm type)
       case am_atom:
 	/* check that value fits in an unsigned imm32 */
 	/* XXX: are we sure it's not really a signed imm32? */
-
-  /* XXX: In LLVM Backend we are using medium code level for
-   * constants(including atoms), so atoms need 8-byte addresses. */
-	if ((Uint)(Uint64)value != value)
+	if ((Uint)(Uint32)value != value)
 	    return -1;
-	*(Uint64*)address = (Uint64)value;
+	*(Uint32*)address = (Uint32)value;
 	break;
       default:
 	return -1;
