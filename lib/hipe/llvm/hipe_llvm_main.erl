@@ -128,7 +128,7 @@ compile_with_llvm(Fun_Name) ->
   
 %% OPT wrapper (.ll -> .ll)
 opt(Fun_Name) ->
-  Options = ["-O3"],
+  Options = ["-mem2reg", "-O2"], %XXX: Do we want -O3?
   opt(Fun_Name, Options).
 
 opt(Fun_Name, Opts) ->
@@ -146,8 +146,8 @@ opt(Fun_Name, Opts) ->
 
 %% LLC wrapper (.ll -> .s)
 llc(Opt_filename, Fun_Name) ->
-  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so",
-    "-tailcallopt"],
+  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so"],
+    %"-tailcallopt"],
   llc(Opt_filename, Fun_Name, Options).
 
 llc(Opt_filename, Fun_Name, Opts) ->
