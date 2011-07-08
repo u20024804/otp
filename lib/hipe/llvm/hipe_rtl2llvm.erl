@@ -11,17 +11,17 @@
 -define(P, "p").
 -define(NSP, "nsp").
 
--ifdef(AMD64_FCALLS_IN_REGISTER).
--define(FCALLS, "fcalls").
--else.
--define(FCALLS, "undef").
--endif.
+%% -ifdef(AMD64_FCALLS_IN_REGISTER).
+%% -define(FCALLS, "fcalls").
+%% -else.
+%% -define(FCALLS, "undef").
+%% -endif.
 
--ifdef(AMD64_HEAP_LIMIT_IN_REGISTER).
--define(HEAP_LIMIT, "heap_limit").
--else.
--define(HEAP_LIMIT, "undef").
--endif.
+%% -ifdef(AMD64_HEAP_LIMIT_IN_REGISTER).
+%% -define(HEAP_LIMIT, "heap_limit").
+%% -else.
+%% -define(HEAP_LIMIT, "undef").
+%% -endif.
 
 -define(HIPE_X86_REGISTERS, hipe_amd64_registers).
 
@@ -502,7 +502,7 @@ trans_call(I) ->
             "i64*"),
           TT2 = mk_temp(),
           II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
-            "{i64,i64,i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
+            "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
           {TT2, [II2, II1]};
         false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
       end;
@@ -512,22 +512,21 @@ trans_call(I) ->
   %% TODO: Fix return type of calls
   I3 = case hipe_rtl:call_fail(I) of
     %% Normal Call
-    [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64, i64,
-        i64}", Name, FinalArgs, []);
+    [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64}",
+			    Name, FinalArgs, []);
     %% Call With Exception
     FailLabelNum -> 
         TrueLabel = "L"++integer_to_list(hipe_rtl:call_normal(I)),
         FailLabel = mk_jump_label(FailLabelNum),
-        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64, i64,
-          i64}", Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
+        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64}",
+				 Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
         I5 = hipe_llvm:mk_label(TrueLabel),
         [I5, I4]
     end,
     I6 = store_call_regs(FixedRegs, T1),
     I7 = case hipe_rtl:call_dstlist(I) of
       [] -> [];
-      [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64, i64,
-          i64}", T1, "5", [])
+      [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64}", T1, "3", [])
     end,
     I8 = case hipe_rtl:call_continuation(I) of
       [] -> [];
@@ -577,7 +576,7 @@ trans_enter(I) ->
             "i64*"),
           TT2 = mk_temp(),
           II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
-            "{i64,i64,i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
+            "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
           {TT2, [II2, II1]};
         false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
       end;
@@ -585,9 +584,9 @@ trans_enter(I) ->
   end,
   %% TODO: Fix return type of calls
   T1 = mk_temp(),
-  I3 = hipe_llvm:mk_call(T1, true, "cc 11", [], "{i64, i64, i64, i64, i64,
-    i64}", Name, FinalArgs, []),
-  I4 = hipe_llvm:mk_ret([{"{i64,i64,i64,i64,i64,i64}", T1}]),
+  I3 = hipe_llvm:mk_call(T1, true, "cc 11", [], "{i64, i64, i64, i64}",
+			 Name, FinalArgs, []),
+  I4 = hipe_llvm:mk_ret([{"{i64,i64,i64,i64}", T1}]),
   [I4, I3, I2, I1].
 
 %%
@@ -1172,7 +1171,7 @@ load_call_regs(RegList) ->
 % Store Precoloured Registers
 % Name: The LLVM temp variable name tha holds the struct of return value
 store_call_regs(RegList, Name) -> 
-  Type = "{i64, i64, i64, i64, i64, i64}",
+  Type = "{i64, i64, i64, i64}",
   RegList2 = lists:filter(fun reg_not_undef/1, RegList),
   Names = lists:map(fun mk_temp_reg/1, RegList),
   Indexes = lists:seq(0, erlang:length(RegList2)-1),
@@ -1481,7 +1480,7 @@ fixed_registers() ->
   case get(hipe_target_arch) of
     x86 -> [?HP, ?P, ?NSP];
     amd64 ->
-      [?HP, ?P, ?NSP, ?FCALLS, ?HEAP_LIMIT];
+      [?HP, ?P, ?NSP];
     Other ->
       exit({?MODULE, map_registers, {"Unknown Architecture"}})
   end.
@@ -1506,49 +1505,3 @@ load_regs([R | Rs], Acc) ->
   I1 = hipe_llvm:mk_alloca("%"++R++"_reg_var", "i64", [], []),
   I2 = hipe_llvm:mk_store("i64", "%"++R++"_in", "i64", "%"++R++"_reg_var", [], [], false),
   load_regs(Rs, [I1,I2,Acc]).
-
-
-%%-----------------------------------------------------------------------------
-%%
-%% Only For Testing
-%%
-
-
-%% Create Main Function (Only for testing reasons)
-
-create_main(Dev, Name, Params) ->
-  {_,N,_} = Name,
-%  io:format(Dev, "@.str = private constant [3 x i8] c\"%d\\00\", align 1;",[]),
-%  io:format(Dev, "~n~ndefine i64 @main() {~n", []),
-%  io:format(Dev, "Entry:~n", []),
-%  T1 = mk_temp(hipe_gensym:new_var(llvm)),
-%  io:format(Dev, "~s = call {i64,i64,i64,i64,i64,i64} @~w(", [T1, N]),
-%  init_params(Dev, 5+erlang:length(Params)),
-%  io:format(Dev, ")~n", []),
-%
-%  io:format(Dev, "%0 = tail call i64 (i8*, ...)* @printf(i8* noalias " ++ 
-%    "getelementptr inbounds ([3 x i8]* @.str, i64 0, i64 0)," ++ 
-%    " i64 ~s) nounwind~n", [T1]),
-%  io:format(Dev, "ret i64 ~s~n}~n",[T1]),
-%  io:format(Dev, "declare i64 @printf(i8* noalias, ...) nounwind~n",[]),
-  io:format(Dev, "declare {i64, i1} @llvm.smul.with.overflow.i64(i64 %a, "++
-    "i64%b)~n", []),
-  io:format(Dev, "declare {i64, i1} @llvm.ssub.with.overflow.i64(i64 %a, "++
-    "i64%b)~n", []),
-  io:format(Dev, "declare {i64, i1} @llvm.sadd.with.overflow.i64(i64 %a, "++
-    "i64%b)~n", []),
-io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_add(i64 %a, i64
-  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
-io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_sub(i64 %a, i64
-  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
-io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_mul(i64 %a, i64
-  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]),
-io:format(Dev,"declare cc 11  {i64, i64, i64, i64, i64, i64} @bif_div(i64 %a, i64
-  %b, i64 %c, i64 %d, i64 %e, i64 %q, i64 %l)~n",[]).
-
-%% Print random parameters in main function
-init_params(Dev, 1) -> 
-  io:format(Dev,"i64 ~w",[random:uniform(20)]);
-init_params(Dev, N) -> 
-  io:format(Dev,"i64 ~w,",[random:uniform(20)]),
-  init_params(Dev, N-1).
