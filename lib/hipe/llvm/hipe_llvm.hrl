@@ -38,6 +38,7 @@
 %-record(llvm_xor, {dst, type, src1, src2}).
 %% Aggregate Operations
 -record(llvm_extractvalue, {dst, type, val, idx, idxs=[]}).
+-record(llvm_insertvalue, {dst, val_type, val, elem_type, elem, idx, idxs=[]}).
 %% Memory Access And Addressing Operations
 -record(llvm_alloca, {dst, type, num = [], align = []}).
 -record(llvm_load, {dst, p_type, pointer, alignment = [], nontemporal = [],
