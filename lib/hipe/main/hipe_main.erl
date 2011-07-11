@@ -118,11 +118,6 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
 			   "RTL", Options),
   case proplists:get_bool(to_llvm, Options) of
-    false -> ok; 
-    true ->
-      hipe_rtl2llvm:translate(LinearRTL)  % Stub Function to try RTL parsing
-  end,
-  case proplists:get_bool(to_rtl, Options) of
     false ->
       LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
              "RTL", Options),

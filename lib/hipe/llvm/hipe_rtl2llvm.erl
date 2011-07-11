@@ -713,8 +713,23 @@ trans_return(I, Relocs) ->
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
   Ret2 = lists:map(fun(X) -> {"i64", X} end, LoadedFixedRegs),
   Ret = lists:append(Ret2,Ret1),
-  I2 = hipe_llvm:mk_ret(Ret),
-  {[I2, I1], Relocs}.
+  [_|[_|Typ]] = lists:foldl(fun(_,Y) -> Y++", i64" end, [],
+    Ret),
+  Type = "{"++Typ++"}",
+  {RetStruct, I2} = mk_return_struct(Ret, Type),
+  I3 = hipe_llvm:mk_ret([{Type, RetStruct}]),
+  {[I3, I2, I1], Relocs}.
+
+mk_return_struct(RetValues, Type) ->
+  mk_return_struct(RetValues, Type, [], "undef", 0).
+
+mk_return_struct([], _Type, Acc, StructName, _Index) ->
+  {StructName, Acc};
+mk_return_struct([{ElemType, ElemName}|Rest], Type, Acc, StructName, Index) ->
+  T1 = mk_temp(),
+  I1 = hipe_llvm:mk_insertvalue(T1, Type, StructName, ElemType, ElemName, 
+    integer_to_list(Index), []),
+  mk_return_struct(Rest, Type, [I1|Acc], T1, Index+1).
 
 %%
 %% store 
