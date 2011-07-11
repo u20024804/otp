@@ -456,7 +456,10 @@ trans_call(I) ->
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
+  FinalArgs = case hipe_rtl:call_fun(I) of
+		{erlang, get_stacktrace, 0} -> ReversedArgs;
+		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
+	      end,
   {Name, I2} = case hipe_rtl:call_fun(I) of
     PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
@@ -530,7 +533,10 @@ trans_enter(I) ->
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ ReversedArgs,
+  FinalArgs = case hipe_rtl:enter_fun(I) of
+		{erlang, get_stacktrace, 0} -> ReversedArgs;
+		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
+	      end,
   {Name, I2} = case hipe_rtl:enter_fun(I) of
     PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
