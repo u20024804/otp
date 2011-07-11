@@ -168,6 +168,15 @@
     extractvalue_idx/1,
     extractvalue_idxs/1,
 
+    mk_insertvalue/7,
+    insertvalue_dst/1,
+    insertvalue_val_type/1,
+    insertvalue_val/1,
+    insertvalue_elem_type/1,
+    insertvalue_elem/1,
+    insertvalue_idx/1,
+    insertvalue_idxs/1,
+
     mk_alloca/4,
     alloca_dst/1,
     alloca_type/1,
@@ -606,6 +615,20 @@ extractvalue_idx(#llvm_extractvalue{idx=Idx})-> Idx.
 extractvalue_idxs(#llvm_extractvalue{idxs=Idxs})-> Idxs.
 
 %%
+%% insertvalue
+%%
+mk_insertvalue(Dst, Val_type, Val, Elem_type, Elem, Idx, Idxs) -> 
+  #llvm_insertvalue{dst=Dst, val_type=Val_type, val=Val, elem_type=Elem_type,
+                    elem=Elem, idx=Idx, idxs=Idxs}.
+insertvalue_dst(#llvm_insertvalue{dst=Dst}) -> Dst.
+insertvalue_val_type(#llvm_insertvalue{val_type=Val_type}) -> Val_type.
+insertvalue_val(#llvm_insertvalue{val=Val}) -> Val.
+insertvalue_elem_type(#llvm_insertvalue{elem_type=Elem_type}) -> Elem_type.
+insertvalue_elem(#llvm_insertvalue{elem=Elem}) -> Elem.
+insertvalue_idx(#llvm_insertvalue{idx=Idx}) -> Idx.
+insertvalue_idxs(#llvm_insertvalue{idxs=Idxs}) -> Idxs.
+
+%%
 %% alloca
 %%
 mk_alloca(Dst, Type, Num, Align) ->
@@ -912,6 +935,11 @@ pp_ins(Dev, I) ->
         %%TODO Print idxs
         [extractvalue_dst(I), extractvalue_type(I), extractvalue_val(I),
           extractvalue_idx(I)]);
+    #llvm_insertvalue{} ->
+      io:format(Dev, "~s = insertvalue ~s ~s, ~s ~s, ~s~n", 
+        %%TODO Print idxs
+        [insertvalue_dst(I), insertvalue_val_type(I), insertvalue_val(I),
+          insertvalue_elem_type(I), insertvalue_elem(I), insertvalue_idx(I)]);
     #llvm_alloca{} ->
       io:format(Dev, "~s = alloca ~s ", [alloca_dst(I), alloca_type(I)]),
       case alloca_num(I) of
