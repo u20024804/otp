@@ -31,18 +31,8 @@ translate(RTL) ->
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
-  %% To be used later
-  IsClosure = hipe_rtl:rtl_is_closure(RTL),
-  _IsLeaf = hipe_rtl:rtl_is_leaf(RTL),
-%  io:format("Geia sou llvm!~n"),
-  {Mod_Name, Fun_Name, Arity} = 
-  case IsClosure of
-    false ->
-      Fun;
-    true ->
-      {M, Closure_Name, A} = Fun,
-      {M, fix_closure_name(Closure_Name), A}
-  end,
+  {_Mod_Name, Closure_Name, _Arity} = Fun,
+  Fun_Name = fix_closure_name(Closure_Name),
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -50,277 +40,123 @@ translate(RTL) ->
   %% Create NewData which containts also data for switches
   {NewData, SortedBy} = data_from_switches(Code, Data, []),
   %% Create constant map and write it to file for loader
-  {ConstAlign,ConstSize,ConstMap,RefsFromConsts} =
-  hipe_pack_constants:pack_constants([{Fun, [], NewData}], ?HIPE_X86_REGISTERS:alignment()),
+  {ConstAlign, ConstSize, ConstMap, RefsFromConsts} =
+    hipe_pack_constants:pack_constants([{Fun, [], NewData}], 
+                                      ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SC)),
-  %% io:format("--> RTL2LLVM: Constant Labels Found: ~w~n", [ConstLabels]),
-  %% Extract atoms from RTL Code(remove duplicates)
-  Atoms = lists:usort(find_atoms(Code)),
-  %% io:format("--> RTL2LLVM Atoms Found ~w~n", [Atoms]),
-  %% Create code to declare atoms
-  AtomDecl = lists:map(fun declare_atom/1, Atoms),
-  %% Create code to create local name for atoms
-  AtomLoad = lists:map(fun load_atom/1, Atoms),
   %% Create code to declare constants 
   ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
-  %% Extract closures from RTL Code(remove duplicates)
-  Closures = find_closures(Code),
-  %% Create code to declare closures
-  ClosureDecl = lists:map(fun declare_closure/1, Closures),
-  %% Create code to create local name for closures
-  ClosureLoad = lists:map(fun load_closure/1, Closures),
   %% Create LabelMap 
   TempLabelMap = lists:map(fun create_label_map/1, SortedBy),
   %% Collect gc roots
   %%GCRoots = collect_gc_roots(Code),
   %%GCRootDeclare = declare_gc_roots(GCRoots),
   Code2 = fix_invoke_calls(Code),
-  LLVM_Code = translate_instr_list(Code2, []),
+  Relocs0 = dict:new(),
+  {LLVM_Code, Relocs1} = translate_instr_list(Code2, [], Relocs0),
+  RelocsList = relocs_to_list(Relocs1),
+  {CallList, AtomList, ClosureList} = seperate_relocs(RelocsList),
+  %% Create code to declare atoms
+  AtomDecl = lists:map(fun declare_atom/1, AtomList),
+  %% Create code to create local name for atoms
+  AtomLoad = lists:map(fun load_atom/1, AtomList),
+  %% Create code to declare closures
+  ClosureDecl = lists:map(fun declare_closure/1, ClosureList),
+  %% Create code to create local name for closures
+  ClosureLoad = lists:map(fun load_closure/1, ClosureList),
   LLVM_Code2 = create_header(Fun, Params, LLVM_Code,
-    ClosureLoad++AtomLoad++ConstLoad,
-    IsClosure),
-  %% Find function calls in code
-  Is_call = fun (X) -> is_external_call(X, atom_to_list(Mod_Name),
-        atom_to_list(Fun_Name), integer_to_list(Arity)) end,
-  I1 = lists:filter(fun is_call/1, LLVM_Code),
-  I2 = lists:filter(Is_call, I1),
+    ClosureLoad++AtomLoad++ConstLoad),
+  %% Find function calls
+  IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
+  ExternalCallList = lists:filter(IsExternalCall, CallList),
   %% Create code to declare external function
-  Fun_Declarations = lists:map(fun call_to_decl/1, lists:filter(fun (X) ->
-          string:substr(call_name(X),1,1) /= "%" end,  I2)),
+  Fun_Declarations = lists:map(fun call_to_decl/1, ExternalCallList),
   LLVM_Code3 = ClosureDecl++AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
-  CallDict = dict:new(),
-  CallDict2 = lists:foldl(fun call_to_dict/2, CallDict, I1),
-  CallDict3 = lists:foldl(fun const_to_dict/2, CallDict2, ConstLabels),
-  CallDict4 = lists:foldl(fun atom_to_dict/2, CallDict3, Atoms),
-  CallDict5 = labels_to_dict(TempLabelMap, CallDict4),
+  Relocs2 = lists:foldl(fun const_to_dict/2, Relocs1, ConstLabels),
+  Relocs3 = labels_to_dict(TempLabelMap, Relocs2),
   %% Temporary Store inc_stack to Dictionary
-  CallDict6 = dict:store("@inc_stack_0", {inc_stack_0}, CallDict5),
-  CallDict7 = lists:foldl(fun closure_to_dict/2, CallDict6, Closures),
-  {LLVM_Code3, CallDict7, SC, ConstAlign, ConstSize, TempLabelMap}.
+  Relocs4 = dict:store("inc_stack_0", {call, {bif, inc_stack_0, 0}}, 
+                        Relocs3),
+  {LLVM_Code3, Relocs4, SC, ConstAlign, ConstSize, TempLabelMap}.
 
 %%-----------------------------------------------------------------------------
 
-%% Create NewData which contains blocks for JumpTables. Also
-%% return necessary information to create LabelMap
-data_from_switches([], NewData, SortedBy) -> {NewData, SortedBy};
-data_from_switches([I|Is], Data, Sorted) ->
-  case I of
-    #switch{} ->
-      Labels = hipe_rtl:switch_labels(I),
-      LMap = [{label,L} || L <- Labels],
-      {NewData, JTabLab} =
-      case hipe_rtl:switch_sort_order(I) of
-        [] ->
-          hipe_consttab:insert_block(Data, word, LMap);
-        SortOrder ->
-          hipe_consttab:insert_sorted_block(
-            Data, word, LMap, SortOrder)
-      end,
-      io:format("J Tab Lab ~w ~n", [JTabLab]),
-      data_from_switches(Is, NewData, [{JTabLab, hipe_rtl:switch_sort_order(I)}|Sorted]);
-    _ -> data_from_switches(Is, Data, Sorted)
-  end.
 
-create_label_map([]) -> [];
-create_label_map({_, []}=LM) -> LM;
-create_label_map({ConstNumber, SortOrder}) -> {ConstNumber, sorted,
-    length(SortOrder)*8,SortOrder}.
-
-labels_to_dict(TempLabelMap, Dict) ->
-  labels_to_dict(TempLabelMap, Dict, 0).
-
-labels_to_dict([], Dict,_) -> Dict;
-labels_to_dict([{ConstNumber, []}|Rest], Dict, RodataNumber) ->
-  Dict1 = dict:store("@.rodata"++integer_to_list(RodataNumber), {constant,
-      ConstNumber}, Dict),
-  labels_to_dict(Rest, Dict1, RodataNumber+1);
-labels_to_dict([{ConstNumber, _, _, _}|Rest], Dict, RodataNumber) -> 
-  Dict1 = dict:store("@.rodata"++integer_to_list(RodataNumber), {constant,
-      ConstNumber}, Dict),
-  labels_to_dict(Rest, Dict1, RodataNumber+1).
-
-collect_gc_roots(Code) -> collect_gc_roots(Code, []).
-
-collect_gc_roots([], Roots) -> Roots;
-collect_gc_roots([I|Is], Roots) ->
-  Dst = insn_dst(I),
-  case Dst of 
-    [] ->  collect_gc_roots(Is, Roots);
-    _ -> 
-      case hipe_rtl:is_var(Dst) of
-        true -> collect_gc_roots(Is, [Dst|Roots]);
-        false -> collect_gc_roots(Is, Roots)
-      end
-  end.
-
-declare_gc_roots(Roots) -> declare_gc_roots(Roots, []).
-
-declare_gc_roots([], Ins) -> Ins;
-declare_gc_roots([Root|Rest], Ins) -> 
-  GCRootName = trans_dst(Root) ++ "_gcroot",
-  I1 = hipe_llvm:mk_alloca(GCRootName, "i64*", [], []),
-  T1 = mk_temp(),
-  I2 = hipe_llvm:mk_conversion(T1, bitcast, "i64**", GCRootName, "i8**"),
-  I3 = hipe_llvm:mk_call([], false, [], [], void, "@llvm.gcroot", 
-    [{"i8**",T1}, {"i8*", "null"}], []),
-  declare_gc_roots(Rest, [I1, I2, I3 | Ins]).
+%%collect_gc_roots(Code) -> collect_gc_roots(Code, []).
+%%
+%%collect_gc_roots([], Roots) -> Roots;
+%%collect_gc_roots([I|Is], Roots) ->
+%%  Dst = insn_dst(I),
+%%  case Dst of 
+%%    [] ->  collect_gc_roots(Is, Roots);
+%%    _ -> 
+%%      case hipe_rtl:is_var(Dst) of
+%%        true -> collect_gc_roots(Is, [Dst|Roots]);
+%%        false -> collect_gc_roots(Is, Roots)
+%%      end
+%%  end.
+%%
+%%declare_gc_roots(Roots) -> declare_gc_roots(Roots, []).
+%%
+%%declare_gc_roots([], Ins) -> Ins;
+%%declare_gc_roots([Root|Rest], Ins) -> 
+%%  GCRootName = trans_dst(Root) ++ "_gcroot",
+%%  I1 = hipe_llvm:mk_alloca(GCRootName, "i64*", [], []),
+%%  T1 = mk_temp(),
+%%  I2 = hipe_llvm:mk_conversion(T1, bitcast, "i64**", GCRootName, "i8**"),
+%%  I3 = hipe_llvm:mk_call([], false, [], [], void, "@llvm.gcroot", 
+%%    [{"i8**",T1}, {"i8*", "null"}], []),
+%%  declare_gc_roots(Rest, [I1, I2, I3 | Ins]).
 
 %%----------------------------------------------------------------------------
 
 
-%% Extract Closures from RTL CODE
-find_closures(Code) -> find_closures(Code, []).
-find_closures([], Closures) -> Closures;
-find_closures([I|Is], Closures) ->
-    case I of
-      #load_address{} ->
-        case hipe_rtl:load_address_type(I) of
-          closure -> 
-            Closure  = hipe_rtl:load_address_addr(I),
-            find_closures(Is, [Closure | Closures]);
-          _ -> find_closures(Is, Closures)
-        end;
-        _ -> find_closures(Is, Closures)
-      end.
+%%----------------------------------------------------------------------------
+%%----------------------------------------------------------------------------
+%%----------------------------------------------------------------------------
 
-declare_closure({{_, ClosureName, _}, _, _})->
-  FixedName = "@"++atom_to_list(fix_closure_name(ClosureName)),
-  hipe_llvm:mk_const_decl(FixedName, "external constant", "i8", "").
+translate_instr_list([], Acc, Relocs) -> 
+  {lists:reverse(lists:flatten(Acc)), Relocs};
+translate_instr_list([I|Is], Acc, Relocs) ->
+  {Acc1, NewRelocs} = translate_instr(I, Relocs),
+  translate_instr_list(Is, [Acc1|Acc], NewRelocs).
 
-load_closure({{_, ClosureName, _}, _, _})->
-  FixedName = atom_to_list(fix_closure_name(ClosureName)),
-  Dst = "%"++FixedName++"_var",
-  Name = "@"++FixedName,
-  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
-
-closure_to_dict({{_, ClosureName, _}, _, _}=Closure, Dict)->
-  FixedName = "@"++atom_to_list(fix_closure_name(ClosureName)),
-  dict:store(FixedName, {closure, Closure}, Dict).
-
-%% Extract Atoms from RTL Code
-find_atoms(Code) -> find_atoms(Code, []).
-find_atoms([], Atoms) -> Atoms;
-find_atoms([I|Is], Atoms) -> 
+translate_instr(I, Relocs) ->
   case I of
-    #load_atom{} ->
-      Atom = hipe_rtl:load_atom_atom(I),
-      find_atoms(Is, [Atom|Atoms]);
-    _ -> find_atoms(Is, Atoms)
-  end.
-
-declare_atom(Atom) ->
-  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
-  Name = "@"++LLVM_Name,
-  hipe_llvm:mk_const_decl(Name, "external constant", "i64", "").
-load_atom(Atom) ->
-  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
-  Dst = "%"++LLVM_Name++"_var",
-  Name = "@"++LLVM_Name,
-  hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
-atom_to_dict(Atom, Dict) ->
-  LLVM_Name = make_llvm_id(atom_to_list(Atom)),
-  Name = "@"++LLVM_Name,
-  dict:store(Name, {'atom', Atom}, Dict).
-
-%% Extract Type of Constants from ConstMap
-find_constants(ConstMap) -> find_constants(ConstMap, []).
-find_constants([], LabelAcc) -> LabelAcc;
-find_constants([Label, _, _, _| Rest], LabelAcc) -> 
-  find_constants(Rest, [Label| LabelAcc]).
-
-%% Declare an External Consant. We declare all constants as i8 
-%% in order to be able to calcucate pointers of the form DL+6, with
-%% the getelementptr instruction. Otherwise we have to convert constants form 
-%% pointers to values, add the offset and convert them again to pointers
-declare_constant(Label) -> 
-  Name = "@DL"++integer_to_list(Label),
-  hipe_llvm:mk_const_decl(Name, "external constant", "i8", "").
-
-%% Loading of a constant depends on it's type. Float constants are loaded
-%% to double (with offset 6?), and all other constants are converted from
-%% pointers to 64 integers.
-load_constant(Label) ->
-  Dst = "%DL"++integer_to_list(Label)++"_var",
-  Name = "@DL"++integer_to_list(Label),
-  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
-
-
-%% Store external constants and calls to dictionary
-const_to_dict(Elem, Dict) ->
-  Name = "@DL"++integer_to_list(Elem),
-  dict:store(Name, {'constant', Elem}, Dict).
-
-call_to_dict(Elem, Dict) -> 
-  Name = case Elem of
-    #llvm_call{} ->
-      hipe_llvm:call_fnptrval(Elem);
-    #llvm_invoke{} ->
-      hipe_llvm:invoke_fnptrval(Elem)
-  end,
-  case re:run(Name, "@([a-zA-Z_0-9]*)\.([a-zA-Z_0-9]*)\.([a-zA-Z_0-9]*)",
-      [global,{capture,all_but_first,list}]) of
-    {match, [[BifName, [], []]]} -> 
-      dict:store(Name, {erlang:list_to_atom(BifName)}, Dict);
-    {match, [[M,F,A]]} -> 
-      case M of
-        "llvm" -> Dict;
-        _ -> 
-          dict:store(Name, {erlang:list_to_atom(M),
-                        erlang:list_to_atom(F),
-                        erlang:list_to_integer(A)}, Dict)
-                end;
-    {match, _} -> Dict;
-    nomatch -> 
-      case string:substr(Name,1,1) of
-      "%" -> Dict;
-          _ ->
-      exit({?MODULE, call_to_dict, {"Unknown call",Name}})
-  end
-  end.
-
-translate_instr_list([], Acc) -> 
-  lists:reverse(lists:flatten(Acc));
-translate_instr_list([I|Is], Acc) ->
-  Acc1 = translate_instr(I),
-  translate_instr_list(Is, [Acc1|Acc]).
-
-
-translate_instr(I) ->
-  case I of
-    #alu{} -> trans_alu(I);
-    #alub{} -> trans_alub(I);
-    #branch{} -> trans_branch(I);
+    #alu{} -> trans_alu(I, Relocs);
+    #alub{} -> trans_alub(I, Relocs);
+    #branch{} -> trans_branch(I, Relocs);
     #call{} -> case hipe_rtl:call_fun(I) of
-        fwait -> io:format("Fwait found~n"),[];
-        _ -> trans_call(I)
+        fwait -> io:format("Fwait found~n"),{[], Relocs};
+        _ -> trans_call(I, Relocs)
       end;
-    #comment{} -> trans_comment(I);
-    #enter{} -> trans_enter(I);
-    #fconv{} -> trans_fconv(I);
-    #fixnumop{} -> trans_fixnum(I);
-    #fload{} -> trans_fload(I);
-    #fmove{} -> trans_fmove(I);
-    #fp{} -> trans_fp(I);
-    #fp_unop{} -> trans_fp_unop(I);
-    #fstore{} -> trans_fstore(I);
-    #gctest{} -> trans_gctest(I);
-    #goto{} -> trans_goto(I);
+    #comment{} -> trans_comment(I, Relocs);
+    #enter{} -> trans_enter(I, Relocs);
+    #fconv{} -> trans_fconv(I, Relocs);
+    #fixnumop{} -> trans_fixnum(I, Relocs);
+    #fload{} -> trans_fload(I, Relocs);
+    #fmove{} -> trans_fmove(I, Relocs);
+    #fp{} -> trans_fp(I, Relocs);
+    #fp_unop{} -> trans_fp_unop(I, Relocs);
+    #fstore{} -> trans_fstore(I, Relocs);
+    #gctest{} -> trans_gctest(I, Relocs);
+    #goto{} -> trans_goto(I, Relocs);
     %#goto_index{} -> ok;
-    #label{} -> trans_label(I);
-    #load{} -> trans_load(I);
-    #load_address{} -> trans_load_address(I);
-    #load_atom{} -> trans_load_atom(I);
+    #label{} -> trans_label(I, Relocs);
+    #load{} -> trans_load(I, Relocs);
+    #load_address{} -> trans_load_address(I, Relocs);
+    #load_atom{} -> trans_load_atom(I, Relocs);
     %#load_word_index{} -> ok;
-    #move{} -> trans_move(I);
+    #move{} -> trans_move(I, Relocs);
     %#multimove{} -> ok;
-    #phi{} -> trans_phi(I);
-    #return{} -> trans_return(I);
-    #store{} -> trans_store(I);
-    #switch{} -> trans_switch(I);
+    #phi{} -> trans_phi(I, Relocs);
+    #return{} -> trans_return(I, Relocs);
+    #store{} -> trans_store(I, Relocs);
+    #switch{} -> trans_switch(I, Relocs);
     Other -> 
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
@@ -330,7 +166,7 @@ translate_instr(I) ->
 %%
 %% alu
 %% 
-trans_alu(I) ->
+trans_alu(I, Relocs) ->
   _Dst = hipe_rtl:alu_dst(I),
   _Src1 = hipe_rtl:alu_src1(I),
   _Src2 = hipe_rtl:alu_src2(I),
@@ -351,32 +187,34 @@ trans_alu(I) ->
       [II2, II1];
     false -> []
   end,
-  [I5, I4, I3, I2, I1].
+  {[I5, I4, I3, I2, I1], Relocs}.
           
 %%
 %% alub
 %%
-trans_alub(I) ->
+trans_alub(I, Relocs) ->
   case hipe_rtl:alub_cond(I) of
-    overflow -> trans_alub_overflow(I);
-    not_overflow -> trans_alub_overflow(I);
-    _ -> trans_alub_no_overflow(I)
+    overflow -> trans_alub_overflow(I, Relocs);
+    not_overflow -> trans_alub_overflow(I, Relocs);
+    _ -> trans_alub_no_overflow(I, Relocs)
   end.
 
-trans_alub_overflow(I) ->
+trans_alub_overflow(I, Relocs) ->
   T1 = mk_temp(),
   %% No Precoloured Registers can exit in an alu with overflow
   {Src1, []} =  trans_src(hipe_rtl:alub_src1(I)),
   {Src2, []} =  trans_src(hipe_rtl:alub_src2(I)),
   %% TODO: Fix call
   Name = case hipe_rtl:alub_op(I) of
-          add -> "@llvm.sadd.with.overflow.i64";
-          mul -> "@llvm.smul.with.overflow.i64";
-          sub -> "@llvm.ssub.with.overflow.i64";
+          add -> "llvm.sadd.with.overflow.i64";
+          mul -> "llvm.smul.with.overflow.i64";
+          sub -> "llvm.ssub.with.overflow.i64";
           Other -> exit({?MODULE, trans_alub_overflow, {"Unknown operator in
                   alu with overflow", Other}})
         end,
-  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i64, i1}", Name,
+  NewRelocs = relocs_store(Name, {call, {llvm, "llvm.sadd.with.overflow.i64",
+        2}}, Relocs),
+  I1 = hipe_llvm:mk_call(T1, false, [], [], "{i64, i1}", "@"++Name,
                         [{"i64", Src1},{"i64", Src2}], []),
   {Dst, []} = trans_dst(hipe_rtl:alub_dst(I)),
   I2 = hipe_llvm:mk_extractvalue(Dst, "{i64, i1}", T1 , "0", []),
@@ -391,13 +229,14 @@ trans_alub_overflow(I) ->
       False_label = mk_jump_label(hipe_rtl:alub_true_label(I))
   end,
   I4 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
-  [I4, I3, I2, I1].
+  {[I4, I3, I2, I1], NewRelocs}.
 
-trans_alub_no_overflow(I) ->
+trans_alub_no_overflow(I, Relocs) ->
   %%alu
   T = hipe_rtl:mk_alu(hipe_rtl:alub_dst(I), hipe_rtl:alub_src1(I),
     hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
-  I1 = trans_alu(T),
+  %% a trans_alu instruction cannot change relocations
+  {I1, _} = trans_alu(T, Relocs),
   %%icmp
   _Dst = hipe_rtl:alub_dst(I),
   %% Translate destination as src, to match with the semantic of instruction
@@ -414,12 +253,12 @@ trans_alub_no_overflow(I) ->
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
   I6 = hipe_llvm:mk_br_cond(T3, True_label, False_label),
-  [I6, I5, I2, I1].
+  {[I6, I5, I2, I1], Relocs}.
 
 %%
 %% branch
 %%
-trans_branch(I) ->
+trans_branch(I, Relocs) ->
   Type = "i64",
   {Src1, []} = trans_src(hipe_rtl:branch_src1(I)),
   {Src2, []} = trans_src(hipe_rtl:branch_src2(I)),
@@ -431,13 +270,13 @@ trans_branch(I) ->
   True_label = mk_jump_label(hipe_rtl:branch_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:branch_false_label(I)),
   I2 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
-  [I2, I1].
+  {[I2, I1], Relocs}.
 
 
 %%
 %% call
 %%
-trans_call(I) ->
+trans_call(I, Relocs) ->
   %% TODO: Fix Destination List
   {Dst, []} =  case hipe_rtl:call_dstlist(I) of
     [] -> {mk_temp(), []};
@@ -452,7 +291,7 @@ trans_call(I) ->
     false -> Args;
     true -> 
       {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
-      ArgsInRegs++ lists:reverse(ArgsInStack)
+      ArgsInRegs ++ lists:reverse(ArgsInStack)
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
@@ -460,10 +299,16 @@ trans_call(I) ->
 		{erlang, get_stacktrace, 0} -> ReversedArgs;
 		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
 	      end,
-  {Name, I2} = case hipe_rtl:call_fun(I) of
-    PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
+  {Name, I2, NewRelocs} = case hipe_rtl:call_fun(I) of
+    PrimOp when is_atom(PrimOp) -> 
+      Name1 = trans_prim_op(PrimOp),
+      Relocs1  = relocs_store(Name1, {call, {bif, PrimOp,
+                                erlang:length(Args)}}, Relocs),
+      {"@"++Name1, [], Relocs1};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      {"@"++trans_mfa_name({M,F,A}), []};
+      Name1 = trans_mfa_name({M,F,A}),
+      Relocs1 = relocs_store(Name1, {call, {M,F,A}}, Relocs),
+                              {"@"++Name1, [], Relocs1};
  		Reg ->
       case hipe_rtl:is_reg(Reg) of
         true -> 
@@ -474,7 +319,7 @@ trans_call(I) ->
           TT2 = mk_temp(),
           II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
             "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
-          {TT2, [II2, II1]};
+          {TT2, [II2, II1], Relocs};
         false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
       end
   end,
@@ -500,9 +345,10 @@ trans_call(I) ->
     end,
     I8 = case hipe_rtl:call_continuation(I) of
       [] -> [];
-      CC -> trans_goto(hipe_rtl:mk_goto(CC))
+      CC -> {II3, _UnusedRelocs} = trans_goto(hipe_rtl:mk_goto(CC), Relocs),
+        II3
     end,
-    [I8, I7, I6, I3, I2, I1].
+    {[I8, I7, I6, I3, I2, I1], NewRelocs}.
 
 args_to_type(Args) -> 
   Args1 = lists:map(fun (_) -> "i64" end, Args),
@@ -513,15 +359,15 @@ args_to_type(Args) ->
 %%
 %% trans_comment
 %%
-trans_comment(I) ->
+trans_comment(I, Relocs) ->
   I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
-  I1.
+  {I1, Relocs}.
 
 
 %%
 %% enter
 %%
-trans_enter(I) ->
+trans_enter(I, Relocs) ->
   Args = fix_args(hipe_rtl:enter_arglist(I)),
   %% Reverse arguments that are passed to stack to match with the Erlang
   %% calling convention(Propably not needed in prim calls).
@@ -537,11 +383,17 @@ trans_enter(I) ->
 		{erlang, get_stacktrace, 0} -> ReversedArgs;
 		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
 	      end,
-  {Name, I2} = case hipe_rtl:enter_fun(I) of
-    PrimOp when is_atom(PrimOp) -> {"@"++trans_prim_op(PrimOp), []};
+  {Name, I2, NewRelocs} = case hipe_rtl:enter_fun(I) of
+    PrimOp when is_atom(PrimOp) -> 
+      Name1 = trans_prim_op(PrimOp),
+      NewRelocs1  = relocs_store(Name1, {call, {bif, PrimOp,
+                                erlang:length(Args)}}, Relocs),
+      {"@"++Name1, [], NewRelocs1};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      {"@"++trans_mfa_name({M,F,A}), []};
-    Reg ->
+      Name1 = trans_mfa_name({M,F,A}),
+      NewRelocs1 = relocs_store(Name1, {call, {M,F,A}}, Relocs),
+      {"@"++Name1, [], NewRelocs1};
+ 		Reg ->
       case hipe_rtl:is_reg(Reg) of
         true -> 
           TT1 = mk_temp(),
@@ -551,7 +403,7 @@ trans_enter(I) ->
           TT2 = mk_temp(),
           II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
             "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
-          {TT2, [II2, II1]};
+          {TT2, [II2, II1], Relocs};
         false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
       end
   end,
@@ -560,35 +412,35 @@ trans_enter(I) ->
   I3 = hipe_llvm:mk_call(T1, true, "cc 11", [], "{i64, i64, i64, i64}",
 			 Name, FinalArgs, []),
   I4 = hipe_llvm:mk_ret([{"{i64,i64,i64,i64}", T1}]),
-  [I4, I3, I2, I1].
+  {[I4, I3, I2, I1], NewRelocs}.
 
 %%
 %% fconv
 %%
-trans_fconv(I) ->
+trans_fconv(I, Relocs) ->
   %% XXX: Can a fconv destination be a precoloured reg? 
   _Dst = hipe_rtl:fconv_dst(I),
   {Dst, []} = trans_dst(_Dst),
   _Src = hipe_rtl:fconv_src(I),
   {Src, I1} =  trans_float_src(_Src),
   I2 = hipe_llvm:mk_sitofp(Dst, "i64", Src, "double"),
-  [I2, I1].
+  {[I2, I1], Relocs}.
     
       
   
 %%
 %% fixnumop
 %%
-trans_fixnum(I) ->
+trans_fixnum(I, Relocs) ->
   Dst = hipe_rtl:fixnumop_dst(I),
   Src = hipe_rtl:fixnumop_src(I),
   I1 = case hipe_rtl:fixnumop_type(I) of
     tag ->
-      trans_alu(hipe_tagscheme:realtag_fixnum(Dst, Src));
+      trans_alu(hipe_tagscheme:realtag_fixnum(Dst, Src), Relocs);
     untag ->
-      trans_alu(hipe_tagscheme:realuntag_fixnum(Dst, Src))
+      trans_alu(hipe_tagscheme:realuntag_fixnum(Dst, Src), Relocs)
   end,
-  I1.
+  {I1, Relocs}.
 
 
 %% TODO: fload, fstore, fmove, and fp are almost the same with load,store,move
@@ -597,7 +449,7 @@ trans_fixnum(I) ->
 %%
 %% fload
 %% 
-trans_fload(I) ->
+trans_fload(I, Relocs) ->
   _Dst = hipe_rtl:fload_dst(I),
   _Src = hipe_rtl:fload_src(I),
   _Offset = hipe_rtl:fload_offset(I),
@@ -609,12 +461,12 @@ trans_fload(I) ->
   T2 = mk_temp(),
   I4 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "double"),
   I5 = hipe_llvm:mk_load(Dst, "double", T2, [], [], false),
-  [I5, I4, I3, I2, I1].
+  {[I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% fmove
 %%
-trans_fmove(I) -> 
+trans_fmove(I, Relocs) -> 
   _Dst = hipe_rtl:fmove_dst(I),
   _Src = hipe_rtl:fmove_src(I),
   IsDstColoured = isPrecoloured(_Dst),
@@ -631,12 +483,12 @@ trans_fmove(I) ->
       [II2, II1];
     false -> []
   end,
-  [I3, I2, I1].
+  {[I3, I2, I1], Relocs}.
 
 %%
 %% fp
 %%
-trans_fp(I) ->
+trans_fp(I, Relocs) ->
   %% XXX: Just copied trans_alu...think again..
   _Dst = hipe_rtl:fp_dst(I),
   _Src1 = hipe_rtl:fp_src1(I),
@@ -662,12 +514,12 @@ trans_fp(I) ->
   I5 = hipe_llvm:mk_store("double", Dst, "double", "%exception_sync", [] ,[], true),
   T1 = mk_temp(),
   I6 = hipe_llvm:mk_load(T1, "double", "%exception_sync", [], [] ,true),
-  [I6, I5, I4, I3, I2, I1].
+  {[I6, I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% fp_unop
 %%
-trans_fp_unop(I) ->
+trans_fp_unop(I, Relocs) ->
   _Dst = hipe_rtl:fp_unop_dst(I),
   _Src = hipe_rtl:fp_unop_src(I),
   % Destination is a register and not in SSA Form..
@@ -687,7 +539,7 @@ trans_fp_unop(I) ->
       [II2, II1];
     false -> []
   end,
-  [I3, I2, I1].
+  {[I3, I2, I1], Relocs}.
 %% TODO: Fix fp_unop in a way like the following. You must change trans_dest,
 %% in order to call float_to_list in a case of float constant. Maybe the type
 %% check is expensive...
@@ -696,20 +548,20 @@ trans_fp_unop(I) ->
 % Op = hipe_rtl:fp_unop_op(I),
 % Zero = hipe_rtl:mk_imm(0.0),
 % I1 = hipe_rtl:mk_fp(Dst, Zero, Op, Src),
-% trans_fp(I1).
+% trans_fp(I, Relocs1).
 
 %%
 %% fstore
 %%
-trans_fstore(I) ->
+trans_fstore(I, Relocs) ->
   Base = hipe_rtl:fstore_base(I),
   I1 = case hipe_rtl_arch:is_precoloured(Base) of
-    true -> trans_fstore_reg(I);
+    true -> trans_fstore_reg(I, Relocs);
     false -> exit({?MODULE, trans_fstore ,{"Non Implemened yet", false}})
   end,
   I1.
 
-trans_fstore_reg(I) ->
+trans_fstore_reg(I, Relocs) ->
   B = hipe_rtl:fstore_base(I),
   {Base, _}  = trans_reg(B, dst),
   D1 = mk_hp(),
@@ -725,36 +577,36 @@ trans_fstore_reg(I) ->
   {Value, []} = trans_src(_Value),
   I4 = hipe_llvm:mk_store("double", Value, "double", D3, [], [],
                           false),
-  [I4, I3, I2, I1].
+  {[I4, I3, I2, I1], Relocs}.
 
 %%
 %% gctest
 %%
-trans_gctest(I) ->
+trans_gctest(I, Relocs) ->
   % For now ignore gc_test. Just print it as comment
   {W, []} = trans_src(hipe_rtl:gctest_words(I)),
   I1 = hipe_llvm:mk_comment("gc_test("++W++")"),
-  I1.
+  {I1, Relocs}.
 
 %%
 %% goto
 %%
-trans_goto(I) ->
+trans_goto(I, Relocs) ->
   I1 = hipe_llvm:mk_br(mk_jump_label(hipe_rtl:goto_label(I))),
-  I1.
+  {I1, Relocs}.
 
 %%
 %% label
 %%
-trans_label(I) ->
+trans_label(I, Relocs) ->
   Label  = mk_label(hipe_rtl:label_name(I)),
   I1 = hipe_llvm:mk_label(Label),
-  I1.
+  {I1, Relocs}.
 
 %%
 %% load
 %%
-trans_load(I) ->
+trans_load(I, Relocs) ->
   _Dst = hipe_rtl:load_dst(I),
   _Src = hipe_rtl:load_src(I),
   _Offset = hipe_rtl:load_offset(I),
@@ -784,12 +636,12 @@ trans_load(I) ->
       I6 = hipe_llvm:mk_conversion(Dst, Conversion, LoadType, T3, "i64"),
       [I6, I5, I4]
   end,
-  [Ins, I3, I2, I1].
+  {[Ins, I3, I2, I1], Relocs}.
 
 %%
 %% load_address
 %%
-trans_load_address(I) ->
+trans_load_address(I, Relocs) ->
   %% Check the load_type is constant. We have not implemented other cases yet.
   _Dst = hipe_rtl:load_address_dst(I),
   _Addr = hipe_rtl:load_address_addr(I),
@@ -798,12 +650,14 @@ trans_load_address(I) ->
     true -> {mk_temp(), []};
     false -> trans_dst(_Dst)
   end,
-  Addr = case hipe_rtl:load_address_type(I) of
-    constant -> "%DL"++integer_to_list(_Addr)++"_var";
+  {Addr, NewRelocs} = case hipe_rtl:load_address_type(I) of
+    constant -> {"%DL"++integer_to_list(_Addr)++"_var", Relocs};
     closure  -> 
       {Closure, _, _} = _Addr,
       {_, ClosureName, _} = Closure,
-      "%"++atom_to_list(fix_closure_name(ClosureName))++"_var";
+      FixedClosurename = atom_to_list(fix_closure_name(ClosureName)),
+      Relocs1 = relocs_store(FixedClosurename, {closure,_Addr}, Relocs),
+      {"%"++FixedClosurename++"_var", Relocs1};
     type -> exit({?MODULE,trans_load_address, {"Type not implemented in
           load_address", _Addr}})
       end,
@@ -816,22 +670,24 @@ trans_load_address(I) ->
       [II2, II1];
     false -> []
   end,
-  [I2, I1].
+  {[I2, I1], NewRelocs}.
 
 %%
 %% load_atom
 %%
-trans_load_atom(I) ->
+trans_load_atom(I, Relocs) ->
   _Dst = hipe_rtl:load_atom_dst(I),
   _Atom = hipe_rtl:load_atom_atom(I),
-  Atom_Name = "%"++make_llvm_id(atom_to_list(_Atom))++"_var",
+  Name = make_llvm_id(atom_to_list(_Atom)),
+  Atom_Name = "%"++Name++"_var",
+  NewRelocs = relocs_store(Name, {atom, _Atom}, Relocs),
   {Dst, []} = trans_dst(_Dst),
-  hipe_llvm:mk_select(Dst, true, "i64", Atom_Name, "i64", "undef").
+  {hipe_llvm:mk_select(Dst, true, "i64", Atom_Name, "i64", "undef"), NewRelocs}.
 
 %%
 %% move
 %%
-trans_move(I) ->
+trans_move(I, Relocs) ->
   _Dst = hipe_rtl:move_dst(I),
   _Src = hipe_rtl:move_src(I),
   IsDstColoured = isPrecoloured(_Dst),
@@ -848,17 +704,17 @@ trans_move(I) ->
       [II2, II1];
     false -> []
   end,
-  [I3, I2, I1].
+  {[I3, I2, I1], Relocs}.
 
 %% 
 %% phi
 %%
-trans_phi(I) ->
+trans_phi(I, Relocs) ->
   _Dst = hipe_rtl:phi_dst(I),
   {Dst, []} = trans_dst(_Dst),
   I1 = hipe_llvm:mk_phi(Dst , arg_type(_Dst), 
     trans_phi_list(hipe_rtl:phi_arglist(I))),
-  I1.
+  {I1, Relocs}.
 
 trans_phi_list([]) -> [];
 trans_phi_list([{Label, Value}| Args]) ->
@@ -869,7 +725,7 @@ trans_phi_list([{Label, Value}| Args]) ->
 %% return 
 %%
 %% TODO: Take care of returning many items
-trans_return(I) ->
+trans_return(I, Relocs) ->
   Ret1 = case hipe_rtl:return_varlist(I) of
     [] -> [];
     [_,_,[]] -> exit({?MODULE, trans_return, "Multiple return not
@@ -883,20 +739,20 @@ trans_return(I) ->
   Ret2 = lists:map(fun(X) -> {"i64", X} end, LoadedFixedRegs),
   Ret = lists:append(Ret2,Ret1),
   I2 = hipe_llvm:mk_ret(Ret),
-  [I2, I1].
+  {[I2, I1], Relocs}.
 
 %%
 %% store 
 %%
-trans_store(I) ->
+trans_store(I, Relocs) ->
   Base = hipe_rtl:store_base(I),
   I1 = case hipe_rtl_arch:is_precoloured(Base) of
-    true -> trans_store_reg(I);
-    false -> trans_store_var(I)
+    true -> trans_store_reg(I, Relocs);
+    false -> trans_store_var(I, Relocs)
   end,
   I1.
 
-trans_store_var(I) ->
+trans_store_var(I, Relocs) ->
   {Base, []} = trans_src(hipe_rtl:store_base(I)),
   {Offset, []} = trans_src(hipe_rtl:store_offset(I)), 
   _Value = hipe_rtl:store_src(I),
@@ -919,9 +775,9 @@ trans_store_var(I) ->
       I5 = hipe_llvm:mk_store(LoadType, T3, LoadType, T2, [], [], false),
       [I5, I4, I3]
   end,
-  [Ins, I2, I1].
+  {[Ins, I2, I1], Relocs}.
 
-trans_store_reg(I) ->
+trans_store_reg(I, Relocs) ->
   {Base, _} = trans_reg(hipe_rtl:store_base(I), dst),
   _Value = hipe_rtl:store_src(I),
   {Value, I1} = trans_src(_Value),
@@ -936,12 +792,12 @@ trans_store_reg(I) ->
   I4 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
   I5 = hipe_llvm:mk_store("i64", Value, "i64", D3, [], [],
                           false),
-  [I5, I4, I3, I2, I1].
+  {[I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% switch
 %%
-trans_switch(I) ->
+trans_switch(I, Relocs) ->
   _Src = hipe_rtl:switch_src(I),
   {Src, I1} = trans_src(_Src),
   LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
@@ -949,7 +805,7 @@ trans_switch(I) ->
       length(LabelList)-1)),
   ValueLabelList = lists:zip(ValueList, LabelList),
   I2 = hipe_llvm:mk_switch("i64", Src, lists:nth(length(LabelList)-1, LabelList), ValueLabelList),
-  [I2, I1]. 
+  {[I2, I1], Relocs}. 
 %%-----------------------------------------------------------------------------
 
 
@@ -998,59 +854,21 @@ update_phi_node(I, [{OldPred, NewPred} | SubstMap]) ->
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 
-is_call(I) -> 
-  case I of 
-    #llvm_call{} -> true;
-    #llvm_invoke{} -> true;
-    _ -> false
-  end.
-
-call_name(I) ->
-  case I of 
-    #llvm_call{} ->
-      hipe_llvm:call_fnptrval(I);
-    #llvm_invoke{} ->
-      hipe_llvm:invoke_fnptrval(I);
-    Other -> exit({?MODULE, call_name, {"Not a call", Other}})
-  end.
-
-is_external_call(I, M, F, A) -> 
-  case I of
-    #llvm_call{} -> 
-      Name = hipe_llvm:call_fnptrval(I),
-      case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
-          [global,{capture,all_but_first,list}]) of
-        {match, [[M,F,A]]} -> 
-          false;
-        _ -> true
-      end;
-    #llvm_invoke{} -> 
-      Name = hipe_llvm:invoke_fnptrval(I),
-      case re:run(Name, "@([a-z_0-9]*)\.([a-z_0-9]*)\.([a-z_0-9]*)",
-          [global,{capture,all_but_first,list}]) of
-        {match, [[M,F,A]]} -> 
-          false;
-        _ -> true
-      end;
-    _ -> false
-  end.
-
-call_to_decl(A) -> 
-  case A of
-    #llvm_call{} ->
-      Cconv = hipe_llvm:call_cconv(A),
-      Type = hipe_llvm:call_type(A),
-      Name = hipe_llvm:call_fnptrval(A),
-      Args = hipe_llvm:call_arglist(A);
-    #llvm_invoke{} ->
-      Cconv = hipe_llvm:invoke_cconv(A),
-      Type = hipe_llvm:invoke_type(A),
-      Name = hipe_llvm:invoke_fnptrval(A),
-      Args = hipe_llvm:invoke_arglist(A)
-  end,
-  Args_type = lists:map(fun({X,_}) -> X end, Args),
-    hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, Name, Args_type, []). 
-
+%%is_call(I) -> 
+%%  case I of 
+%%    #llvm_call{} -> true;
+%%    #llvm_invoke{} -> true;
+%%    _ -> false
+%%  end.
+%%
+%%call_name(I) ->
+%%  case I of 
+%%    #llvm_call{} ->
+%%      hipe_llvm:call_fnptrval(I);
+%%    #llvm_invoke{} ->
+%%      hipe_llvm:invoke_fnptrval(I);
+%%    Other -> exit({?MODULE, call_name, {"Not a call", Other}})
+%%  end.
 
 % Convert RTL argument list to LLVM argument list
 fix_args(ArgList) -> lists:map(fun(A) -> {Name, []} = trans_src(A), 
@@ -1248,27 +1066,27 @@ pointer_from_reg(RegName, Type, Offset) ->
       {T3, [I3, I2, I1]}.
   
 
-insn_dst(I) ->
-  case I of
-    #alu{} -> hipe_rtl:alu_dst(I);
-    #alub{} -> hipe_rtl:alub_dst(I);
-    #call{} -> 
-      case hipe_rtl:call_dstlist(I) of
-        [] -> [];
-        [_, _ |[]] -> exit({?MODULE, insn_dst, {"Call destination list
-                      not implemented yet", hipe_rtl:call_dstlist(I)}});
-        [Dst] -> Dst
-      end;
-    #load{} -> hipe_rtl:load_dst(I);
-    #load_address{} -> hipe_rtl:load_address_dst(I);
-    #load_atom{} -> hipe_rtl:load_atom_dst(I);
-    %#load_word_index{} -> ok;
-    #move{} -> hipe_rtl:move_dst(I);
-    %#multimove{} -> ok;
-    #phi{} -> hipe_rtl:phi_dst(I);
-    %#switch{} -> hipe_rtl:switch(I);
-    _ -> []
-  end.
+%%insn_dst(I) ->
+%%  case I of
+%%    #alu{} -> hipe_rtl:alu_dst(I);
+%%    #alub{} -> hipe_rtl:alub_dst(I);
+%%    #call{} -> 
+%%      case hipe_rtl:call_dstlist(I) of
+%%        [] -> [];
+%%        [_, _ |[]] -> exit({?MODULE, insn_dst, {"Call destination list
+%%                      not implemented yet", hipe_rtl:call_dstlist(I)}});
+%%        [Dst] -> Dst
+%%      end;
+%%    #load{} -> hipe_rtl:load_dst(I);
+%%    #load_address{} -> hipe_rtl:load_address_dst(I);
+%%    #load_atom{} -> hipe_rtl:load_atom_dst(I);
+%%    %#load_word_index{} -> ok;
+%%    #move{} -> hipe_rtl:move_dst(I);
+%%    %#multimove{} -> ok;
+%%    #phi{} -> hipe_rtl:phi_dst(I);
+%%    %#switch{} -> hipe_rtl:switch(I);
+%%    _ -> []
+%%  end.
 
 type_from_size(Size) -> 
   case Size of
@@ -1350,14 +1168,11 @@ arg_type(A) ->
 
 %% Create Header for Function 
 
-create_header(Name, Params, Code, ConstLoad, IsClosure) ->
+create_header(Name, Params, Code, ConstLoad) ->
   % TODO: What if arguments more than available registers?
   % TODO: Jump to correct label
   {Mod_Name,FN,Arity} = Name,
-  Fun_Name = case IsClosure of 
-    true -> fix_closure_name(FN);
-    false -> FN
-  end,
+  Fun_Name = fix_closure_name(FN),
   N = atom_to_list(Mod_Name) ++ "." ++ atom_to_list(Fun_Name) ++ "." ++
   integer_to_list(Arity),
 
@@ -1417,3 +1232,129 @@ load_regs([R | Rs], Acc) ->
   I1 = hipe_llvm:mk_alloca("%"++R++"_reg_var", "i64", [], []),
   I2 = hipe_llvm:mk_store("i64", "%"++R++"_in", "i64", "%"++R++"_reg_var", [], [], false),
   load_regs(Rs, [I1,I2,Acc]).
+
+
+%%----------------------------------------------------------------------------
+relocs_store(Key, Value, Relocs) ->
+  dict:store(Key, Value, Relocs).
+
+relocs_to_list(Relocs) ->
+  dict:to_list(Relocs).
+
+
+%%  Seperate Relocations found in the code to calls, atoms and closures
+seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], []).
+
+seperate_relocs([], CallAcc, AtomAcc, ClosureAcc) ->
+  {CallAcc, AtomAcc, ClosureAcc};
+seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc) ->
+  case R of
+    {_,{call,_}} -> seperate_relocs(Rs, [R|CallAcc], AtomAcc, ClosureAcc);
+    {_,{atom,_}} -> seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc);
+    {_,{closure,_}} -> seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc])
+  end.
+
+%% External declaration of an atom
+declare_atom({AtomName, _}) ->
+  hipe_llvm:mk_const_decl("@"++AtomName, "external constant", "i64", "").
+
+%% Creation of local variable for an atom 
+load_atom({AtomName, _}) ->
+  Dst = "%"++AtomName++"_var",
+  Name = "@"++AtomName,
+  hipe_llvm:mk_ptrtoint(Dst, "i64", Name, i64).
+
+%% External declaration of a closure
+declare_closure({ClosureName, _})->
+  hipe_llvm:mk_const_decl("@"++ClosureName, "external constant", "i8", "").
+
+%% Creation of local variable for a closure
+load_closure({ClosureName, _})->
+  Dst = "%"++ClosureName++"_var",
+  Name = "@"++ClosureName,
+  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
+
+%% A call is treated as non external only in a case of a recursive function
+is_external_call({_, {call, Fun}}, Fun) -> false;
+is_external_call(_, _) -> true.
+
+%% External declaration of a function
+call_to_decl({Name, {call, MFA}}) -> 
+  {M, _F, A} = MFA,
+  Cconv = "cc 11",
+  {Type, Args} = case M of
+    llvm -> {"{i64, i1}", lists:seq(1,2)};
+    %% +3 for precoloured regs
+    _ -> {"{i64,i64,i64,i64}", lists:seq(1,A+3)}
+  end,
+  Args_type = lists:map(fun(_) -> "i64" end, Args),
+  hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, "@"++Name, Args_type, []). 
+
+%% Create NewData which contains blocks for JumpTables. Also
+%% return necessary information to create LabelMap
+data_from_switches([], NewData, SortedBy) -> {NewData, SortedBy};
+data_from_switches([I|Is], Data, Sorted) ->
+  case I of
+    #switch{} ->
+      Labels = hipe_rtl:switch_labels(I),
+      LMap = [{label,L} || L <- Labels],
+      {NewData, JTabLab} =
+      case hipe_rtl:switch_sort_order(I) of
+        [] ->
+          hipe_consttab:insert_block(Data, word, LMap);
+        SortOrder ->
+          hipe_consttab:insert_sorted_block(
+            Data, word, LMap, SortOrder)
+      end,
+      io:format("J Tab Lab ~w ~n", [JTabLab]),
+      data_from_switches(Is, NewData, [{JTabLab, hipe_rtl:switch_sort_order(I)}|Sorted]);
+    _ -> data_from_switches(Is, Data, Sorted)
+  end.
+
+create_label_map([]) -> [];
+create_label_map({_, []}=LM) -> LM;
+create_label_map({ConstNumber, SortOrder}) -> {ConstNumber, sorted,
+    length(SortOrder)*8,SortOrder}.
+
+labels_to_dict(TempLabelMap, Dict) ->
+  labels_to_dict(TempLabelMap, Dict, 0).
+
+labels_to_dict([], Dict,_) -> Dict;
+labels_to_dict([{ConstNumber, []}|Rest], Dict, RodataNumber) ->
+  Dict1 = dict:store(".rodata"++integer_to_list(RodataNumber), {constant,
+      ConstNumber}, Dict),
+  labels_to_dict(Rest, Dict1, RodataNumber+1);
+labels_to_dict([{ConstNumber, _, _, _}|Rest], Dict, RodataNumber) -> 
+  Dict1 = dict:store(".rodata"++integer_to_list(RodataNumber), {constant,
+      ConstNumber}, Dict),
+  labels_to_dict(Rest, Dict1, RodataNumber+1).
+
+
+
+%% Extract Type of Constants from ConstMap
+find_constants(ConstMap) -> find_constants(ConstMap, []).
+find_constants([], LabelAcc) -> LabelAcc;
+find_constants([Label, _, _, _| Rest], LabelAcc) -> 
+  find_constants(Rest, [Label| LabelAcc]).
+
+%% Declare an External Consant. We declare all constants as i8 
+%% in order to be able to calcucate pointers of the form DL+6, with
+%% the getelementptr instruction. Otherwise we have to convert constants form 
+%% pointers to values, add the offset and convert them again to pointers
+declare_constant(Label) -> 
+  Name = "@DL"++integer_to_list(Label),
+  hipe_llvm:mk_const_decl(Name, "external constant", "i8", "").
+
+%% Loading of a constant depends on it's type. Float constants are loaded
+%% to double (with offset 6?), and all other constants are converted from
+%% pointers to 64 integers.
+load_constant(Label) ->
+  Dst = "%DL"++integer_to_list(Label)++"_var",
+  Name = "@DL"++integer_to_list(Label),
+  hipe_llvm:mk_ptrtoint(Dst, "i8", Name, "i64").
+
+
+%% Store external constants and calls to dictionary
+const_to_dict(Elem, Dict) ->
+  Name = "DL"++integer_to_list(Elem),
+  dict:store(Name, {'constant', Elem}, Dict).
