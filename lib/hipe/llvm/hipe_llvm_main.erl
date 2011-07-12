@@ -23,8 +23,7 @@ rtl_to_native(RTL, _Options) ->
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
-  {Mod_Name, FN, Arity} =  Fun,
-  Fun_Name = hipe_rtl2llvm:fix_closure_name(FN),
+  {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
@@ -85,7 +84,7 @@ rtl_to_native(RTL, _Options) ->
   %% Create All Information needed by the hipe_unified_loader
   %% No Labelmap Used yet..
   %% As Fun Name we must pass the original name
-  ExportMap = {Mod_Name, FN, Arity},
+  ExportMap = Fun,
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
   Refs = lists:filter(

@@ -5,7 +5,7 @@
 -include("../rtl/hipe_rtl.hrl").
 -include("hipe_llvm.hrl").
 -include("../rtl/hipe_literals.hrl").
--export([translate/1,fix_closure_name/1]).
+-export([translate/1, fix_mfa_name/1]).
 
 -define(HP, "hp").
 -define(P, "p").
@@ -25,63 +25,38 @@
 
 -define(HIPE_X86_REGISTERS, hipe_amd64_registers).
 
+
 translate(RTL) ->
   hipe_gensym:init(llvm),
   Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
-  {_Mod_Name, Closure_Name, _Arity} = Fun,
-  Fun_Name = fix_closure_name(Closure_Name),
+  {_Mod_Name, Fun_Name, _Arity} = fix_mfa_name(Fun),
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
   file:close(File_rtl),
   %% Create NewData which containts also data for switches
-  {NewData, SortedBy} = data_from_switches(Code, Data, []),
-  %% Create constant map and write it to file for loader
-  {ConstAlign, ConstSize, ConstMap, RefsFromConsts} =
+  {NewData, SwitchValues} = data_from_switches(Code, Data, []),
+  %% Create constant map
+  {ConstAlign, ConstSize, ConstMap, _RefsFromConsts} =
     hipe_pack_constants:pack_constants([{Fun, [], NewData}], 
                                       ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
-  %% Extract constant labels from Constant Map (remove duplicates)
-  ConstLabels = lists:usort(find_constants(SC)),
-  %% Create code to declare constants 
-  ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
-  %% Create code to create local name for constants
-  ConstLoad = lists:map(fun load_constant/1, ConstLabels),
-  %% Create LabelMap 
-  TempLabelMap = lists:map(fun create_label_map/1, SortedBy),
   %% Collect gc roots
-  %%GCRoots = collect_gc_roots(Code),
-  %%GCRootDeclare = declare_gc_roots(GCRoots),
+  %% GCRoots = collect_gc_roots(Code),
+  %% GCRootDeclare = declare_gc_roots(GCRoots),
   Code2 = fix_invoke_calls(Code),
   Relocs0 = dict:new(),
   {LLVM_Code, Relocs1} = translate_instr_list(Code2, [], Relocs0),
-  RelocsList = relocs_to_list(Relocs1),
-  {CallList, AtomList, ClosureList} = seperate_relocs(RelocsList),
-  %% Create code to declare atoms
-  AtomDecl = lists:map(fun declare_atom/1, AtomList),
-  %% Create code to create local name for atoms
-  AtomLoad = lists:map(fun load_atom/1, AtomList),
-  %% Create code to declare closures
-  ClosureDecl = lists:map(fun declare_closure/1, ClosureList),
-  %% Create code to create local name for closures
-  ClosureLoad = lists:map(fun load_closure/1, ClosureList),
-  LLVM_Code2 = create_header(Fun, Params, LLVM_Code,
-    ClosureLoad++AtomLoad++ConstLoad),
-  %% Find function calls
-  IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
-  ExternalCallList = lists:filter(IsExternalCall, CallList),
-  %% Create code to declare external function
-  Fun_Declarations = lists:map(fun call_to_decl/1, ExternalCallList),
-  LLVM_Code3 = ClosureDecl++AtomDecl++ConstDecl++[LLVM_Code2|Fun_Declarations],
-  Relocs2 = lists:foldl(fun const_to_dict/2, Relocs1, ConstLabels),
-  Relocs3 = labels_to_dict(TempLabelMap, Relocs2),
-  %% Temporary Store inc_stack to Dictionary
-  Relocs4 = dict:store("inc_stack_0", {call, {bif, inc_stack_0, 0}}, 
-                        Relocs3),
-  {LLVM_Code3, Relocs4, SC, ConstAlign, ConstSize, TempLabelMap}.
+  {FinalRelocs, ExternalDecl, LocalVars, TempLabelMap} = 
+    handle_relocations(Relocs1, SC, SwitchValues, Fun),
+  %% Create LLVM Code for the compiled function
+  LLVM_Code2 = create_function_definition(Fun, Params, LLVM_Code, LocalVars),
+  %% Final Code = CompiledFunction + External Declarations
+  FinalLLVMCode = [LLVM_Code2 | ExternalDecl],
+  {FinalLLVMCode, FinalRelocs, SC, ConstAlign, ConstSize, TempLabelMap}.
 
 %%-----------------------------------------------------------------------------
 
@@ -925,6 +900,11 @@ fix_name(Name) ->
     Other -> Other
   end.
 
+fix_mfa_name(Fun) ->
+  {Mod_Name, Closure_Name, Arity} = Fun,
+  Fun_Name = fix_closure_name(Closure_Name),
+  {Mod_Name, Fun_Name, Arity}.
+
 fix_closure_name(ClosureName) ->
   CN = atom_to_list(ClosureName),
   list_to_atom(make_llvm_id(CN)).
@@ -1166,16 +1146,10 @@ arg_type(A) ->
 
 %%-----------------------------------------------------------------------------
 
-%% Create Header for Function 
+%% Create definition for the compiled function
 
-create_header(Name, Params, Code, ConstLoad) ->
-  % TODO: What if arguments more than available registers?
-  % TODO: Jump to correct label
-  {Mod_Name,FN,Arity} = Name,
-  Fun_Name = fix_closure_name(FN),
-  N = atom_to_list(Mod_Name) ++ "." ++ atom_to_list(Fun_Name) ++ "." ++
-  integer_to_list(Arity),
-
+create_function_definition(Fun, Params, Code, LocalVars) ->
+  FunctionName = trans_mfa_name(Fun),
   Fixed_regs = fixed_registers(),
   Args1 = header_regs(Fixed_regs),
   %% Reverse Parameters to match with the Erlang calling convention
@@ -1188,17 +1162,17 @@ create_header(Name, Params, Code, ConstLoad) ->
   Args2 = lists:map( fun(X) -> {"i64", "%v" ++
           integer_to_list(hipe_rtl:var_index(X))}
     end, ReversedParams),
-  
   I1 = hipe_llvm:mk_label("Entry"),
   Exception_Sync = hipe_llvm:mk_alloca("%exception_sync", "double", [], []),
   RegList = lists:filter(fun reg_not_undef/1, Fixed_regs),
   I2 = load_regs(RegList),
+  % TODO: Jump to correct label
   I3 = hipe_llvm:mk_br(mk_jump_label(1)),
-  Final_Code = lists:flatten([I1,Exception_Sync,I2,ConstLoad,I3])++Code,
+  Final_Code = lists:flatten([I1, Exception_Sync, I2, LocalVars, I3])++Code,
   [_|[_|Typ]] = lists:foldl(fun(_,Y) -> Y++", i64" end, [],
     Fixed_regs) ,
   Type = "{"++Typ++",i64"++"}",
-  hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, N,
+  hipe_llvm:mk_fun_def([], [], "cc 11", [], Type, FunctionName,
                         Args1++Args2, 
                         [nounwind, noredzone, list_to_atom("gc \"erlang_gc\"")],
                         [],Final_Code).
@@ -1235,12 +1209,56 @@ load_regs([R | Rs], Acc) ->
 
 
 %%----------------------------------------------------------------------------
+
 relocs_store(Key, Value, Relocs) ->
   dict:store(Key, Value, Relocs).
 
 relocs_to_list(Relocs) ->
   dict:to_list(Relocs).
 
+%%----------------------------------------------------------------------------
+
+%% This function is responsible for the actions needed to handle relocations.
+%% 1) Updates relocations with constants and switch jump tables
+%% 2) Creates LLVM code to declare relocations as external functions/constants
+%% 3) Creates LLVM code in order to create local variables for the external
+%%    constants/labels
+%% 4) Creates a temporary LabelMap 
+handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
+  RelocsList = relocs_to_list(Relocs),
+  %% Seperate Relocations according to their type
+  {CallList, AtomList, ClosureList} = seperate_relocs(RelocsList),
+  %% Create code to declare atoms
+  AtomDecl = lists:map(fun declare_atom/1, AtomList),
+  %% Create code to create local name for atoms
+  AtomLoad = lists:map(fun load_atom/1, AtomList),
+  %% Create code to declare closures
+  ClosureDecl = lists:map(fun declare_closure/1, ClosureList),
+  %% Create code to create local name for closures
+  ClosureLoad = lists:map(fun load_closure/1, ClosureList),
+  %% Find function calls
+  IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
+  ExternalCallList = lists:filter(IsExternalCall, CallList),
+  %% Create code to declare external function
+  FunDecl = lists:map(fun call_to_decl/1, ExternalCallList),
+  %% Extract constant labels from Constant Map (remove duplicates)
+  ConstLabels = lists:usort(find_constants(SlimedConstMap)),
+  %% Create code to declare constants 
+  ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
+  %% Create code to create local name for constants
+  ConstLoad = lists:map(fun load_constant/1, ConstLabels),
+  %% Enter constants to relocations
+  Relocs1 = lists:foldl(fun const_to_dict/2, Relocs, ConstLabels),
+  %% Temporary Store inc_stack to Dictionary
+  Relocs2 = dict:store("inc_stack_0", {call, {bif, inc_stack_0, 0}}, 
+                        Relocs1),
+  %% Create LabelMap 
+  TempLabelMap = lists:map(fun create_label_map/1, SwitchValues),
+  %% Store Swich Jump Tables to reloactions
+  Relocs3 = labels_to_dict(TempLabelMap, Relocs2),
+  ExternalDeclarations = AtomDecl++ClosureDecl++ConstDecl++FunDecl,
+  LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
+  {Relocs3, ExternalDeclarations, LocalVariables, TempLabelMap}.
 
 %%  Seperate Relocations found in the code to calls, atoms and closures
 seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], []).
