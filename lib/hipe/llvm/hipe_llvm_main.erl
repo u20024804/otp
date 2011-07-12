@@ -24,13 +24,7 @@ rtl_to_native(RTL, _Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   IsClosure = hipe_rtl:rtl_is_closure(RTL),
   {Mod_Name, FN, Arity} =  Fun,
-  Fun_Name =
-  case IsClosure of
-    false ->
-      FN;
-    true ->
-      hipe_rtl2llvm:fix_closure_name(FN)
-  end,
+  Fun_Name = hipe_rtl2llvm:fix_closure_name(FN),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
@@ -182,12 +176,12 @@ map_funs(Name, Dict) ->
     ".rodata" -> ".rodata0";
     _ -> Name
   end,
-  case dict:fetch("@"++FName, Dict) of
+  case dict:fetch(FName, Dict) of
     {'constant', Label} -> {'constant', Label};
     {'atom', AtomName} -> {'atom', AtomName};
     {closure, Closure} -> {closure, Closure};
-    {BifName} -> map_bifs(BifName);
-    {M,F,A} -> {M,map_bifs(F),A};
+    {call, {bif, BifName, _}} -> map_bifs(BifName);
+    {call, {M,F,A}} -> {M, map_bifs(F), A};
     Other -> exit({?MODULE,map_funs,{"Unknown call", Other}})
   end.
 
