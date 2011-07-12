@@ -1280,10 +1280,16 @@ is_external_call(_, _) -> true.
 
 %% External declaration of a function
 call_to_decl({Name, {call, MFA}}) -> 
-  {M, _F, A} = MFA,
+  {M, F, A} = MFA,
   Cconv = "cc 11",
   {Type, Args} = case M of
     llvm -> {"{i64, i1}", lists:seq(1,2)};
+    erlang ->
+      case F of 
+        get_stacktrace -> {"{i64,i64,i64,i64}", []};
+        %% +3 for precoloured regs
+        _ -> {"{i64,i64,i64,i64}", lists:seq(1,A+3)}
+      end;
     %% +3 for precoloured regs
     _ -> {"{i64,i64,i64,i64}", lists:seq(1,A+3)}
   end,
