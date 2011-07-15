@@ -247,89 +247,60 @@ trans_branch(I, Relocs) ->
   I2 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
   {[I2, I1], Relocs}.
 
-
 %%
 %% call
 %%
 trans_call(I, Relocs) ->
-  %% TODO: Fix Destination List
-  {Dst, []} =  case hipe_rtl:call_dstlist(I) of
-    [] -> {mk_temp(), []};
-    [Destination] -> trans_dst(Destination);
-    [_D|_Ds] -> exit({?MODULE, trans_prim_call, "Destination list not i
-          implemented yet"})
+  OriginalName = hipe_rtl:call_fun(I),
+  {Dst, []} =  
+  case hipe_rtl:call_dstlist(I) of
+    [] -> 
+      {mk_temp(), []};
+    [Destination] -> 
+      trans_dst(Destination)
   end,
-  Args = fix_args(hipe_rtl:call_arglist(I)),
-  %% Reverse arguments that are passed to stack to match with the Erlang
-  %% calling convention(Propably not needed in prim calls).
-  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
-    false -> Args;
-    true -> 
-      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
-      ArgsInRegs ++ lists:reverse(ArgsInStack)
-  end,
+  CallArgs = trans_call_args(hipe_rtl:call_arglist(I)),
   FixedRegs = fixed_registers(),
-  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = case hipe_rtl:call_fun(I) of
-		{erlang, get_stacktrace, 0} -> ReversedArgs;
-		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
-	      end,
-  {Name, I2, NewRelocs} = case hipe_rtl:call_fun(I) of
-    PrimOp when is_atom(PrimOp) -> 
-      Name1 = trans_prim_op(PrimOp),
-      Relocs1  = relocs_store(Name1, {call, {bif, PrimOp,
-                                erlang:length(Args)}}, Relocs),
-      {"@"++Name1, [], Relocs1};
-    {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      Name1 = trans_mfa_name({M,F,A}),
-      Relocs1 = relocs_store(Name1, {call, {M,F,A}}, Relocs),
-                              {"@"++Name1, [], Relocs1};
- 		Reg ->
-      case hipe_rtl:is_reg(Reg) of
-        true -> 
-          TT1 = mk_temp(),
-          {RegName, []} = trans_dst(Reg),
-          II1 = hipe_llvm:mk_conversion(TT1, inttoptr, "i64", RegName,
-            "i64*"),
-          TT2 = mk_temp(),
-          II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
-            "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
-          {TT2, [II2, II1], Relocs};
-        false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
-      end
+  {LoadedFixedRegs, I1} = load_fixed_regs(FixedRegs), 
+  FinalArgs = 
+  case OriginalName of
+    {erlang, get_stacktrace, 0} ->
+      CallArgs;
+    _ ->
+      fix_reg_args(LoadedFixedRegs) ++ CallArgs
   end,
+  {Name, I2, NewRelocs} = trans_call_name(OriginalName, Relocs, CallArgs,
+                                          FinalArgs),
   T1 = mk_temp(),
   %% TODO: Fix return type of calls
-  I3 = case hipe_rtl:call_fail(I) of
+  I3 =
+  case hipe_rtl:call_fail(I) of
     %% Normal Call
     [] -> hipe_llvm:mk_call(T1, false, "cc 11", [], "{i64, i64, i64, i64}",
-			    Name, FinalArgs, []);
+        Name, FinalArgs, []);
     %% Call With Exception
     FailLabelNum -> 
-        TrueLabel = "L"++integer_to_list(hipe_rtl:call_normal(I)),
-        FailLabel = mk_jump_label(FailLabelNum),
-        I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64}",
-				 Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
-        I5 = hipe_llvm:mk_label(TrueLabel),
-        [I5, I4]
-    end,
-    I6 = store_call_regs(FixedRegs, T1),
-    I7 = case hipe_rtl:call_dstlist(I) of
-      [] -> [];
-      [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64}", T1, "3", [])
-    end,
-    I8 = case hipe_rtl:call_continuation(I) of
-      [] -> [];
-      CC -> {II3, _UnusedRelocs} = trans_goto(hipe_rtl:mk_goto(CC), Relocs),
-        II3
-    end,
-    {[I8, I7, I6, I3, I2, I1], NewRelocs}.
-
-args_to_type(Args) -> 
-  Args1 = lists:map(fun (_) -> "i64" end, Args),
-  Args2 = lists:foldl(fun (A,B) -> A++","++B end, "", Args1),
-  {Args3,_} =lists:split(erlang:length(Args2)-1, Args2),
-  Args3.
+      TrueLabel = "L"++integer_to_list(hipe_rtl:call_normal(I)),
+      FailLabel = mk_jump_label(FailLabelNum),
+      I4 = hipe_llvm:mk_invoke(T1, "cc 11", [], "{i64, i64, i64, i64}",
+        Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
+      I5 = hipe_llvm:mk_label(TrueLabel),
+      [I5, I4]
+  end,
+  I6 = store_fixed_regs(FixedRegs, T1),
+  I7 = 
+  case hipe_rtl:call_dstlist(I) of
+    [] -> [];
+    [_] -> hipe_llvm:mk_extractvalue(Dst, "{i64, i64, i64, i64}", T1, "3", [])
+  end,
+  I8 = 
+  case hipe_rtl:call_continuation(I) of
+    [] -> [];
+    CC -> 
+      {II3, _UnusedRelocs} = trans_goto(hipe_rtl:mk_goto(CC), Relocs),
+      II3
+  end,
+  {[I8, I7, I6, I3, I2, I1], NewRelocs}.
 
 %%
 %% trans_comment
@@ -338,54 +309,26 @@ trans_comment(I, Relocs) ->
   I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
   {I1, Relocs}.
 
-
 %%
 %% enter
 %%
 trans_enter(I, Relocs) ->
-  Args = fix_args(hipe_rtl:enter_arglist(I)),
-  %% Reverse arguments that are passed to stack to match with the Erlang
-  %% calling convention(Propably not needed in prim calls).
-  ReversedArgs = case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
-    false -> Args;
-    true -> 
-      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
-      ArgsInRegs++ lists:reverse(ArgsInStack)
-  end,
+  CallArgs = trans_call_args(hipe_rtl:enter_arglist(I)),
   FixedRegs = fixed_registers(),
-  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
-  FinalArgs = case hipe_rtl:enter_fun(I) of
-		{erlang, get_stacktrace, 0} -> ReversedArgs;
-		_ -> fix_reg_args(LoadedFixedRegs) ++ ReversedArgs
-	      end,
-  {Name, I2, NewRelocs} = case hipe_rtl:enter_fun(I) of
-    PrimOp when is_atom(PrimOp) -> 
-      Name1 = trans_prim_op(PrimOp),
-      NewRelocs1  = relocs_store(Name1, {call, {bif, PrimOp,
-                                erlang:length(Args)}}, Relocs),
-      {"@"++Name1, [], NewRelocs1};
-    {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      Name1 = trans_mfa_name({M,F,A}),
-      NewRelocs1 = relocs_store(Name1, {call, {M,F,A}}, Relocs),
-      {"@"++Name1, [], NewRelocs1};
- 		Reg ->
-      case hipe_rtl:is_reg(Reg) of
-        true -> 
-          TT1 = mk_temp(),
-          {RegName, []} = trans_dst(Reg),
-          II1 = hipe_llvm:mk_conversion(TT1, inttoptr, "i64", RegName,
-            "i64*"),
-          TT2 = mk_temp(),
-          II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
-            "{i64,i64,i64,i64}"++"("++args_to_type(FinalArgs)++")*"),
-          {TT2, [II2, II1], Relocs};
-        false -> exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
-      end
+  {LoadedFixedRegs, I1} = load_fixed_regs(FixedRegs), 
+  FinalArgs = 
+  case hipe_rtl:enter_fun(I) of
+    {erlang, get_stacktrace, 0} -> 
+      CallArgs;
+    _ -> 
+      fix_reg_args(LoadedFixedRegs) ++ CallArgs
   end,
+  {Name, I2, NewRelocs} = trans_call_name(hipe_rtl:enter_fun(I), Relocs, 
+                                          CallArgs, FinalArgs),
   %% TODO: Fix return type of calls
   T1 = mk_temp(),
   I3 = hipe_llvm:mk_call(T1, true, "cc 11", [], "{i64, i64, i64, i64}",
-			 Name, FinalArgs, []),
+    Name, FinalArgs, []),
   I4 = hipe_llvm:mk_ret([{"{i64,i64,i64,i64}", T1}]),
   {[I4, I3, I2, I1], NewRelocs}.
 
@@ -429,7 +372,7 @@ trans_fload(I, Relocs) ->
   _Src = hipe_rtl:fload_src(I),
   _Offset = hipe_rtl:fload_offset(I),
   {Dst, []} = trans_dst(_Dst),
-  {Src, I1} =  trans_float_src(_Src),
+  {Src, I1} = trans_float_src(_Src),
   {Offset, I2} = trans_float_src(_Offset),
   T1 = mk_temp(),
   I3 = hipe_llvm:mk_operation(T1, add, "i64", Src, Offset, []),
@@ -445,13 +388,15 @@ trans_fmove(I, Relocs) ->
   _Dst = hipe_rtl:fmove_dst(I),
   _Src = hipe_rtl:fmove_src(I),
   IsDstColoured = isPrecoloured(_Dst),
-  {Dst, []} = case IsDstColoured of
-                true -> {mk_temp(), []};
-                false -> trans_dst(_Dst)
-            end,
+  {Dst, []} =
+  case IsDstColoured of
+    true -> {mk_temp(), []};
+    false -> trans_dst(_Dst)
+  end,
   {Src, I1} = trans_float_src(_Src),
   I2 = hipe_llvm:mk_select(Dst, "true", "double", Src, "double", "undef"),
-  I3 = case IsDstColoured of 
+  I3 =
+  case IsDstColoured of 
     true -> 
       {Dst2, II1} = trans_dst(_Dst),
       II2 = hipe_llvm:mk_store("double", Dst, "double", Dst2, [], [], false),
@@ -470,16 +415,18 @@ trans_fp(I, Relocs) ->
   _Src2 = hipe_rtl:fp_src2(I),
   % Destination is a register and not in SSA Form..
   IsDstColoured = isPrecoloured(_Dst),
-  {Dst, []} = case IsDstColoured of
+  {Dst, []} =
+  case IsDstColoured of
     true -> {mk_temp(), []};
     false -> trans_dst(_Dst)
   end,
   {Src1, I1} = trans_float_src(_Src1),
   {Src2, I2} = trans_float_src(_Src2),
   Type = "double",
-  Op =  trans_fp_op(hipe_rtl:fp_op(I)),
+  Op = trans_fp_op(hipe_rtl:fp_op(I)),
   I3 = hipe_llvm:mk_operation(Dst, Op, Type, Src1, Src2, []),
-  I4 = case IsDstColoured of 
+  I4 =
+  case IsDstColoured of 
     true -> 
       {Dst2, II1} = trans_dst(_Dst),
       II2 = hipe_llvm:mk_store(Type, Dst, "i64", Dst2, [], [], false),
@@ -621,21 +568,25 @@ trans_load_address(I, Relocs) ->
   _Dst = hipe_rtl:load_address_dst(I),
   _Addr = hipe_rtl:load_address_addr(I),
   IsDstColoured = isPrecoloured(_Dst),
-  {Dst, []} = case IsDstColoured of
+  {Dst, []} =
+  case IsDstColoured of
     true -> {mk_temp(), []};
     false -> trans_dst(_Dst)
   end,
-  {Addr, NewRelocs} = case hipe_rtl:load_address_type(I) of
-    constant -> {"%DL"++integer_to_list(_Addr)++"_var", Relocs};
+  {Addr, NewRelocs} =
+  case hipe_rtl:load_address_type(I) of
+    constant ->
+      {"%DL"++integer_to_list(_Addr)++"_var", Relocs};
     closure  -> 
       {Closure, _, _} = _Addr,
       {_, ClosureName, _} = Closure,
       FixedClosurename = atom_to_list(fix_closure_name(ClosureName)),
       Relocs1 = relocs_store(FixedClosurename, {closure,_Addr}, Relocs),
       {"%"++FixedClosurename++"_var", Relocs1};
-    type -> exit({?MODULE,trans_load_address, {"Type not implemented in
+    type ->
+      exit({?MODULE,trans_load_address, {"Type not implemented in
           load_address", _Addr}})
-      end,
+  end,
   Type = "i64",
   I1 = hipe_llvm:mk_select(Dst, true, Type, Addr, Type, "undef"),
   I2 = case IsDstColoured of 
@@ -666,13 +617,15 @@ trans_move(I, Relocs) ->
   _Dst = hipe_rtl:move_dst(I),
   _Src = hipe_rtl:move_src(I),
   IsDstColoured = isPrecoloured(_Dst),
-  {Dst, []} = case IsDstColoured of
+  {Dst, []} =
+  case IsDstColoured of
     true -> {mk_temp(), []};
     false -> trans_dst(_Dst)
   end,
   {Src, I1} = trans_src(_Src),
   I2 = hipe_llvm:mk_select(Dst, "true", "i64", Src, "i64", "undef"),
-  I3 = case IsDstColoured of 
+  I3 =
+  case IsDstColoured of 
     true -> 
       {Dst2, II1} = trans_dst(_Dst),
       II2 = hipe_llvm:mk_store("i64", Dst, "i64", Dst2, [], [], false),
@@ -701,16 +654,15 @@ trans_phi_list([{Label, Value}| Args]) ->
 %%
 %% TODO: Take care of returning many items
 trans_return(I, Relocs) ->
-  Ret1 = case hipe_rtl:return_varlist(I) of
+  Ret1 = 
+  case hipe_rtl:return_varlist(I) of
     [] -> [];
-    [_,_,[]] -> exit({?MODULE, trans_return, "Multiple return not
-          implemented"});
-    [A|[]] -> 
+    [A] -> 
       {Name, []} = trans_src(A),
       [{"i64", Name}]
   end,
   FixedRegs = fixed_registers(),
-  {LoadedFixedRegs, I1} = load_call_regs(FixedRegs), 
+  {LoadedFixedRegs, I1} = load_fixed_regs(FixedRegs), 
   Ret2 = lists:map(fun(X) -> {"i64", X} end, LoadedFixedRegs),
   Ret = lists:append(Ret2,Ret1),
   [_|[_|Typ]] = lists:foldl(fun(_,Y) -> Y++", i64" end, [],
@@ -735,21 +687,14 @@ mk_return_struct([{ElemType, ElemName}|Rest], Type, Acc, StructName, Index) ->
 %% store 
 %%
 trans_store(I, Relocs) ->
-  Base = hipe_rtl:store_base(I),
-  I1 = case hipe_rtl_arch:is_precoloured(Base) of
-    true -> trans_store_reg(I, Relocs);
-    false -> trans_store_var(I, Relocs)
-  end,
-  I1.
-
-trans_store_var(I, Relocs) ->
-  {Base, []} = trans_src(hipe_rtl:store_base(I)),
+  {Base, I0} = trans_src(hipe_rtl:store_base(I)),
   {Offset, []} = trans_src(hipe_rtl:store_offset(I)), 
   _Value = hipe_rtl:store_src(I),
   {Value, I1} = trans_src(_Value),
   T1 = mk_temp(),
   I2 = hipe_llvm:mk_operation(T1, add, "i64", Base, Offset, []),
-  Ins = case hipe_rtl:store_size(I) of 
+  Ins =
+  case hipe_rtl:store_size(I) of 
     word -> 
       T2 = mk_temp(),
       I3 = hipe_llvm:mk_inttoptr(T2, "i64", T1, "i64"),
@@ -765,24 +710,7 @@ trans_store_var(I, Relocs) ->
       I5 = hipe_llvm:mk_store(LoadType, T3, LoadType, T2, [], [], false),
       [I5, I4, I3]
   end,
-  {[Ins, I2, I1], Relocs}.
-
-trans_store_reg(I, Relocs) ->
-  {Base, _} = trans_reg(hipe_rtl:store_base(I), dst),
-  _Value = hipe_rtl:store_src(I),
-  {Value, I1} = trans_src(_Value),
-  D1 = mk_hp(),
-  I2 = hipe_llvm:mk_load(D1, "i64", Base, [],  [], false),
-  D2 = mk_hp(),
-  I3 = hipe_llvm:mk_inttoptr(D2, "i64", D1, "i64"),
-  {_Offset, []} = trans_src(hipe_rtl:store_offset(I)),
-  Offset = integer_to_list(list_to_integer(_Offset) div 8), 
-  D3 = mk_hp(),
-  %% TODO: Fix Size...
-  I4 = hipe_llvm:mk_getelementptr(D3, "i64", D2, [{"i64", Offset}], false),
-  I5 = hipe_llvm:mk_store("i64", Value, "i64", D3, [], [],
-                          false),
-  {[I5, I4, I3, I2, I1], Relocs}.
+  {[Ins, I2, I1, I0], Relocs}.
 
 %%
 %% switch
@@ -860,6 +788,52 @@ isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 %%    Other -> exit({?MODULE, call_name, {"Not a call", Other}})
 %%  end.
 
+trans_call_name(Name, Relocs, CallArgs, FinalArgs) ->
+  case Name of
+    PrimOp when is_atom(PrimOp) -> 
+      Name1 = trans_prim_op(PrimOp),
+      Relocs1  = relocs_store(Name1, {call, {bif, PrimOp,
+                                erlang:length(CallArgs)}}, Relocs),
+      {"@"++Name1, [], Relocs1};
+
+    {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
+      Name1 = trans_mfa_name({M,F,A}),
+      Relocs1 = relocs_store(Name1, {call, {M,F,A}}, Relocs),
+      {"@"++Name1, [], Relocs1};
+ 		Reg ->
+      case hipe_rtl:is_reg(Reg) of
+        true -> 
+          TT1 = mk_temp(),
+          {RegName, []} = trans_dst(Reg),
+          II1 = hipe_llvm:mk_conversion(TT1, inttoptr, "i64", RegName, "i64*"),
+          TT2 = mk_temp(),
+          II2 = hipe_llvm:mk_conversion(TT2, bitcast, "i64*", TT1,
+                                        "{i64,i64,i64,i64}"++"("++
+                                        args_to_type(FinalArgs)++")*"),
+          {TT2, [II2, II1], Relocs};
+        false -> 
+          exit({?MODULE, trans_call, {"Unimplemted Call to", Reg}}) 
+      end
+  end.
+
+args_to_type(Args) -> 
+  Args1 = lists:map(fun (_) -> "i64" end, Args),
+  Args2 = lists:foldl(fun (A,B) -> A++","++B end, "", Args1),
+  {Args3,_} =lists:split(erlang:length(Args2)-1, Args2),
+  Args3.
+
+trans_call_args(ArgList) ->
+  Args = fix_args(ArgList),
+  %% Reverse arguments that are passed to stack to match with the Erlang
+  %% calling convention(Propably not needed in prim calls).
+  case erlang:length(Args) > ?AMD64_NR_ARG_REGS of
+    false -> 
+      Args;
+    true -> 
+      {ArgsInRegs, ArgsInStack} = lists:split(?AMD64_NR_ARG_REGS, Args),
+      ArgsInRegs ++ lists:reverse(ArgsInStack)
+  end.
+
 % Convert RTL argument list to LLVM argument list
 fix_args(ArgList) -> lists:map(fun(A) -> {Name, []} = trans_src(A), 
                             {"i64", Name} end, ArgList).
@@ -872,10 +846,11 @@ reg_not_undef(Name) ->
     "undef" -> false;
     _ -> true
   end.
+
 % Load Precoloured registers.
 % Names : Tha name of LLVM temp variables
-% Ins   : LLVM Instructions tha achieve the loading
-load_call_regs(RegList) -> 
+% Ins   : LLVM Instructions that achieve the loading
+load_fixed_regs(RegList) -> 
   RegList2 = lists:filter(fun reg_not_undef/1, RegList),
   Names = lists:map(fun mk_temp_reg/1, RegList),
   Names2 = lists:filter(fun reg_not_undef/1, Names), 
@@ -885,7 +860,7 @@ load_call_regs(RegList) ->
 
 % Store Precoloured Registers
 % Name: The LLVM temp variable name tha holds the struct of return value
-store_call_regs(RegList, Name) -> 
+store_fixed_regs(RegList, Name) -> 
   Type = "{i64, i64, i64, i64}",
   RegList2 = lists:filter(fun reg_not_undef/1, RegList),
   Names = lists:map(fun mk_temp_reg/1, RegList),
