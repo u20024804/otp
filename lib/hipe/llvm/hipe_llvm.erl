@@ -904,8 +904,10 @@ pp_ins(Dev, I) ->
     #llvm_br{} ->
       io:format(Dev, "br label ~s~n", [br_dst(I)]);
     #llvm_switch{} ->
-      io:format(Dev, "switch ~s ~s, label ~s ~n    [~n", 
-        [switch_type(I), switch_value(I), switch_default_label(I)]),
+      io:format(Dev, "switch ", []),
+      pp_type(Dev, switch_type(I)),
+      io:format(Dev, " ~s, label ~s ~n    [~n", 
+        [switch_value(I), switch_default_label(I)]),
       pp_switch_value_label_list(Dev, switch_type(I), switch_value_label_list(I)),
       io:format(Dev, "    ]~n", []);
     #llvm_invoke{} ->
@@ -913,7 +915,8 @@ pp_ins(Dev, I) ->
       io:format(Dev, "invoke ", []),
       io:format(Dev, "~s " , [invoke_cconv(I)]),
       pp_options(Dev, invoke_ret_attrs(I)),
-      io:format(Dev, "~s ~s(", [invoke_type(I), invoke_fnptrval(I)]),
+      pp_type(Dev, invoke_type(I)),
+      io:format(Dev, " ~s(", [invoke_fnptrval(I)]),
       pp_args(Dev, invoke_arglist(I)),
       io:format(Dev, ") ", []),
       pp_options(Dev, invoke_fn_attrs(I)),
@@ -928,23 +931,32 @@ pp_ins(Dev, I) ->
         true -> pp_options(Dev, operation_options(I));
         false -> ok
       end,
-      io:format(Dev, "~s ~s, ~s~n",
-        [operation_type(I), operation_src1(I), operation_src2(I)]);
+      pp_type(Dev, operation_type(I)),
+      io:format(Dev, " ~s, ~s~n",
+        [operation_src1(I), operation_src2(I)]);
     #llvm_extractvalue{} ->
-      io:format(Dev, "~s = extractvalue ~s ~s, ~s~n", 
-        %%TODO Print idxs
-        [extractvalue_dst(I), extractvalue_type(I), extractvalue_val(I),
-          extractvalue_idx(I)]);
+      io:format(Dev, "~s = extractvalue ", [extractvalue_dst(I)]),
+      pp_type(Dev, extractvalue_type(I)),
+      %% TODO Print idxs
+      io:format(Dev, " ~s, ~s~n",
+        [extractvalue_val(I), extractvalue_idx(I)]);
     #llvm_insertvalue{} ->
-      io:format(Dev, "~s = insertvalue ~s ~s, ~s ~s, ~s~n", 
+      io:format(Dev, "~s = insertvalue ", [insertvalue_dst(I)]),
+      pp_type(Dev, insertvalue_val_type(I)),
+      io:format(Dev, " ~s, ", [insertvalue_val(I)]),
+      pp_type(Dev, insertvalue_elem_type(I)),
+      io:format(Dev, " ~s, ~s~n", 
         %%TODO Print idxs
-        [insertvalue_dst(I), insertvalue_val_type(I), insertvalue_val(I),
-          insertvalue_elem_type(I), insertvalue_elem(I), insertvalue_idx(I)]);
+        [insertvalue_elem(I), insertvalue_idx(I)]);
     #llvm_alloca{} ->
-      io:format(Dev, "~s = alloca ~s ", [alloca_dst(I), alloca_type(I)]),
+      io:format(Dev, "~s = alloca ", [alloca_dst(I)]),
+      pp_type(Dev, alloca_type(I)),
       case alloca_num(I) of
         [] -> ok;
-        Num -> io:format(Dev, ",~s ~s ", [alloca_type(I), Num])
+        Num -> 
+          io:format(Dev, ", ", []),
+          pp_type(Dev, alloca_type(I)),
+          io:format(Dev, " ~s ", [Num])
       end,
       case alloca_align(I) of
         [] ->ok;
@@ -957,8 +969,9 @@ pp_ins(Dev, I) ->
         true -> io:format(Dev, "volatile ", []);
         false -> ok
       end,
-      io:format(Dev, "load ~s* ~s ", 
-        [load_p_type(I), load_pointer(I)]),
+      io:format(Dev, "load ", []),
+      pp_type(Dev, load_p_type(I)),
+      io:format(Dev, " ~s ", [load_pointer(I)]),
       case load_alignment(I) of 
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
@@ -973,8 +986,11 @@ pp_ins(Dev, I) ->
         true -> io:format(Dev, "volatile ", []);
         false -> ok
       end,
-      io:format(Dev, "store ~s ~s, ~s* ~s ", 
-        [store_type(I), store_value(I), store_p_type(I), store_pointer(I)]),
+      io:format(Dev, "store ", []),
+      pp_type(Dev, store_type(I)),
+      io:format(Dev, " ~s, ", [store_value(I)]),
+      pp_type(Dev, store_p_type(I)),
+      io:format(Dev, " ~s ", [store_pointer(I)]),
       case store_alignment(I) of 
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
@@ -990,38 +1006,44 @@ pp_ins(Dev, I) ->
         true -> io:format(Dev, "inbounds ", []);
         false -> ok
       end,
-      io:format(Dev, "~s* ~s", [getelementptr_p_type(I), 
-          getelementptr_value(I)]),
+      pp_type(Dev, getelementptr_p_type(I)),
+      io:format(Dev, " ~s", [getelementptr_value(I)]),
       pp_typed_idxs(Dev, getelementptr_typed_idxs(I)),
       io:format(Dev, "~n", []);
     #llvm_conversion{} ->
-      io:format(Dev, "~s = ~w ~s ~s to ~s~n",
-        [conversion_dst(I),conversion_op(I),
-          conversion_src_type(I), conversion_src(I), conversion_dst_type(I)]);
-    #llvm_sitofp{} ->
-      io:format(Dev, "~s = sitofp ~s ~s to ~s~n", [sitofp_dst(I),
-          sitofp_src_type(I), sitofp_src(I), sitofp_dst_type(I)]);
-    #llvm_ptrtoint{} ->
-      io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
-          ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
-    #llvm_inttoptr{} ->
-      io:format(Dev, "~s = inttoptr ~s ~s to ~s*~n", [inttoptr_dst(I),
-          inttoptr_src_type(I), inttoptr_src(I), inttoptr_dst_type(I)]);
+      io:format(Dev, "~s = ~w ", [conversion_dst(I), conversion_op(I)]),
+      pp_type(Dev, conversion_src_type(I)),
+      io:format(Dev, " ~s to ", [conversion_src(I)]),
+      pp_type(Dev, conversion_dst_type(I)),
+      io:format(Dev, "~n", []);
+%%    #llvm_sitofp{} ->
+%%      io:format(Dev, "~s = sitofp ~s ~s to ~s~n", [sitofp_dst(I),
+%%          sitofp_src_type(I), sitofp_src(I), sitofp_dst_type(I)]);
+%%    #llvm_ptrtoint{} ->
+%%      io:format(Dev, "~s = ptrtoint ~s* ~s to ~s~n", [ptrtoint_dst(I),
+%%          ptrtoint_src_type(I), ptrtoint_src(I), ptrtoint_dst_type(I)]);
+%%    #llvm_inttoptr{} ->
+%%      io:format(Dev, "~s = inttoptr ~s ~s to ~s*~n", [inttoptr_dst(I),
+%%          inttoptr_src_type(I), inttoptr_src(I), inttoptr_dst_type(I)]);
     #llvm_icmp{} ->
-      io:format(Dev, "~s = icmp ~s ~s ~s, ~s~n",
-        [icmp_dst(I), icmp_cond(I), icmp_type(I), icmp_src1(I), icmp_src2(I)]);
+      io:format(Dev, "~s = icmp ~s ", [icmp_dst(I), icmp_cond(I)]),
+      pp_type(Dev, icmp_type(I)),
+      io:format(Dev, " ~s, ~s~n", [icmp_src1(I), icmp_src2(I)]);
     #llvm_fcmp{} ->
-      io:format(Dev, "~s = fcmp ~s ~s ~s, ~s~n",
-        [fcmp_dst(I), fcmp_cond(I), fcmp_type(I), fcmp_src1(I), fcmp_src2(I)]);
+      io:format(Dev, "~s = fcmp ~s ", [fcmp_dst(I), fcmp_cond(I)]),
+      pp_type(Dev, fcmp_type(I)),
+      io:format(Dev, " ~s, ~s~n", [fcmp_src1(I), fcmp_src2(I)]);
     #llvm_phi{} ->
-      io:format(Dev, "~s = phi ~s ", [phi_dst(I), phi_type(I)]),
+      io:format(Dev, "~s = phi ", [phi_dst(I)]),
+      pp_type(Dev, phi_type(I)),
       pp_phi_value_labels(Dev, phi_value_label_list(I)),
       io:format(Dev, "~n", []);
     #llvm_select{} ->
-      io:format(Dev, "~s = select i1 ~s, ~s ~s, ~s ~s", [select_dst(I),
-          select_cond(I), select_typ1(I), select_val1(I), select_typ2(I),
-          select_val2(I)]),
-      io:format(Dev, "~n", []);
+      io:format(Dev, "~s = select i1 ~s, ", [select_dst(I), select_cond(I)]),
+      pp_type(Dev, select_typ1(I)),
+      io:format(Dev, " ~s, ", [select_val1(I)]),
+      pp_type(Dev, select_typ2(I)),
+      io:format(Dev, " ~s~n", [select_val2(I)]);
     #llvm_call{} ->
       case call_dst(I) of
         [] -> ok;
@@ -1034,7 +1056,9 @@ pp_ins(Dev, I) ->
       io:format(Dev, "call ", []),
       io:format(Dev, "~s " , [call_cconv(I)]),
       pp_options(Dev, call_ret_attrs(I)),
-      io:format(Dev, "~s ~s(", [call_type(I), call_fnptrval(I)]),
+      io:format(Dev, " ", []),
+      pp_type(Dev, call_type(I)),
+      io:format(Dev, " ~s(", [call_fnptrval(I)]),
       pp_args(Dev, call_arglist(I)),
       io:format(Dev, ") ", []),
       pp_options(Dev, call_fn_attrs(I)),
@@ -1048,7 +1072,9 @@ pp_ins(Dev, I) ->
         Cc -> io:format(Dev, "~s ", [Cc])
       end,
       pp_options(Dev, fun_def_ret_attrs(I)),
-      io:format(Dev, "~s @~s", [fun_def_type(I), fun_def_name(I)]),
+      io:format(Dev, " ", []),
+      pp_type(Dev, fun_def_type(I)),
+      io:format(Dev, " @~s", [fun_def_name(I)]),
       io:format(Dev, "(", []),
       pp_args(Dev, fun_def_arglist(I)),
       io:format(Dev, ") ", []),
@@ -1069,9 +1095,11 @@ pp_ins(Dev, I) ->
         Cc -> io:format(Dev, "~s ", [Cc])
       end,
       pp_options(Dev, fun_decl_ret_attrs(I)),
-      io:format(Dev, "~s ~s", [fun_decl_type(I), fun_decl_name(I)]),
+      io:format(Dev, " ", []),
+      pp_type(Dev, fun_decl_type(I)),
+      io:format(Dev, " ~s", [fun_decl_name(I)]),
       io:format(Dev, "(", []),
-      pp_types(Dev, fun_decl_arglist(I)),
+      pp_type_list(Dev, fun_decl_arglist(I)),
       io:format(Dev, ") ", []),
       case fun_decl_align(I) of
         [] -> ok;
@@ -1084,9 +1112,9 @@ pp_ins(Dev, I) ->
     #llvm_label{} ->
       io:format(Dev, "~s:~n", [label_label(I)]);
     #llvm_const_decl{} ->
-      io:format(Dev, "~s = ~s ~s ~s", [const_decl_dst(I),
-          const_decl_decl_type(I), const_decl_type(I), const_decl_value(I)]),
-      io:format(Dev, "~n", []);
+      io:format(Dev, "~s = ~s ", [const_decl_dst(I), const_decl_decl_type(I)]),
+      pp_type(Dev, const_decl_type(I)),
+      io:format(Dev, " ~s~n", [const_decl_value(I)]);
     
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
@@ -1155,18 +1183,12 @@ op_has_options(Op) ->
 
 pp_args(_Dev, []) -> ok;
 pp_args(Dev, [{Type, Arg} | []]) ->
-  io:format(Dev, "~s ~s", [Type, Arg]);
+  pp_type(Dev, Type),
+  io:format(Dev, " ~s", [Arg]);
 pp_args(Dev, [{Type, Arg} | Args]) ->
-  io:format(Dev, "~s ~s, ", [Type, Arg]),
+  pp_type(Dev, Type),
+  io:format(Dev, " ~s, ", [Arg]),
   pp_args(Dev, Args).
-
-pp_types(_Dev, []) -> ok;
-pp_types(Dev, [T | []]) ->
-  io:format(Dev, "~s ", [T]);
-pp_types(Dev, [T | Types]) ->
-  io:format(Dev, "~s , ", [T]),
-  pp_types(Dev, Types).
-
 
 pp_options(_Dev, []) -> ok;
 pp_options(Dev, [O|Os])-> io:format(Dev,"~s ", [erlang:atom_to_list(O)]),
@@ -1182,12 +1204,16 @@ pp_phi_value_labels(Dev,[{Value,Label}| VL]) ->
 
 pp_typed_idxs(_Dev, []) -> ok;
 pp_typed_idxs(Dev, [{Type, Id} | Tids]) ->
-  io:format(Dev, ", ~s ~s", [Type, Id]),
+  io:format(Dev, ", ", []),
+  pp_type(Dev, Type),
+  io:format(Dev, " ~s", [Id]),
   pp_typed_idxs(Dev, Tids).
 
 pp_switch_value_label_list(_Dev, _Type,  []) -> ok;
 pp_switch_value_label_list(Dev, Type, [{Value, Label} | VLs]) ->
-  io:format(Dev, "      ~s ~s, label ~s~n", [Type, Value, Label]),
+  io:format(Dev, "      ", []),
+  pp_type(Dev, Type),
+  io:format(Dev, " ~s, label ~s~n", [Value, Label]),
   pp_switch_value_label_list(Dev, Type, VLs).
 
 indent(I) ->
