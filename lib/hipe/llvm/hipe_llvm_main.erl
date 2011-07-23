@@ -8,21 +8,11 @@
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
 
-patch_labels([],[])->[];
-patch_labels([M|_], Labels) ->
-  case M of
-    {_, []} ->
-      [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
-    {_, sorted, Length, SortedBy} ->
-      [{sorted, Length, lists:zip(SortedBy,Labels)}]
-  end.
-
 rtl_to_native(RTL, _Options) ->
   %% Get LLVM Instruction List
-  {LLVMCode, RefDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} = hipe_rtl2llvm:translate(RTL),
+  {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} = hipe_rtl2llvm:translate(RTL),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
-  IsClosure = hipe_rtl:rtl_is_closure(RTL),
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
@@ -31,53 +21,18 @@ rtl_to_native(RTL, _Options) ->
   Object_filename = compile_with_llvm(Filename),
   %% Extract information from object file
   ObjBin = elf64_format:open_object_file(Object_filename),
-  %% Get relocation info and write to file for loader
+  %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
   SDescs = note_erlgc:get_sdesc_list(ObjBin), 
   %% Get Labels info
   Labels = elf64_format:get_label_list(ObjBin),
-  LabelMap = patch_labels(TempLabelMap, Labels),
-  %% Temporary code for creating references needed by  the loader
-  Relocs1 = lists:map(fun({A,B}) -> {map_funs(A, RefDict), B} end, Relocs),
-  Is_mfa = 
-    fun ({Function,_}) ->
-      case Function of
-        {Mod_Name, _, _} -> false;
-        {_, _, _} -> true;
-        _ -> false
-      end 
-    end,
-  Is_constant = 
-    fun ({A, _}) ->
-      case A of
-        {constant, _} -> true;
-        _ -> false
-      end
-    end,
-  Is_closure =
-    fun ({A,_}) ->
-        case A of
-          {closure, _} -> true;
-          _ -> false
-        end
-    end,
-  Is_atom = 
-    fun ({A, _}) ->
-      case A of
-        {'atom', _} -> true;
-        _ -> false
-      end
-    end,
-  {MFAs, Rest} = lists:partition(Is_mfa, Relocs1),
-  {Constants, Rest1} = lists:partition(Is_constant, Rest),
-  {Closures, Rest2} = lists:partition(Is_closure, Rest1),
-  {Atoms1, BIFs} = lists:partition(Is_atom, Rest2),
-  Atoms = lists:map(fun ({{'atom', Name}, X}) -> {Name,X} end, Atoms1),
-  FinalRelocs = [{2, MFAs},{3, BIFs}, {1, Constants},{1,Closures}, {0, Atoms},
-                  {4, SDescs}],
-  ok = file:write_file(Filename ++ "_relocs.o", erlang:term_to_binary(FinalRelocs), [binary]),
-  %% Get binary code and write to file for loader
+  %% Create final LabelMap
+  LabelMap = fix_labelmap(TempLabelMap, Labels),
+  %% Create relocation list
+  Relocs1 = fix_relocations(Relocs, RelocsDict, Mod_Name),
+  FinalRelocs = [{4, SDescs}|Relocs1],
+  %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
   ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   %%--------------------------------------------------------------------------
@@ -87,13 +42,7 @@ rtl_to_native(RTL, _Options) ->
   ExportMap = Fun,
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
-  Refs = lists:filter(
-    fun ({_, X}) -> 
-        case X of [] -> false;
-          _ -> true 
-        end 
-    end,
-    FinalRelocs), 
+  Refs = FinalRelocs,
   Bin = hipe_llvm_bin:mk_llvm_bin(
     ?VERSION_STRING(),
     ?HIPE_SYSTEM_CRC,
@@ -107,18 +56,17 @@ rtl_to_native(RTL, _Options) ->
     Refs),
   Bin.
 
-
-fix_opts(Opts) ->
-  lists:foldl(fun(X, Acc) -> Acc++" "++X end, "", Opts).
-
-
+%%----------------------------------------------------------------------------
+%%------------------------- LLVM TOOL CHAIN ---------------------------------
+%%----------------------------------------------------------------------------
 %% Compile with LLVM tools
+%%----------------------------------------------------------------------------
 compile_with_llvm(Fun_Name) ->
   Opt_filename = opt(Fun_Name),
   llc(Opt_filename, Fun_Name),  %XXX: Both names needed. FIX THIS SHIT
   llvmc(Fun_Name).
 
-  
+
 %% OPT wrapper (.ll -> .ll)
 opt(Fun_Name) ->
   Options = ["-mem2reg", "-O2"], %XXX: Do we want -O3?
@@ -169,23 +117,83 @@ llvmc(Fun_Name, Opts) ->
   end,
   Object_filename.
 
+fix_opts(Opts) ->
+  lists:foldl(fun(X, Acc) -> Acc++" "++X end, "", Opts).
 
-map_funs(Name, Dict) ->
-  FName = case Name of
-    ".rodata" -> ".rodata0";
-    _ -> Name
-  end,
-  case dict:fetch(FName, Dict) of
-    {'constant', Label} -> {'constant', Label};
-    {'atom', AtomName} -> {'atom', AtomName};
-    {closure, Closure} -> {closure, Closure};
-    {call, {bif, BifName, _}} -> map_bifs(BifName);
-    {call, {M,F,A}} -> {M, map_bifs(F), A};
-    Other -> exit({?MODULE,map_funs,{"Unknown call", Other}})
+%%----------------------------------------------------------------------------
+
+%%----------------------------------------------------------------------------
+%% Functions to manage relocations
+%%----------------------------------------------------------------------------
+
+fix_labelmap([],[])->[];
+fix_labelmap([M|_], Labels) ->
+  case M of
+    {_, []} ->
+      [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
+    {_, sorted, Length, SortedBy} ->
+      [{sorted, Length, lists:zip(SortedBy,Labels)}]
   end.
 
-%% Ugly..Just for testing reasons
-map_bifs(Name) ->
+%% Correlate object file relocation symbols with info from translation to llvm
+%% code. Also split relocations according to their type, as expected by the
+%% hipe_unified_loader.
+fix_relocations(Relocs, RelocsDict, ModName) ->
+  Relocs1 = fix_rodata(Relocs),
+  fix_relocs(Relocs1, RelocsDict, ModName, [], [], [], []).
+
+fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3) ->
+  Relocs = [{0, Acc0}, {1, Acc1}, {2, Acc2}, {3, Acc3}],
+  %% Remove Empty Elements
+  NotEmpty = 
+    fun ({_, X}) -> 
+        case X of [] -> false;
+          _ -> true 
+        end 
+    end,
+  lists:filter(NotEmpty, Relocs);
+
+fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3) ->
+  case dict:fetch(Name, RelocsDict) of
+    {atom, AtomName} ->
+      NR = {AtomName, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, [NR|Acc0], Acc1, Acc2, Acc3);
+    {constant, _}=Constant ->
+      NR = {Constant, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3);
+    {closure, _}=Closure ->
+      NR = {Closure, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3);
+    {call, {bif, BifName, _}} ->
+      NR = {fix_reloc_name(BifName), Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3]);
+    %% MFA calls to functions in the same module are of type 3, while all
+    %% other MFA calls are of type 2.
+    {call, {ModName,F,A}} ->
+      NR = {{ModName,fix_reloc_name(F),A}, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3]);
+    {call, {M,F,A}} ->
+      NR = {{M,fix_reloc_name(F),A}, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, [NR|Acc2], Acc3);
+    Other ->
+      exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary", Other}})
+  end.
+
+%% Temporary function that gives correct names to symbols that correspond to
+%% .rodata section, which are produced from switch statement translation.
+fix_rodata(Relocs) ->
+  fix_rodata(Relocs, 0, []).
+fix_rodata([], _, Acc) -> Acc;
+fix_rodata([{Name, Offset}=R|Rs], Num, Acc) ->
+  case Name of
+    ".rodata" -> 
+      NewName = ".rodata"++integer_to_list(Num),
+      fix_rodata(Rs, Num+1, [{NewName, Offset}|Acc]);
+    _ -> 
+      fix_rodata(Rs, Num, [R|Acc])
+  end.
+
+fix_reloc_name(Name) ->
   case Name of
     bif_add -> '+';
     bif_sub -> '-';
@@ -196,3 +204,4 @@ map_bifs(Name) ->
     Other -> Other
   end.
 
+%%----------------------------------------------------------------------------
