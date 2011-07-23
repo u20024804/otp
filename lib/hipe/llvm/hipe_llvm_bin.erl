@@ -71,6 +71,7 @@ join_binaries(Binaries, Closures, Exports) ->
  % io:format("LabelMap ~w~n",[LabelMap]),
   {ConstAlign, ConstSize} = correct_align_size(Binaries),
   {ConstMap, Refs} = join_relocations(Binaries, ExportMap),
+  FinalRefs = merge_refs(Refs),
 %  io:format("ConstMap ~w ~nRefs ~wn",[ConstMap, Refs]),
   FinalExportMap =  fix_exportmap(ExportMap, Closures, Exports),
   ConstMap1 = filter_empty_list(ConstMap),
@@ -78,12 +79,11 @@ join_binaries(Binaries, Closures, Exports) ->
   {FinalConstMap, FinalLabelMap} = compute_const_size(ConstMap1, LabelMap1),
   term_to_binary([{Version, CheckSum},
    ConstAlign, ConstSize, FinalConstMap, FinalLabelMap, FinalExportMap,
-   CodeSize,  CodeBinary,  Refs,
+   CodeSize,  CodeBinary,  FinalRefs,
    0,[] % ColdSize, CRrefs
  ]).
 
 %%----------------------------------------------------------------------------
-
 
 %%----------------------------------------------------------------------------
 %% Misc Functions
@@ -223,6 +223,27 @@ add_offset_to_relocs(Refs, Size) ->
   Update_all = fun ({Type, Relocs}) -> {Type, lists:map(Update_relocs, Relocs)} end,
   lists:map(Update_all, Refs).
 
+%%----------------------------------------------------------------------------
+
+%% In case of whole module compilation the same relocation must appear in many
+%% functions. This function merges same relocation of differents functions in
+%% one relocation with many offsets.
+merge_refs(Refs) -> merge_refs(Refs, []).
+
+merge_refs([], Acc) -> Acc;
+merge_refs([{Type, _ElemList}=R|Rs], Acc) ->
+  SameType = 
+  fun ({A,_}) ->
+      case A of
+        Type -> true;
+        _ -> false
+      end
+  end,
+  {Same, Diff} = lists:partition(SameType, Rs),
+  SameMerged = lists:foldl(fun({_,B}, Acc2) -> B++Acc2 end, [], [R|Same]),
+  merge_refs(Diff, [{Type, merge_refs(SameMerged)}|Acc]);
+merge_refs([N|_]=List, _) when is_integer(N) ->
+  List.
 
 %%----------------------------------------------------------------------------
 
