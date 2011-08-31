@@ -445,10 +445,14 @@ rtl_symbolic(RtlCfg, Options) ->
 rtl_to_llvm(RtlCfg0, Options) ->
   RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
   RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
-  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA0),
+  RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
+ % hipe_rtl_liveness:pp(RtlSSA0),
+  Live = hipe_rtl_liveness:analyze(RtlSSA10),
+  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlSSA10, Live),
+  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
+  %hipe_rtl_cfg:pp(RtlSSA0),
   %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
   %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
-  %% RtlSSA2 = rtl_ssa_dead_code_elimination(RtlSSA1, Options),
   %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
   %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
   %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
