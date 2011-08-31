@@ -56,6 +56,40 @@ rtl_to_native(RTL, _Options) ->
     Refs),
   Bin.
 
+%more_than_4(Relocs) ->
+%  io:format("~w~n",[Relocs]),
+%  A = lists:filter(fun ({X,Y}) -> case X of 3 -> true; 2-> true ; _ -> false end end, Relocs),
+%  io:format("~w~n",[A]),
+%  {_,B} = lists:unzip(A),
+%  io:format("~w~n",[B]),
+%  C = lists:filter(fun ({F,_}) -> case F of {_,_,Num}  when Num>4 -> true; _ ->
+%            false end end, lists:flatten(B)),
+%  io:format("~w~n",[C]),
+%  Offsets = lists:map(fun ({{_,_,Arity},[Offset]}) -> {Arity-4,Offset+4} end, C),
+%  io:format("~w~n",[Offsets]),
+%  Offsets.
+%
+%
+%fix_gc_desc(Sdescs, []) -> Sdescs;
+%fix_gc_desc(Sdescs, [{FixAr, Offset}]) ->
+%  [{{[],FrameSize,Arity,Roots},Offs}] = Sdescs,
+%  NewFrameSize = FrameSize-FixAr,
+%  Roots2= tuple_to_list(Roots),
+%  {NewRoots,_} = lists:split(length(Roots2)-FixAr, Roots2),
+%  NewOffs = lists:delete(Offset, Offs),
+%  Foo=[{{[],FrameSize,Arity,Roots},NewOffs},
+%  {{[],NewFrameSize,Arity,list_to_tuple(NewRoots)},[Offset]}
+%    ],
+%  io:format("~w~n",[Foo]),
+%  Foo.
+%  
+
+
+
+  
+
+
+
 %%----------------------------------------------------------------------------
 %%------------------------- LLVM TOOL CHAIN ---------------------------------
 %%----------------------------------------------------------------------------
