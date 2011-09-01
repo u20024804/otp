@@ -103,6 +103,18 @@
 -define(IF_DEBUG_LEVEL(Level,DebugAction,NoDebugAction), NoDebugAction).
 -endif.
 
+
+%%
+%% Define the macros that are dependent on the llvm_debug flag.
+%%
+
+-ifdef(LLVM_DEBUG).
+-define(llvm_debug_msg(Msg,Data), ?msg(Msg,Data)).
+-else.
+-define(llvm_debug_msg(Msg,Data), no_llvm_debug).
+-endif.
+
+
 %%
 %% Define the exit macro
 %%
