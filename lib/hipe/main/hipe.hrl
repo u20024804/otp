@@ -57,7 +57,7 @@
 %%  HIPE_INSTRUMENT_COMPILER - Turn on instrumentation of the compiler.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--define(VERSION_STRING(),"3.7.9").
+-define(VERSION_STRING(),"3.8").
 -define(MSGTAG, "<HiPE (v " ++ ?VERSION_STRING() ++ ")> ").
                                                                                 
 %%
@@ -88,16 +88,6 @@
 	?msg("Warning: [~s:~w]: " ++ Msg, [?MODULE,?LINE|Args])).
 
 %%
-%% Define the macros that are dependent on the llvm_debug flag.
-%%
-
--ifdef(LLVM_DEBUG).
--define(llvm_debug_msg(Msg,Data), ?msg(Msg,Data)).
--else.
--define(llvm_debug_msg(Msg,Data), no_llvm_debug).
--endif.
-
-%%
 %% Define the macros that are dependent on the debug flag.
 %%
 
@@ -113,6 +103,18 @@
 -define(IF_DEBUG(DebugAction,NoDebugAction), NoDebugAction).
 -define(IF_DEBUG_LEVEL(Level,DebugAction,NoDebugAction), NoDebugAction).
 -endif.
+
+
+%%
+%% Define the macros that are dependent on the llvm_debug flag.
+%%
+
+-ifdef(LLVM_DEBUG).
+-define(llvm_debug_msg(Msg,Data), ?msg(Msg,Data)).
+-else.
+-define(llvm_debug_msg(Msg,Data), no_llvm_debug).
+-endif.
+
 
 %%
 %% Define the exit macro
