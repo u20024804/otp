@@ -68,16 +68,17 @@ translate(RTL) ->
   GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_void{},
     "@llvm.gcroot", [hipe_llvm:mk_pointer(?BYTE_TYPE_P), ?BYTE_TYPE_P], []),
   GCExt = [GCROOTDecl, GcMetadata],
-  Code2 = fix_invoke_calls(Code),
+  {Code2, FailLabels} = fix_invoke_calls(Code),
   Relocs0 = dict:new(),
-  {LLVM_Code, Relocs1} = translate_instr_list(Code2, [], Relocs0),
+  {LLVM_Code1, Relocs1} = translate_instr_list(Code2, [], Relocs0),
   {FinalRelocs, ExternalDecl, LocalVars, TempLabelMap} = 
     handle_relocations(Relocs1, SC, SwitchValues, Fun),
+  LLVM_Code2 = add_landingpads(LLVM_Code1, FailLabels),
   %% Create LLVM Code for the compiled function
-  LLVM_Code2 = create_function_definition(Fun, Params, LLVM_Code,
+  LLVM_Code3 = create_function_definition(Fun, Params, LLVM_Code2,
     GCRootDeclare++LocalVars++StoredParams),
   %% Final Code = CompiledFunction + External Declarations
-  FinalLLVMCode = [LLVM_Code2 | ExternalDecl],
+  FinalLLVMCode = [LLVM_Code3 | ExternalDecl],
   FinalLLVMCode2 = GCExt ++ FinalLLVMCode,
   {FinalLLVMCode2, FinalRelocs, SC, ConstAlign, ConstSize, TempLabelMap}.
 
@@ -702,23 +703,25 @@ trans_switch(I, Relocs) ->
 %% When a call has a fail continuation label it must be extended with a normal
 %% continuation label to go with the LLVM's invoke instruction. Also all phi
 %% nodes that are correlated with the block that holds tha call instruction
-%% must be updated
-fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], []).
-fix_invoke_calls([], Acc, SubstMap) -> 
+%% must be updated. FailLabels is the list of labels of all fail blocks, which
+%% is needed to be declared as landing pads.
+fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], [], []).
+fix_invoke_calls([], Acc, SubstMap, FailLabels) -> 
   Update = fun (X) -> update_phi_nodes(X, SubstMap) end,
-  lists:reverse(lists:map(Update, Acc));
-fix_invoke_calls([I|Is], Acc, SubstMap) ->
+  {lists:reverse(lists:map(Update, Acc)), FailLabels};
+fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
   case I of 
     #call{} ->
       case hipe_rtl:call_fail(I) of
-        [] -> fix_invoke_calls(Is, [I|Acc], SubstMap);
-        _Label ->
+        [] -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels);
+        Label ->
           OldLabel = find_first_label(Acc),
           NewLabel = 9999999999 - hipe_gensym:new_label(rtl),
           NewCall =  hipe_rtl:call_normal_update(I, NewLabel),
-          fix_invoke_calls(Is, [NewCall|Acc], [{OldLabel, NewLabel}|SubstMap])
+          fix_invoke_calls(Is, [NewCall|Acc], [{OldLabel, NewLabel}|SubstMap],
+                            [Label|FailLabels])
       end;
-    _ -> fix_invoke_calls(Is, [I|Acc], SubstMap)
+    _ -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels)
   end.
 
 find_first_label([]) -> exit({?MODULE, find_first_label, "No label found"});
@@ -738,6 +741,26 @@ update_phi_node(I, []) -> I;
 update_phi_node(I, [{OldPred, NewPred} | SubstMap]) ->
   I1 = hipe_rtl:phi_redirect_pred(I, OldPred, NewPred),
   update_phi_node(I1, SubstMap).
+
+add_landingpads(LLVM_Code, FailLabels) ->
+  FailLabels2 = lists:map(fun(X) -> "L"++integer_to_list(X) end, FailLabels),
+  add_landingpads(LLVM_Code, FailLabels2, []).
+add_landingpads([], _, Acc) ->
+  lists:reverse(Acc);
+add_landingpads([I|Is], FailLabels, Acc) ->
+  case I of
+    #llvm_label{} ->
+      Label = hipe_llvm:label_label(I),
+      case lists:member(Label, FailLabels) of
+        true ->
+          LP = #llvm_landingpad{},
+          add_landingpads(Is, FailLabels, [LP,I|Acc]);
+        false ->
+          add_landingpads(Is, FailLabels, [I|Acc])
+      end;
+    _ ->
+      add_landingpads(Is, FailLabels, [I|Acc])
+  end.
 
 %%----------------------------------------------------------------------------
 
@@ -1233,8 +1256,11 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   %% Find function calls
   IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
   ExternalCallList = lists:filter(IsExternalCall, CallList),
+  LandPad = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_int{width=32},
+    "@__gcc_personality_v0", [#llvm_int{width=32}, #llvm_int{width=64},
+      ?BYTE_TYPE_P, ?BYTE_TYPE_P], []),
   %% Create code to declare external function
-  FunDecl = lists:map(fun call_to_decl/1, ExternalCallList),
+  FunDecl = [LandPad | lists:map(fun call_to_decl/1, ExternalCallList)],
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SlimedConstMap)),
   %% Create code to declare constants 

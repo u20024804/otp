@@ -62,6 +62,7 @@
     type, 'name', arglist=[], fn_attrs=[], align=[], body=[]}).
 -record(llvm_fun_decl, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
     type, 'name', arglist=[],  align=[]}).
+-record(llvm_landingpad, {}).
 %%---------------------------------------------------------------------
 -record(llvm_comment, {text}).
 -record(llvm_label, {label}).
