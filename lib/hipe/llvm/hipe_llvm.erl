@@ -1115,6 +1115,9 @@ pp_ins(Dev, I) ->
       io:format(Dev, "~s = ~s ", [const_decl_dst(I), const_decl_decl_type(I)]),
       pp_type(Dev, const_decl_type(I)),
       io:format(Dev, " ~s~n", [const_decl_value(I)]);
+    #llvm_landingpad{} ->
+      io:format(Dev, "landingpad { i8*, i32 } personality i32 (i32, i64,
+        i8*,i8*)* @__gcc_personality_v0 cleanup~n", []);
     
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
