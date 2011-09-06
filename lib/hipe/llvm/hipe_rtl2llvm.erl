@@ -37,7 +37,8 @@
 -define(BYTE_TYPE, #llvm_int{width=8}).
 -define(BYTE_TYPE_P, #llvm_pointer{type=?BYTE_TYPE}).
 -define(FUN_RETURN_TYPE, 
-  #llvm_struct{type_list=[?WORD_TYPE, ?WORD_TYPE, ?WORD_TYPE, ?WORD_TYPE]}).
+  #llvm_struct{type_list=[?WORD_TYPE, ?WORD_TYPE, ?WORD_TYPE]}).
+-define(NR_PINNED_REGS, 2).
 
 
 translate(RTL) ->
@@ -304,7 +305,8 @@ trans_call(I, Relocs) ->
   I7 = 
   case hipe_rtl:call_dstlist(I) of
     [] -> [];
-    [_] -> hipe_llvm:mk_extractvalue(Dst, ?FUN_RETURN_TYPE, T1, "3", [])
+    [_] -> hipe_llvm:mk_extractvalue(Dst, ?FUN_RETURN_TYPE, T1,
+        integer_to_list(?NR_PINNED_REGS), [])
   end,
   I8 = 
   case hipe_rtl:call_continuation(I) of
@@ -1160,9 +1162,9 @@ create_function_definition(Fun, Params, Code, LocalVars) ->
 
 fixed_registers() ->
   case get(hipe_target_arch) of
-    x86 -> ["hp", "p", "nsp"];
+    x86 -> ["hp", "p"];
     amd64 ->
-      ["hp", "p", "nsp"];
+      ["hp", "p"];
     Other ->
       exit({?MODULE, map_registers, {"Unknown Architecture", Other}})
   end.
@@ -1288,11 +1290,11 @@ call_to_decl({Name, {call, MFA}}) ->
     erlang ->
       case F of 
         get_stacktrace -> {?FUN_RETURN_TYPE, []};
-        %% +3 for precoloured regs
-        _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+3)}
+        %% +precoloured regs
+        _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
       end;
-    %% +3 for precoloured regs
-    _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+3)}
+    %% +precoloured regs
+    _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
   end,
   ArgsTypes = lists:map(fun(_) -> ?WORD_TYPE end, Args),
   hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, "@"++Name, ArgsTypes, []). 
