@@ -238,7 +238,7 @@
    call_normal/1,
    call_normal_update/2,
 	 %% call_continuation_update/2,
-	 %% call_fail_update/2,
+	 call_fail_update/2,
 	 is_call/1,
 
 	 mk_enter/3,
