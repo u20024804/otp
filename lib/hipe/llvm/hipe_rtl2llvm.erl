@@ -306,7 +306,8 @@ trans_call(I, Relocs) ->
     %% Call With Exception
     FailLabelNum -> 
       TrueLabel = "L"++integer_to_list(hipe_rtl:call_normal(I)),
-      FailLabel = mk_jump_label(FailLabelNum),
+     % FailLabel = mk_jump_label(FailLabelNum),
+     FailLabel = "%FL"++integer_to_list(FailLabelNum),
       II1 = hipe_llvm:mk_invoke(T1, "cc 11", [], ?FUN_RETURN_TYPE,
         Name, FinalArgs, [], "%"++TrueLabel, FailLabel),
       II2 = hipe_llvm:mk_label(TrueLabel),
@@ -714,12 +715,21 @@ fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
     #call{} ->
       case hipe_rtl:call_fail(I) of
         [] -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels);
-        Label ->
+        FailLabel ->
           OldLabel = find_first_label(Acc),
           NewLabel = 9999999999 - hipe_gensym:new_label(rtl),
-          NewCall =  hipe_rtl:call_normal_update(I, NewLabel),
-          fix_invoke_calls(Is, [NewCall|Acc], [{OldLabel, NewLabel}|SubstMap],
-                            [Label|FailLabels])
+          NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
+          case lists:keyfind(FailLabel, 1, FailLabels) of
+            {FailLabel, NewFailLabel} ->
+              NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
+              fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
+                FailLabels);
+            false ->
+              NewFailLabel = hipe_gensym:new_label(rtl),
+              NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
+              fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
+                [{FailLabel, NewFailLabel}|FailLabels])
+          end
       end;
     _ -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels)
   end.
@@ -743,7 +753,10 @@ update_phi_node(I, [{OldPred, NewPred} | SubstMap]) ->
   update_phi_node(I1, SubstMap).
 
 add_landingpads(LLVM_Code, FailLabels) ->
-  FailLabels2 = lists:map(fun(X) -> "L"++integer_to_list(X) end, FailLabels),
+  FailLabels2 =
+    lists:map(fun({X,Y}) ->
+          {"L"++integer_to_list(X), "FL"++integer_to_list(Y)}
+      end, FailLabels),
   add_landingpads(LLVM_Code, FailLabels2, []).
 add_landingpads([], _, Acc) ->
   lists:reverse(Acc);
@@ -751,10 +764,12 @@ add_landingpads([I|Is], FailLabels, Acc) ->
   case I of
     #llvm_label{} ->
       Label = hipe_llvm:label_label(I),
-      case lists:member(Label, FailLabels) of
-        true ->
+      case lists:keyfind(Label, 1, FailLabels) of
+        {OldLabel,FailLabel} ->
+          I1 = hipe_llvm:mk_label(FailLabel),
+          I2 = hipe_llvm:mk_br("%"++OldLabel),
           LP = #llvm_landingpad{},
-          add_landingpads(Is, FailLabels, [LP,I|Acc]);
+          add_landingpads(Is, FailLabels, [I, I2 ,LP ,I1|Acc]);
         false ->
           add_landingpads(Is, FailLabels, [I|Acc])
       end;
