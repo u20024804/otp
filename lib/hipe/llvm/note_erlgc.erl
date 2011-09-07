@@ -274,7 +274,7 @@ combine_ras_and_exns(ExnHandlers, [RA | MoreRAs], Acc) ->
 find_exn_handler(_, []) ->
   [];
 find_exn_handler(RA, [{Start, End, Handler} | MoreExnHandlers]) ->
-  case (RA > Start andalso RA < End) of
+  case (RA >= Start andalso RA =< End) of
     true ->
       Handler;
     false ->
