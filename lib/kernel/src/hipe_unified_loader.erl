@@ -48,8 +48,8 @@
 	 load_module/3,
 	 load/2]).
 
--define(LLVM_DEBUG,true).
-%-define(DEBUG,true).
+%%-define(DEBUG,true).
+%%-define(LLVM_DEBUG,true).
 -define(DO_ASSERT,true).
 -define(HIPE_LOGGING,true).
 
