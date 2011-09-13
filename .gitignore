@@ -376,3 +376,5 @@ JAVADOC-GENERATED
 # llvm - RTL and LLVM assembly files
 /lib/hipe/llvm/test/*.rtl
 /lib/hipe/llvm/test/*.ll
+/lib/hipe/llvm/test/*.s
+/lib/hipe/llvm/test/*.o

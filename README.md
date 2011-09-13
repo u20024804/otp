@@ -14,40 +14,72 @@ and release handling tools.
 
 More information can be found at [erlang.org] [1].
 
+Why forked?
+-----------
+Erlang/OTP was forked in order to work on implementing an LLVM
+back-end for HiPE. The current work is focused on AMD64 architecture
+but the back-end is meant to be target-independent (for the
+architecture that the Erlang Run-Time System supports). Please take
+some time and install [custom LLVM] [5] before moving forward because
+it is an integral part of the back-end.
+
+More information about the design decisions and the actual patch to be announced.
+
 Building and Installing
 -----------------------
+*  Getting latest source code from [Github] [4]:
 
-Information on building and installing Erlang/OTP can be found
-in the [$ERL_TOP/HOWTO/INSTALL.md] [5] document.
+        git clone git://github.com/yiannist/otp.git otp
 
-Contributing to Erlang/OTP
---------------------------
+*  Compiling:
 
-Here are the [instructions for submitting patches] [2].
+	    cd otp/
+	    export ERL_TOP=`pwd`
+	    ./otp_build autoconf
+	    ./configure
+	    make
 
-In short:
+*  Installing (*optional*):
 
-*   We prefer to receive proposed updates via email on the
-    [`erlang-patches`] [3] mailing list rather than through a pull request.
-    Pull requests are not practical because we have a strict policy never to
-    merge any untested changes to the development branch (the only exception
-    being **obviously** correct changes, such as corrections of typos).
+        sudo make install
 
-*   We merge all proposed updates to the `pu` (*proposed updates*) branch,
-    typically within one working day.
+*  Verifying that the installation was successful (this
+   step considers [custom LLVM] [5] to be **already** successfully
+   installed in your system): 
 
-*   At least once a day, the contents of the `pu` branch will be built on
-    several platforms (Linux, Solaris, Mac OS X, Windows, and so on) and
-    automatic test suites will be run. We will email you if any problems are
-    found.
+    1.  Write an Erlang module:
+         
+            -module(test).
+            -export(hello/1).
+            
+            hello(Name) ->
+                io:format("Hello ~w!~n", [Name]).
 
-*   If a proposed change builds and passes the tests, it will be reviewed
-    by one or more members of the Erlang/OTP team at Ericsson. The reviewer
-    may suggest improvements that are needed before the change can be accepted
-    and merged.
+    2.  Fire the Erlang shell:
 
-*   Once or twice a week, a status email called ["What's cooking in Erlang/OTP"] [4]
-    will be sent to the [`erlang-patches`] [3] mailing list.
+            yiannis@mosby [~/git/otp]>>= erl
+            Erlang R14B04 (erts-5.8.5) [source] [64-bit] [smp:2:2] [rq:16]
+            [async-threads:0] [hipe] [kernel-poll:false]
+
+            Eshell V5.8.5  (abort with ^G)
+            1>
+
+    3.  Compile module to BEAM bytecode:
+
+            1> c(foo).
+            {ok,foo}
+
+    4.  Compile whole module using the LLVM back-end:
+
+            2> hipe:c(foo, [to_llvm]).
+            {ok,foo}
+
+    5.  It works! :-)
+
+            3> foo:hello(world).	
+            Hello world!	
+            ok	 
+            4>
 
 Copyright and License
 ---------------------
@@ -73,6 +105,6 @@ Copyright and License
 
    [1]: http://www.erlang.org
    [2]: http://wiki.github.com/erlang/otp/submitting-patches
-   [3]: http://www.erlang.org/static/doc/mailinglist.html
-   [4]: http://erlang.github.com/otp/
-   [5]: HOWTO/INSTALL.md
+   [3]: http://www.erlang.org/faq.html
+   [4]: http://github.com/yiannist/otp
+   [5]: http://github.com/yiannist/llvm-2.8
