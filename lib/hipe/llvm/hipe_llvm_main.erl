@@ -8,6 +8,8 @@
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
 
+-define(NR_ARG_REGS, ?AMD64_NR_ARG_REGS).
+
 rtl_to_native(RTL, _Options) ->
   %% Get LLVM Instruction List
   {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} = hipe_rtl2llvm:translate(RTL),
@@ -31,7 +33,8 @@ rtl_to_native(RTL, _Options) ->
   LabelMap = fix_labelmap(TempLabelMap, Labels),
   %% Create relocation list
   Relocs1 = fix_relocations(Relocs, RelocsDict, Mod_Name),
-  FinalRelocs = [{4, SDescs}|Relocs1],
+  SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs),
+  FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
   ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
@@ -55,39 +58,6 @@ rtl_to_native(RTL, _Options) ->
     CodeBinary,
     Refs),
   Bin.
-
-%more_than_4(Relocs) ->
-%  io:format("~w~n",[Relocs]),
-%  A = lists:filter(fun ({X,Y}) -> case X of 3 -> true; 2-> true ; _ -> false end end, Relocs),
-%  io:format("~w~n",[A]),
-%  {_,B} = lists:unzip(A),
-%  io:format("~w~n",[B]),
-%  C = lists:filter(fun ({F,_}) -> case F of {_,_,Num}  when Num>4 -> true; _ ->
-%            false end end, lists:flatten(B)),
-%  io:format("~w~n",[C]),
-%  Offsets = lists:map(fun ({{_,_,Arity},[Offset]}) -> {Arity-4,Offset+4} end, C),
-%  io:format("~w~n",[Offsets]),
-%  Offsets.
-%
-%
-%fix_gc_desc(Sdescs, []) -> Sdescs;
-%fix_gc_desc(Sdescs, [{FixAr, Offset}]) ->
-%  [{{[],FrameSize,Arity,Roots},Offs}] = Sdescs,
-%  NewFrameSize = FrameSize-FixAr,
-%  Roots2= tuple_to_list(Roots),
-%  {NewRoots,_} = lists:split(length(Roots2)-FixAr, Roots2),
-%  NewOffs = lists:delete(Offset, Offs),
-%  Foo=[{{[],FrameSize,Arity,Roots},NewOffs},
-%  {{[],NewFrameSize,Arity,list_to_tuple(NewRoots)},[Offset]}
-%    ],
-%  io:format("~w~n",[Foo]),
-%  Foo.
-%  
-
-
-
-  
-
 
 
 %%----------------------------------------------------------------------------
@@ -236,6 +206,98 @@ fix_reloc_name(Name) ->
     concat -> '++';
     unary_plus -> '+';
     Other -> Other
+  end.
+
+%%----------------------------------------------------------------------------
+%% Fixing Stack Descriptors
+%%----------------------------------------------------------------------------
+
+%% This function is responssible for correcting the stack descriptors of the
+%% calls that are found in the code and have more than NR_ARG_REGS(so
+%% some of their arguments are passed to the stack). Because of the
+%% Reserved Call Frame that the LLVM uses, the stack descriptors are no the
+%% correct since at the point of call the frame size is reduced proportionally
+%% to the number of arguments that are passed to the stack. Also the offsets
+%% of the roots need to be readjusted.
+fix_sdescs(RelocsDict, Relocs, SDescs) ->
+  NeedsSDescFix  = calls_with_stack_args(RelocsDict),
+  OffsetsArity = calls_offsets_arity(Relocs, NeedsSDescFix),
+  hipe_llvm_bin:merge_refs(fix_sdescs1(SDescs, OffsetsArity)).
+
+
+%% This function takes as argument the relocation dictionary as produced by the
+%% translation of RTL code to LLVM and finds the names of the calls (MFA and
+%% BIF calls) that have more than NR_ARG_REGS.
+calls_with_stack_args(Dict) ->
+  HasStackArgs =
+    fun(_, Value) ->
+        case Value of
+          {call, {_,_,Arity}} when Arity>?NR_ARG_REGS ->
+            true;
+          _ ->
+            false
+        end
+    end,
+  Calls1 = dict:filter(HasStackArgs, Dict),
+  Calls2 = dict:to_list(Calls1),
+  FindNameArity =
+    fun({_, {call, Y}}) ->
+        case Y of
+          {bif, Name, Arity} ->
+            {Name, Arity};
+          MFA ->
+            MFA
+        end
+    end,
+  lists:map(FindNameArity, Calls2).
+
+%% This functions extracts the stack arity and the offset in the code of the
+%% calls that have stack arguments.
+calls_offsets_arity(Relocs, CallsWithStackArgs) ->
+  {_, Calls1} = lists:unzip(lists:filter(
+    fun ({X,_}) ->
+        case X of 3 -> true;
+          2-> true;
+          _ -> false
+        end
+    end, Relocs)),
+  Calls2 = lists:flatten(Calls1),
+  OffsetsArity1 = lists:map(
+    fun(X) -> case lists:keyfind(X, 1, Calls2) of
+          {X, Offs} ->
+            Arity = case X of
+              {_, A} -> A;
+              {_, _, A} -> A
+            end,
+            lists:map(fun(Z) -> {Z+4, Arity-?NR_ARG_REGS} end, Offs);
+          false -> []
+        end
+    end, CallsWithStackArgs),
+  lists:flatten(OffsetsArity1).
+
+fix_sdescs1(SDescs, OffsetsArity) ->
+  lists:foldl(fun fix_sdescs2/2, SDescs, OffsetsArity).
+
+fix_sdescs2(OffsetsArity, SDescs) ->
+  lists:foldl(
+    fun(X, Acc) -> fix_sdescs3(OffsetsArity, X) ++ Acc end, [], SDescs).
+
+%% If the offset of the call belongs to the offsets of the sdesc then
+%% remove the offset from the sdesc and create a new desc with the correct
+%% frame size and roots offsets.
+fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
+            OldOffsets} = SDesc) ->
+  DecRoot = fun(X) -> X-Arity end,
+  case lists:member(Offset, OldOffsets) of
+    false ->
+      [SDesc];
+    true ->
+      NewRoots = list_to_tuple(lists:map(DecRoot, tuple_to_list(Roots))),
+      NewSDesc = {{ExnHandler, FrameSize-Arity, StkArity, NewRoots}, [Offset]},
+      RestOffsets = lists:delete(Offset, OldOffsets),
+      RestSDesc = {{ExnHandler, FrameSize, StkArity, Roots},
+        RestOffsets},
+      [NewSDesc,  RestSDesc]
   end.
 
 %%----------------------------------------------------------------------------
