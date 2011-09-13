@@ -13,7 +13,8 @@
   llvm_bin_exportmap/1,
   llvm_bin_codesize/1,
   llvm_bin_codebinary/1,
-  llvm_bin_refs/1
+  llvm_bin_refs/1,
+  merge_refs/1
 ]).
 
 %%----------------------------------------------------------------------------
