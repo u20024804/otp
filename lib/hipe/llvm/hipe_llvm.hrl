@@ -68,6 +68,8 @@
 -record(llvm_label, {label}).
 -record(llvm_const_decl, {dst, decl_type, type, value}).
 
+-record(llvm_asm, {instruction}).
+
 
 %% Types
 -record(llvm_void, {}).
