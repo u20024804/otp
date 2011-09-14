@@ -815,6 +815,12 @@ trans_call_name(Name, Relocs, CallArgs, FinalArgs) ->
  		Reg ->
       case hipe_rtl:is_reg(Reg) of
         true -> 
+          case length(CallArgs) of
+            X when X>4 ->
+              io:format("Warning: Cannot support compilation of closures "
+                "with more than 4 args.~n");
+              _ -> ok
+            end,
           TT1 = mk_temp(),
           {RegName, []} = trans_dst(Reg),
           II1 = hipe_llvm:mk_conversion(TT1, inttoptr, ?WORD_TYPE, RegName,
