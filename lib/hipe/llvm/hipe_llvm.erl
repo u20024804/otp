@@ -301,7 +301,10 @@
     const_decl_dst/1,
     const_decl_decl_type/1,
     const_decl_type/1,
-    const_decl_value/1
+    const_decl_value/1,
+
+    mk_asm/1,
+    asm_instruction/1
   ]).
 
 
@@ -849,6 +852,9 @@ const_decl_decl_type(#llvm_const_decl{decl_type=Decl_type}) -> Decl_type.
 const_decl_type(#llvm_const_decl{type=Type}) -> Type.
 const_decl_value(#llvm_const_decl{value=Value}) -> Value.
 
+mk_asm(Instruction) -> #llvm_asm{instruction=Instruction}.
+asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -1118,6 +1124,8 @@ pp_ins(Dev, I) ->
     #llvm_landingpad{} ->
       io:format(Dev, "landingpad { i8*, i32 } personality i32 (i32, i64,
         i8*,i8*)* @__gcc_personality_v0 cleanup~n", []);
+    #llvm_asm{} ->
+      io:format(Dev, "~s~n", [asm_instruction(I)]);
     
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
