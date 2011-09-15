@@ -289,7 +289,7 @@ trans_call(I, Relocs) ->
   {LoadedFixedRegs, I2} = load_fixed_regs(FixedRegs), 
   FinalArgs = 
   case OriginalName of
-    {erlang, get_stacktrace, 0} ->
+    {hipe_bifs, llvm_stub, 0} ->
       CallArgs;
     _ ->
       fix_reg_args(LoadedFixedRegs) ++ CallArgs
@@ -348,7 +348,7 @@ trans_enter(I, Relocs) ->
   {LoadedFixedRegs, I1} = load_fixed_regs(FixedRegs), 
   FinalArgs = 
   case hipe_rtl:enter_fun(I) of
-    {erlang, get_stacktrace, 0} -> 
+    {hipe_bifs, llvm_stub, 0} ->
       CallArgs;
     _ -> 
       fix_reg_args(LoadedFixedRegs) ++ CallArgs
@@ -705,11 +705,18 @@ trans_switch(I, Relocs) ->
 %% continuation label to go with the LLVM's invoke instruction. Also all phi
 %% nodes that are correlated with the block that holds tha call instruction
 %% must be updated. FailLabels is the list of labels of all fail blocks, which
-%% is needed to be declared as landing pads.
+%% is needed to be declared as landing pads. Finnaly we must go to fail labels
+%% and add a call to
+%% hipe_bifs:llvm_stub:0 in order to avoid the reloading of old values of
+%% pinned registers(This happens because at fail labels, the result of an
+%% invoke instruction is no available, and we cannot get the correct values
+%% of pinned registers).
 fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], [], []).
-fix_invoke_calls([], Acc, SubstMap, FailLabels) -> 
+fix_invoke_calls([], Acc, SubstMap, FailLabels) ->
   Update = fun (X) -> update_phi_nodes(X, SubstMap) end,
-  {lists:reverse(lists:map(Update, Acc)), FailLabels};
+  I1 = lists:reverse(lists:map(Update, Acc)),
+  {add_stub_calls(I1, FailLabels), FailLabels};
+
 fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
   case I of 
     #call{} ->
@@ -776,6 +783,29 @@ add_landingpads([I|Is], FailLabels, Acc) ->
     _ ->
       add_landingpads(Is, FailLabels, [I|Acc])
   end.
+
+
+add_stub_calls(LLVM_Code, FailLabels) ->
+  add_stub_calls(LLVM_Code, FailLabels, []).
+
+add_stub_calls([], _, Acc) ->
+  lists:reverse(Acc);
+add_stub_calls([I|Is], FailLabels, Acc) ->
+   case I of
+     #label{} ->
+       Label = hipe_rtl:label_name(I),
+        case lists:keymember(Label, 1, FailLabels) of
+          true ->
+            I1 = hipe_rtl:mk_call([], {hipe_bifs, llvm_stub, 0}, [], [], [],
+              remote),
+            add_stub_calls(Is, FailLabels, [I1, I| Acc]);
+          false ->
+            add_stub_calls(Is, FailLabels, [I|Acc])
+        end;
+      _ ->
+        add_stub_calls(Is, FailLabels, [I|Acc])
+    end.
+
 
 %%----------------------------------------------------------------------------
 
@@ -1345,9 +1375,9 @@ call_to_decl({Name, {call, MFA}}) ->
     llvm -> 
       {hipe_llvm:mk_struct([?WORD_TYPE, hipe_llvm:mk_int(1)]),
       lists:seq(1,2)};
-    erlang ->
+    hipe_bifs ->
       case F of 
-        get_stacktrace -> {?FUN_RETURN_TYPE, []};
+        llvm_stub -> {?FUN_RETURN_TYPE, []};
         %% +precoloured regs
         _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
       end;
