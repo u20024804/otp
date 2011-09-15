@@ -166,3 +166,10 @@ BIF_RETTYPE hipe_bifs_show_message_area_0(BIF_ALIST_0)
     BIF_RET(am_false);
 #endif
 }
+
+/* Stub-BIF for LLVM unwind block */
+
+BIF_RETTYPE hipe_bifs_llvm_stub_0(BIF_ALIST_0)
+{
+    BIF_RET(am_ok);
+}
