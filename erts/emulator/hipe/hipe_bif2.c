@@ -189,3 +189,9 @@ BIF_RETTYPE hipe_debug_bif_wrapper(BIF_ALIST_1)
 
 #endif /* ERTS_ENABLE_LOCK_CHECK && ERTS_SMP */
 
+/* Stub-BIF for LLVM unwind block */
+
+BIF_RETTYPE hipe_bifs_llvm_stub_0(BIF_ALIST_0)
+{
+    BIF_RET(am_ok);
+}
