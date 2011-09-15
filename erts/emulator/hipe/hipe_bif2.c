@@ -180,3 +180,9 @@ BIF_RETTYPE hipe_bifs_debug_native_called_2(BIF_ALIST_2)
     BIF_RET(am_ok);
 }
 
+/* Stub-BIF for LLVM unwind block */
+
+BIF_RETTYPE hipe_bifs_llvm_stub_0(BIF_ALIST_0)
+{
+    BIF_RET(am_ok);
+}
