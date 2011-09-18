@@ -280,7 +280,7 @@
     fun_def_fn_attrs/1,
     fun_def_align/1,
     fun_def_body/1,
-    
+
     mk_fun_decl/8,
     fun_decl_linkage/1,
     fun_decl_visibility/1,
@@ -344,7 +344,7 @@
 
 %%
 %% ret
-%% 
+%%
 mk_ret(Ret_list) -> #llvm_ret{ret_list=Ret_list}.
 ret_ret_list(#llvm_ret{ret_list=Ret_list}) -> Ret_list.
 
@@ -358,20 +358,20 @@ br_dst(#llvm_br{dst=Dst}) -> Dst.
 %%
 %% br_cond
 %%
-mk_br_cond(Cond, True_label, False_label) -> 
+mk_br_cond(Cond, True_label, False_label) ->
   #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label}.
 br_cond_cond(#llvm_br_cond{'cond'=Cond}) -> Cond.
 br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
-br_cond_false_label(#llvm_br_cond{false_label=False_label}) -> 
+br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
   False_label.
 
 
 %%
 %% invoke
 %%
-mk_invoke(Dst, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs, To_label, Unwind_label) -> 
+mk_invoke(Dst, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs, To_label, Unwind_label) ->
   #llvm_invoke{dst=Dst, cconv=Cconv, ret_attrs=Ret_attrs, type=Type,
-    fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs, to_label=To_label, 
+    fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs, to_label=To_label,
               unwind_label=Unwind_label}.
 invoke_dst(#llvm_invoke{dst=Dst}) -> Dst.
 invoke_cconv(#llvm_invoke{cconv=Cconv}) -> Cconv.
@@ -386,21 +386,21 @@ invoke_unwind_label(#llvm_invoke{unwind_label=Unwind_label}) -> Unwind_label.
 %%
 %% switch
 %%
-mk_switch(Type, Value, Default_label, Value_label_list) -> 
+mk_switch(Type, Value, Default_label, Value_label_list) ->
   #llvm_switch{type=Type, value=Value, default_label=Default_label,
               value_label_list=Value_label_list}.
 switch_type(#llvm_switch{type=Type}) -> Type.
 switch_value(#llvm_switch{value=Value}) -> Value.
-switch_default_label(#llvm_switch{default_label=Default_label}) -> 
+switch_default_label(#llvm_switch{default_label=Default_label}) ->
   Default_label.
-switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) -> 
+switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) ->
   Value_label_list.
 
 %%
 %% operation
 %%
 mk_operation(Dst, Op, Type, Src1, Src2, Options) ->
-  #llvm_operation{dst=Dst, op=Op, type=Type, src1=Src1, src2=Src2, 
+  #llvm_operation{dst=Dst, op=Op, type=Type, src1=Src1, src2=Src2,
     options=Options}.
 operation_dst(#llvm_operation{dst=Dst}) -> Dst.
 operation_op(#llvm_operation{op=Op}) -> Op.
@@ -620,7 +620,7 @@ extractvalue_idxs(#llvm_extractvalue{idxs=Idxs})-> Idxs.
 %%
 %% insertvalue
 %%
-mk_insertvalue(Dst, Val_type, Val, Elem_type, Elem, Idx, Idxs) -> 
+mk_insertvalue(Dst, Val_type, Val, Elem_type, Elem, Idx, Idxs) ->
   #llvm_insertvalue{dst=Dst, val_type=Val_type, val=Val, elem_type=Elem_type,
                     elem=Elem, idx=Idx, idxs=Idxs}.
 insertvalue_dst(#llvm_insertvalue{dst=Dst}) -> Dst.
@@ -674,7 +674,7 @@ store_volatile(#llvm_store{volatile=Volatile})-> Volatile.
 mk_getelementptr(Dst, P_Type, Value, Typed_Idxs, Inbounds) ->
   #llvm_getelementptr{dst=Dst,p_type=P_Type, value=Value, typed_idxs=Typed_Idxs,
     inbounds=Inbounds}.
-getelementptr_dst(#llvm_getelementptr{dst=Dst}) -> Dst. 
+getelementptr_dst(#llvm_getelementptr{dst=Dst}) -> Dst.
 getelementptr_p_type(#llvm_getelementptr{p_type=P_Type}) -> P_Type.
 getelementptr_value(#llvm_getelementptr{value=Value}) -> Value.
 getelementptr_typed_idxs(#llvm_getelementptr{typed_idxs=Typed_Idxs}) -> Typed_Idxs.
@@ -766,7 +766,7 @@ select_val2(#llvm_select{val2=Val2}) -> Val2.
 %% call
 %%
 mk_call(Dst, Is_tail, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs) ->
-  #llvm_call{dst=Dst, is_tail=Is_tail, cconv=Cconv, ret_attrs=Ret_attrs, 
+  #llvm_call{dst=Dst, is_tail=Is_tail, cconv=Cconv, ret_attrs=Ret_attrs,
     type=Type, fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs}.
 call_dst(#llvm_call{dst=Dst}) -> Dst.
 call_is_tail(#llvm_call{is_tail=Is_tail}) -> Is_tail.
@@ -777,7 +777,7 @@ call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
 call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
 call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 
-%% 
+%%
 %% fun_def
 %%
 mk_fun_def(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist,
@@ -807,7 +807,7 @@ fun_def_align(#llvm_fun_def{align=Align}) -> Align.
 fun_def_body(#llvm_fun_def{body=Body}) -> Body.
 
 
-%% 
+%%
 %% fun_decl
 %%
 mk_fun_decl(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist, Align)->
@@ -860,7 +860,7 @@ asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
 
 %%
 %% Types
-%% 
+%%
 
 mk_int(Width) -> #llvm_int{width=Width}.
 int_width(#llvm_int{width=Width}) -> Width.
@@ -879,7 +879,7 @@ vector_type(#llvm_vector{type=Type}) -> Type.
 mk_struct(Type_list) -> #llvm_struct{type_list=Type_list}.
 struct_type_list(#llvm_struct{type_list=Type_list}) -> Type_list.
 
-mk_fun(Ret_type, Arg_type_list) -> 
+mk_fun(Ret_type, Arg_type_list) ->
   #llvm_fun{ret_type=Ret_type, arg_type_list=Arg_type_list}.
 function_ret_type(#llvm_fun{ret_type=Ret_type}) -> Ret_type.
 function_arg_type_list(#llvm_fun{arg_type_list=Arg_type_list}) ->
@@ -912,7 +912,7 @@ pp_ins(Dev, I) ->
     #llvm_switch{} ->
       io:format(Dev, "switch ", []),
       pp_type(Dev, switch_type(I)),
-      io:format(Dev, " ~s, label ~s ~n    [~n", 
+      io:format(Dev, " ~s, label ~s ~n    [~n",
         [switch_value(I), switch_default_label(I)]),
       pp_switch_value_label_list(Dev, switch_type(I), switch_value_label_list(I)),
       io:format(Dev, "    ]~n", []);
@@ -929,7 +929,7 @@ pp_ins(Dev, I) ->
       io:format(Dev, " to label ~s unwind label ~s ~n", [invoke_to_label(I),
           invoke_unwind_label(I)]);
     #llvm_br_cond{} ->
-      io:format(Dev, "br i1 ~s, label ~s, label ~s~n", 
+      io:format(Dev, "br i1 ~s, label ~s, label ~s~n",
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
     #llvm_operation{} ->
       io:format(Dev, "~s = ~s ", [operation_dst(I), operation_op(I)]),
@@ -951,7 +951,7 @@ pp_ins(Dev, I) ->
       pp_type(Dev, insertvalue_val_type(I)),
       io:format(Dev, " ~s, ", [insertvalue_val(I)]),
       pp_type(Dev, insertvalue_elem_type(I)),
-      io:format(Dev, " ~s, ~s~n", 
+      io:format(Dev, " ~s, ~s~n",
         %%TODO Print idxs
         [insertvalue_elem(I), insertvalue_idx(I)]);
     #llvm_alloca{} ->
@@ -959,7 +959,7 @@ pp_ins(Dev, I) ->
       pp_type(Dev, alloca_type(I)),
       case alloca_num(I) of
         [] -> ok;
-        Num -> 
+        Num ->
           io:format(Dev, ", ", []),
           pp_type(Dev, alloca_type(I)),
           io:format(Dev, " ~s ", [Num])
@@ -978,7 +978,7 @@ pp_ins(Dev, I) ->
       io:format(Dev, "load ", []),
       pp_type(Dev, load_p_type(I)),
       io:format(Dev, " ~s ", [load_pointer(I)]),
-      case load_alignment(I) of 
+      case load_alignment(I) of
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
       end,
@@ -997,7 +997,7 @@ pp_ins(Dev, I) ->
       io:format(Dev, " ~s, ", [store_value(I)]),
       pp_type(Dev, store_p_type(I)),
       io:format(Dev, " ~s ", [store_pointer(I)]),
-      case store_alignment(I) of 
+      case store_alignment(I) of
         [] -> ok;
         Al -> io:format(Dev, ", align ~s ", [Al])
       end,
@@ -1126,7 +1126,7 @@ pp_ins(Dev, I) ->
         i8*,i8*)* @__gcc_personality_v0 cleanup~n", []);
     #llvm_asm{} ->
       io:format(Dev, "~s~n", [asm_instruction(I)]);
-    
+
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
@@ -1140,7 +1140,7 @@ pp_type_list(Dev, [T|Ts]) ->
   pp_type_list(Dev, Ts).
 
 pp_type(Dev, Type) ->
-  case Type of 
+  case Type of
     #llvm_void{} ->
       io:format(Dev, "void", []);
     %Integer
@@ -1228,7 +1228,7 @@ pp_switch_value_label_list(Dev, Type, [{Value, Label} | VLs]) ->
   pp_switch_value_label_list(Dev, Type, VLs).
 
 indent(I) ->
-  case I of 
+  case I of
     #llvm_label{} -> false;
     #llvm_fun_def{} -> false;
     #llvm_fun_decl{} -> false;
