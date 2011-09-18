@@ -671,8 +671,8 @@ trans_switch(I, Relocs) ->
 fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], [], []).
 fix_invoke_calls([], Acc, SubstMap, FailLabels) ->
   Update = fun (X) -> update_phi_nodes(X, SubstMap) end,
-  I1 = lists:reverse(lists:map(Update, Acc)),
-  {add_stub_calls(I1, FailLabels), FailLabels};
+  {lists:reverse(lists:map(Update, Acc)), FailLabels};
+  %{add_stub_calls(I1, FailLabels), FailLabels};
 
 fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
   case I of
@@ -733,7 +733,12 @@ add_landingpads([I|Is], FailLabels, Acc) ->
           I1 = hipe_llvm:mk_label(FailLabel),
           I2 = hipe_llvm:mk_br("%"++OldLabel),
           LP = #llvm_landingpad{},
-          add_landingpads(Is, FailLabels, [I, I2 ,LP ,I1|Acc]);
+          T1 = mk_temp(),
+          FixedRegs = fixed_registers(),
+          I3 = hipe_llvm:mk_call(T1, false, "cc 11", [], ?FUN_RETURN_TYPE,
+            "@hipe_bifs.llvm_stub.0", [], []),
+          I4 = store_fixed_regs(FixedRegs, T1),
+          add_landingpads(Is, FailLabels, [I,I2]++lists:flatten(I4)++[I3,LP,I1|Acc]);
         false ->
           add_landingpads(Is, FailLabels, [I|Acc])
       end;
@@ -742,26 +747,26 @@ add_landingpads([I|Is], FailLabels, Acc) ->
   end.
 
 
-add_stub_calls(LLVM_Code, FailLabels) ->
-  add_stub_calls(LLVM_Code, FailLabels, []).
-
-add_stub_calls([], _, Acc) ->
-  lists:reverse(Acc);
-add_stub_calls([I|Is], FailLabels, Acc) ->
-   case I of
-     #label{} ->
-       Label = hipe_rtl:label_name(I),
-        case lists:keymember(Label, 1, FailLabels) of
-          true ->
-            I1 = hipe_rtl:mk_call([], {hipe_bifs, llvm_stub, 0}, [], [], [],
-              remote),
-            add_stub_calls(Is, FailLabels, [I1, I| Acc]);
-          false ->
-            add_stub_calls(Is, FailLabels, [I|Acc])
-        end;
-      _ ->
-        add_stub_calls(Is, FailLabels, [I|Acc])
-    end.
+%%add_stub_calls(LLVM_Code, FailLabels) ->
+%%  add_stub_calls(LLVM_Code, FailLabels, []).
+%%
+%%add_stub_calls([], _, Acc) ->
+%%  lists:reverse(Acc);
+%%add_stub_calls([I|Is], FailLabels, Acc) ->
+%%   case I of
+%%     #label{} ->
+%%       Label = hipe_rtl:label_name(I),
+%%        case lists:keymember(Label, 1, FailLabels) of
+%%          true ->
+%%            I1 = hipe_rtl:mk_call([], {hipe_bifs, llvm_stub, 0}, [], [], [],
+%%              remote),
+%%            add_stub_calls(Is, FailLabels, [I1, I| Acc]);
+%%          false ->
+%%            add_stub_calls(Is, FailLabels, [I|Acc])
+%%        end;
+%%      _ ->
+%%        add_stub_calls(Is, FailLabels, [I|Acc])
+%%    end.
 
 
 %%----------------------------------------------------------------------------
@@ -1291,11 +1296,15 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   %% Find function calls
   IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
   ExternalCallList = lists:filter(IsExternalCall, CallList),
+  %% TODO: Remove this
+  %% Temporary declare landing pad and llvm_stub calls
   LandPad = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_int{width=32},
     "@__gcc_personality_v0", [#llvm_int{width=32}, #llvm_int{width=64},
       ?BYTE_TYPE_P, ?BYTE_TYPE_P], []),
+  Bif_Stub = hipe_llvm:mk_fun_decl([], [], [], [], ?FUN_RETURN_TYPE,
+    "@hipe_bifs.llvm_stub.0", [], []),
   %% Create code to declare external function
-  FunDecl = [LandPad | lists:map(fun call_to_decl/1, ExternalCallList)],
+  FunDecl = [LandPad, Bif_Stub | lists:map(fun call_to_decl/1, ExternalCallList)],
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SlimedConstMap)),
   %% Create code to declare constants
@@ -1304,16 +1313,19 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   %% Enter constants to relocations
   Relocs1 = lists:foldl(fun const_to_dict/2, Relocs, ConstLabels),
-  %% Temporary Store inc_stack to Dictionary
+  %% Temporary Store inc_stack and llvm_stub to Dictionary
   Relocs2 = dict:store("inc_stack_0", {call, {bif, inc_stack_0, 0}},
                         Relocs1),
+  %% TODO: Remove this
+  Relocs3 = dict:store("hipe_bifs.llvm_stub.0", {call, {hipe_bifs, llvm_stub, 0}},
+                        Relocs2),
   %% Create LabelMap
   TempLabelMap = lists:map(fun create_label_map/1, SwitchValues),
   %% Store Swich Jump Tables to reloactions
-  Relocs3 = labels_to_dict(TempLabelMap, Relocs2),
+  Relocs4 = labels_to_dict(TempLabelMap, Relocs3),
   ExternalDeclarations = AtomDecl++ClosureDecl++ConstDecl++FunDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
-  {Relocs3, ExternalDeclarations, LocalVariables, TempLabelMap}.
+  {Relocs4, ExternalDeclarations, LocalVariables, TempLabelMap}.
 
 %%  Seperate Relocations found in the code to calls, atoms and closures
 seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], []).
