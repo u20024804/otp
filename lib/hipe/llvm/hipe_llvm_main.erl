@@ -26,7 +26,7 @@ rtl_to_native(RTL, _Options) ->
   %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
-  SDescs = note_erlgc:get_sdesc_list(ObjBin), 
+  SDescs = note_erlgc:get_sdesc_list(ObjBin),
   %% Get Labels info
   Labels = elf64_format:get_label_list(ObjBin),
   %% Create final LabelMap
@@ -91,7 +91,7 @@ opt(Fun_Name, Opts) ->
 
 %% LLC wrapper (.ll -> .s)
 llc(Opt_filename, Fun_Name) ->
-  Options = ["-O3", "-code-model=medium", "-load=libErlangGC.so",
+  Options = ["-O3", "-code-model=medium", "-load=ErlangGC.so",
 	     "-stack-alignment=8", "-tailcallopt"],
   llc(Opt_filename, Fun_Name, Options).
 
@@ -106,7 +106,7 @@ llc(Opt_filename, Fun_Name, Opts) ->
 
 
 %% LLVMC wrapper (.s -> .o)
-llvmc(Fun_Name) -> 
+llvmc(Fun_Name) ->
   Options = [],
   llvmc(Fun_Name, Options).
 
@@ -149,11 +149,11 @@ fix_relocations(Relocs, RelocsDict, ModName) ->
 fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3) ->
   Relocs = [{0, Acc0}, {1, Acc1}, {2, Acc2}, {3, Acc3}],
   %% Remove Empty Elements
-  NotEmpty = 
-    fun ({_, X}) -> 
+  NotEmpty =
+    fun ({_, X}) ->
         case X of [] -> false;
-          _ -> true 
-        end 
+          _ -> true
+        end
     end,
   lists:filter(NotEmpty, Relocs);
 
@@ -190,10 +190,10 @@ fix_rodata(Relocs) ->
 fix_rodata([], _, Acc) -> Acc;
 fix_rodata([{Name, Offset}=R|Rs], Num, Acc) ->
   case Name of
-    ".rodata" -> 
+    ".rodata" ->
       NewName = ".rodata"++integer_to_list(Num),
       fix_rodata(Rs, Num+1, [{NewName, Offset}|Acc]);
-    _ -> 
+    _ ->
       fix_rodata(Rs, Num, [R|Acc])
   end.
 
@@ -223,6 +223,7 @@ fix_sdescs(RelocsDict, Relocs, SDescs) ->
   NeedsSDescFix  = calls_with_stack_args(RelocsDict),
   OffsetsArity = calls_offsets_arity(Relocs, NeedsSDescFix),
   hipe_llvm_bin:merge_refs(fix_sdescs1(SDescs, OffsetsArity)).
+  %lists:map(fun live_args/1, Foo).
 
 
 %% This function takes as argument the relocation dictionary as produced by the
@@ -301,3 +302,15 @@ fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
   end.
 
 %%----------------------------------------------------------------------------
+
+live_args({{ExnHandler, FrameSize, Arity, RootSet},Offs}=A) ->
+  case Arity>0 of
+    false ->A;
+    true ->
+      ArgRoots = lists:seq(1,Arity),
+      ArgRoots2 = lists:map(fun(X) -> X+FrameSize end, ArgRoots),
+      Mpla1 = tuple_to_list(RootSet),
+      NewRootSet = lists:append(Mpla1, ArgRoots2),
+      Mpla2= list_to_tuple(NewRootSet),
+      {{ExnHandler, FrameSize, Arity, Mpla2}, Offs}
+  end.

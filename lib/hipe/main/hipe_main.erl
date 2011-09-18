@@ -434,7 +434,6 @@ rtl_symbolic(RtlCfg, Options) ->
   ?option_time(hipe_rtl_symbolic:expand(RtlCfg),
 	       "Expansion of symbolic instructions", Options).
 
-
 %%----------------------------------------------------------------------
 %%
 %% Perform translation to LLVM assembly code when in rtl_ssa form.
@@ -446,9 +445,10 @@ rtl_to_llvm(RtlCfg0, Options) ->
   RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
   RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
   RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
+  RtlCfg2 = rtl_ssa_unconvert(RtlSSA10, Options),
  % hipe_rtl_liveness:pp(RtlSSA0),
-  Live = hipe_rtl_liveness:analyze(RtlSSA10),
-  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlSSA10, Live),
+  Live = hipe_rtl_liveness:analyze(RtlCfg2),
+  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg2, Live),
   LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
   %hipe_rtl_cfg:pp(RtlSSA0),
   %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
@@ -459,7 +459,6 @@ rtl_to_llvm(RtlCfg0, Options) ->
  Binary = hipe_llvm_main:rtl_to_native(LinearRtl, Options),
  {llvm_binary, Binary}.
 
-      
 %%----------------------------------------------------------------------
 %%
 %% RTL passes on SSA form. The following constraints are applicable:
