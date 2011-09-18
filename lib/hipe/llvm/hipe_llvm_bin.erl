@@ -20,33 +20,33 @@
 %%----------------------------------------------------------------------------
 %% Abstraction For LLVM Object File
 %%----------------------------------------------------------------------------
--record(llvm_bin, 
-      {version, checksum, constalign, constsize, constmap, 
+-record(llvm_bin,
+      {version, checksum, constalign, constsize, constmap,
         labelmap, exportmap, codesize, codebinary, refs}).
 
-mk_llvm_bin(Version, Checksum, Constalign, Constsize, Constmap, 
-  Labelmap, Exportmap, Codesize, Codebinary, Refs) -> 
-              #llvm_bin{version=Version, checksum=Checksum, 
-                            constalign=Constalign, constsize=Constsize, 
+mk_llvm_bin(Version, Checksum, Constalign, Constsize, Constmap,
+  Labelmap, Exportmap, Codesize, Codebinary, Refs) ->
+              #llvm_bin{version=Version, checksum=Checksum,
+                            constalign=Constalign, constsize=Constsize,
                             constmap=Constmap, labelmap=Labelmap,
                             exportmap=Exportmap, codesize=Codesize,
                             codebinary=Codebinary, refs=Refs}.
 
-llvm_bin_version(#llvm_bin{version=Version}) -> 
+llvm_bin_version(#llvm_bin{version=Version}) ->
   Version.
-llvm_bin_checksum(#llvm_bin{checksum=Checksum}) -> 
+llvm_bin_checksum(#llvm_bin{checksum=Checksum}) ->
   Checksum.
-llvm_bin_constalign(#llvm_bin{constalign=Constalign}) -> 
+llvm_bin_constalign(#llvm_bin{constalign=Constalign}) ->
   Constalign.
-llvm_bin_constsize(#llvm_bin{constsize=Constsize}) -> 
+llvm_bin_constsize(#llvm_bin{constsize=Constsize}) ->
   Constsize.
-llvm_bin_constmap(#llvm_bin{constmap=Constmap}) -> 
+llvm_bin_constmap(#llvm_bin{constmap=Constmap}) ->
   Constmap.
 llvm_bin_labelmap(#llvm_bin{labelmap=Labelmap}) ->
   Labelmap.
-llvm_bin_exportmap(#llvm_bin{exportmap=Exportmap}) -> 
+llvm_bin_exportmap(#llvm_bin{exportmap=Exportmap}) ->
   Exportmap.
-llvm_bin_codesize(#llvm_bin{codesize=Codesize}) -> 
+llvm_bin_codesize(#llvm_bin{codesize=Codesize}) ->
   Codesize.
 llvm_bin_codebinary(#llvm_bin{codebinary=Codebinary}) ->
   Codebinary.
@@ -59,7 +59,7 @@ llvm_bin_refs(#llvm_bin{refs=Refs}) -> Refs.
 %% Join llvm_binaries as produced by whole module compilation.
 %% We join the binary code and compute total code size.
 %% Also update offsets to exportmap, labelmap and refs.
-%% Finally we assign unique labels to constants and 
+%% Finally we assign unique labels to constants and
 %% update Constmap and Refs.
 %% While joining constmaps and labelmaps special care must be taken in order
 %% to preserve the order of constants/labels because it is critical for the
@@ -97,7 +97,7 @@ join_binaries(Binaries, Closures, Exports) ->
 %% Also fix exportmap with correct code offset
 join_code(Binaries) -> join_code(Binaries, 0, <<>>, []).
 
-join_code([], CodeSize, CodeBinary, ExportMap) -> 
+join_code([], CodeSize, CodeBinary, ExportMap) ->
   {CodeSize, CodeBinary, lists:reverse(ExportMap)};
 
 join_code([#llvm_bin{codesize=CodeSize, codebinary=CodeBinary,
@@ -110,7 +110,7 @@ join_code([#llvm_bin{codesize=CodeSize, codebinary=CodeBinary,
 %%----------------------------------------------------------------------------
 
 %% Add correct offset to each label in LabelMap
-join_labelmaps(Binaries, ExportMap) -> 
+join_labelmaps(Binaries, ExportMap) ->
   join_labelmaps(Binaries, ExportMap, []).
 
 join_labelmaps([], [], LabelAcc) ->
@@ -136,7 +136,7 @@ add_offset_to_labels(LabelMap, Offset) ->
         end
     end,
   lists:map(AddOffSet2, LabelMap).
-  
+
 %%----------------------------------------------------------------------------
 
 %% Find ConstAlign and ConstSize. They are the max of the ConstAlign
@@ -152,7 +152,7 @@ correct_align_size(Binaries) ->
 %%----------------------------------------------------------------------------
 
 %% Remove Empty Lists from a list
-remove_empty_lists(List) -> 
+remove_empty_lists(List) ->
   IsNotEmptyList =
     fun (X) ->
         case X of
@@ -177,7 +177,7 @@ join_relocations([Bin|Bs], [Export|Es], ConstAcc, RefAcc, BaseLabel) ->
   ConstMap = llvm_bin_constmap(Bin),
   Refs = llvm_bin_refs(Bin),
   ConstMap1 = tuplify_4(ConstMap),
-  {ConstMap2, Refs2, NewBaseLabel} = 
+  {ConstMap2, Refs2, NewBaseLabel} =
     unique_const_labels(ConstMap1, Refs, BaseLabel),
   ConstMap3 = lists:reverse(ConstMap2),
   NewRefs = add_offset_to_relocs(Refs2, Offset),
@@ -186,7 +186,7 @@ join_relocations([Bin|Bs], [Export|Es], ConstAcc, RefAcc, BaseLabel) ->
 
 unique_const_labels(ConstMap, Refs, BaseLabel) ->
   ConstLength = length(ConstMap),
-  ConstMap1 = lists:map(fun 
+  ConstMap1 = lists:map(fun
                           ({Label,A,B,Const}) -> {Label+BaseLabel,A,B,Const}
                         end,
                         ConstMap),
@@ -212,9 +212,9 @@ substitute_const_label(Refs, Base) ->
           _ -> {X,List}
         end
     end,
-  Subst_if_type = 
+  Subst_if_type =
     fun ({X, List}) ->
-        case X of 
+        case X of
             1 -> {X, lists:map(Subst_if_const, List)};
             _ -> {X, List}
           end
@@ -225,7 +225,7 @@ add_offset_to_relocs(Refs, Size) ->
   Update_offset = fun (X) -> X+Size end,
   %% In case of an SDesc update exception handling label
   Update_exn_label =
-  fun (X) -> 
+  fun (X) ->
       case X of
         {[], _, _, _} = A -> A;
         {ExnLabel, FrameSize, Arity, BitMap} ->
@@ -248,7 +248,7 @@ merge_refs(Refs) -> merge_refs(Refs, []).
 
 merge_refs([], Acc) -> Acc;
 merge_refs([{Type, _ElemList}=R|Rs], Acc) ->
-  SameType = 
+  SameType =
   fun ({A,_}) ->
       case A of
         Type -> true;
@@ -285,25 +285,25 @@ compute_const_size(ConstMap, LabelMap) ->
   ConstMap3 = un_tuplify_4(ConstMap2),
   {ConstMap3, LabelMap2}.
 
-compute_const_size([], [], _, ConstAcc, LabelAcc) -> 
+compute_const_size([], [], _, ConstAcc, LabelAcc) ->
   {ConstAcc, lists:reverse(LabelAcc)};
 compute_const_size([{Label, Offset, Type, Constant}|Rest], LabelMap,
                     Base, ConstAcc, LabelAcc) ->
   case Type of
     0 -> compute_const_size(Rest, LabelMap, Base, [{Label, Offset, Type,
             Constant}|ConstAcc], LabelAcc);
-    1 -> 
+    1 ->
       %% In this case there should be an entry in LabelMap for this constant
       %% block
       case LabelMap of
-        [] -> 
+        [] ->
           compute_const_size(Rest, LabelMap, Base+length(Constant), [{Label, Base, Type,
                               Constant}|ConstAcc], LabelAcc);
-        Other -> 
+        Other ->
           [L|Ls] =LabelMap,
           %% Check whether the sizes of the constant and the label match
           case check_sizes(Constant, L) of
-            match -> 
+            match ->
               NewLabel = fix_label_offset(L, Base),
               compute_const_size(Rest, Ls, Base+length(Constant), [{Label, Base, Type,
                     Constant}|ConstAcc], NewLabel++LabelAcc);
@@ -322,7 +322,7 @@ fix_label_offset( {unsorted, Unsorted}, Offset) ->
   lists:map(fun({A,B}) -> {A+Offset,B} end, Unsorted).
 
 check_sizes(Constant, Label) ->
-  LabelSize = 
+  LabelSize =
   case Label of
     {sorted,_, Sorted} ->
       length(Sorted)*8;
@@ -330,7 +330,7 @@ check_sizes(Constant, Label) ->
       length(Unsorted)*8
   end,
   case length(Constant) of
-    LabelSize -> 
+    LabelSize ->
       match;
     Other ->
       io:format("No Constant/Label match:~nconst_size~w~nlabel_size:~w~n", [length(Constant),LabelSize]),
