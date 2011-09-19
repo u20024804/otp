@@ -189,9 +189,23 @@ BIF_RETTYPE hipe_debug_bif_wrapper(BIF_ALIST_1)
 
 #endif /* ERTS_ENABLE_LOCK_CHECK && ERTS_SMP */
 
-/* Stub-BIF for LLVM unwind block */
+/* Stub-BIF for LLVM:
+ * Reloads BP, SP (in llvm unwind label) and realigns stack
+ * in case of more than 4 arguments) */
 
-BIF_RETTYPE hipe_bifs_llvm_stub_0(BIF_ALIST_0)
+BIF_RETTYPE hipe_bifs_llvm_fixstack_1(BIF_ALIST_1)
+{
+    Sint n = signed_val(BIF_ARG_1);
+    if (n > 0) 
+        asm volatile("subq %0, %%rsp\t # llvm_fixstack\n" : : "r"(n) : "%rsp");
+    BIF_RET(am_ok);
+}
+
+/* Stub-BIF for LLVM:
+ * Expose closure call in order to fix its stack descriptor 
+ * (needed in case of a closure call with more than 4 arguments) */
+
+BIF_RETTYPE hipe_bifs_llvm_expose_closure_0(BIF_ALIST_0)
 {
     BIF_RET(am_ok);
 }
