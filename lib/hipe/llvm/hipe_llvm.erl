@@ -304,7 +304,10 @@
     const_decl_value/1,
 
     mk_asm/1,
-    asm_instruction/1
+    asm_instruction/1,
+
+    mk_adj_stack/1,
+    adj_stack_offset/1
   ]).
 
 
@@ -856,6 +859,8 @@ mk_asm(Instruction) -> #llvm_asm{instruction=Instruction}.
 asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
 
 
+mk_adj_stack(Offset) -> #llvm_adj_stack{offset=Offset}.
+adj_stack_offset(#llvm_adj_stack{offset=Offset}) -> Offset.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
@@ -1126,6 +1131,10 @@ pp_ins(Dev, I) ->
         i8*,i8*)* @__gcc_personality_v0 cleanup~n", []);
     #llvm_asm{} ->
       io:format(Dev, "~s~n", [asm_instruction(I)]);
+
+    #llvm_adj_stack{} ->
+      io:format(Dev, "call void asm sideeffect ", []),
+      io:format(Dev, "\"subq $0, %rsp\", \"r\"(i64 ~s)~n", [adj_stack_offset(I)]);
 
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
