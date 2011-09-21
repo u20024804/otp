@@ -535,10 +535,8 @@ extract_rodata(Elf) ->
 
 %% @spec get_label_list( binary() ) -> [{integer(), [integer()]}]
 %% @doc This function gets as argument an ELF64 binary file and returns a list
-%%      of tuples with all .rela.rodata labels (that is constants and literals
-%%      in code) or an empty list if no .rela.rodata section exists in code. The
-%%      tuples separate the labels corresponding to different (most often)
-%%      switch statements e.g. [{0, [...]}, {1, [...]}].
+%%      with all .rela.rodata labels (that is constants and literals in code)
+%%      or an empty list if no .rela.rodata section exists in code.
 
 -spec get_label_list( binary() ) -> [{integer(), [integer()]}].
 get_label_list(Elf) ->
@@ -648,19 +646,20 @@ flatten_list({Key, Val}, [{PrevKey,Vals} | T]) ->
   end.
 
 
-%% @spec split_list( [atom()], [integer()] ) -> [{integer(), [integer()]}]
-%% @doc Function that takes as arguments a list of atoms and a list with
+%% @spec split_list( [integer()], [integer()] ) -> [{integer(), [integer()]}]
+%% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
 %%      the original list to a list of tuples of the form {`Id', `SubList'}
 %%      where `Id' is just a positive integer and `SubList' a sublist of
-%%      atoms (with the specified number of elements).
+%%      atoms (with the specified number of elements), e.g.
+%%      [{0, [...]}, {1, [...]}].
 
--spec split_list([atom()], [integer()]) -> [{integer(), [integer()]}].
+-spec split_list([integer()], [integer()]) -> [{integer(), [integer()]}].
 split_list(List, ElemsPerTuple) ->
   split_list(List, ElemsPerTuple, 0, []).
 
--spec split_list([atom()], [integer()], integer(),
-		 [{integer(), [atom()]}]) -> [{integer(), [atom()]}].
+-spec split_list([integer()], [integer()], integer(),
+		 [{integer(), [integer()]}]) -> [{integer(), [integer()]}].
 split_list(List, [], NextId, Acc) ->
   lists:reverse([{NextId, List} | Acc]);
 split_list(List, [NumOfElems | MoreNums], NextId, Acc) ->
