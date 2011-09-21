@@ -32,8 +32,8 @@ rtl_to_native(RTL, _Options) ->
   %% Create final LabelMap
   LabelMap = fix_labelmap(TempLabelMap, Labels),
   %% Create relocation list
-  Relocs1 = fix_relocations(Relocs, RelocsDict, Mod_Name),
-  SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs),
+  {Relocs1, Closures} = fix_relocations(Relocs, RelocsDict, Mod_Name),
+  SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs, Closures),
   FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
@@ -52,7 +52,7 @@ rtl_to_native(RTL, _Options) ->
     ConstAlign,
     ConstSize,
     ConstMap,
-    LabelMap,
+    lists:flatten(LabelMap),
     ExportMap,
     CodeSize,
     CodeBinary,
@@ -129,11 +129,24 @@ fix_opts(Opts) ->
 %%----------------------------------------------------------------------------
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
+fix_labels(TempLabelMap, Labels) ->
+  Lengths = lists:map(fun export_length/1, TempLabelMap),
+  Labels2 = elf64_format:split_list(Labels, Lengths),
+  {_, Labels3} = lists:unzip(Labels2),
+  Labels3.
 
-fix_labelmap([],[])->[];
-fix_labelmap([M|_], Labels) ->
+export_length({_, L, []}) -> L;
+export_length({_, sorted, L, _}) -> round(L/8).
+
+fix_labelmap(TempLabelMap, Labels) ->
+  Labels2 = fix_labels(TempLabelMap, Labels),
+  Foo = lists:reverse(lists:nthtail(1, lists:reverse(Labels2))),
+  A = lists:zip(TempLabelMap, Foo),
+  lists:map(fun fix_labelmap2/1, A).
+
+fix_labelmap2({M, Labels}) ->
   case M of
-    {_, []} ->
+    {_, _, []} ->
       [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
     {_, sorted, Length, SortedBy} ->
       [{sorted, Length, lists:zip(SortedBy,Labels)}]
@@ -144,9 +157,9 @@ fix_labelmap([M|_], Labels) ->
 %% hipe_unified_loader.
 fix_relocations(Relocs, RelocsDict, ModName) ->
   Relocs1 = fix_rodata(Relocs),
-  fix_relocs(Relocs1, RelocsDict, ModName, [], [], [], []).
+  fix_relocs(Relocs1, RelocsDict, ModName, [], [], [], [], []).
 
-fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3) ->
+fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3, Acc4) ->
   Relocs = [{0, Acc0}, {1, Acc1}, {2, Acc2}, {3, Acc3}],
   %% Remove Empty Elements
   NotEmpty =
@@ -155,30 +168,35 @@ fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3) ->
           _ -> true
         end
     end,
-  lists:filter(NotEmpty, Relocs);
+    {lists:filter(NotEmpty, Relocs), Acc4};
 
-fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3) ->
+fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
+  Acc4) ->
   case dict:fetch(Name, RelocsDict) of
     {atom, AtomName} ->
       NR = {AtomName, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, [NR|Acc0], Acc1, Acc2, Acc3);
+      fix_relocs(Rs, RelocsDict, ModName, [NR|Acc0], Acc1, Acc2, Acc3, Acc4);
     {constant, _}=Constant ->
       NR = {Constant, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3, Acc4);
     {closure, _}=Closure ->
       NR = {Closure, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3, Acc4);
     {call, {bif, BifName, _}} ->
       NR = {fix_reloc_name(BifName), Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3]);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
+    {call, {hipe_bifs, llvm_expose_closure, A}} ->
+      NR = {{hipe_bifs, llvm_expose_closure, 0}, Offset},
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], [{Offset,
+        A}|Acc4]);
     %% MFA calls to functions in the same module are of type 3, while all
     %% other MFA calls are of type 2.
     {call, {ModName,F,A}} ->
       NR = {{ModName,fix_reloc_name(F),A}, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3]);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
     {call, {M,F,A}} ->
       NR = {{M,fix_reloc_name(F),A}, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, [NR|Acc2], Acc3);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, [NR|Acc2], Acc3, Acc4);
     Other ->
       exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary", Other}})
   end.
@@ -211,6 +229,19 @@ fix_reloc_name(Name) ->
 %%----------------------------------------------------------------------------
 %% Fixing Stack Descriptors
 %%----------------------------------------------------------------------------
+closures_offsets_arity([], SDescs) -> SDescs;
+closures_offsets_arity(Closures, SDescs) ->
+  {_,Offsets1} = lists:unzip(SDescs),
+  Offsets2 = lists:flatten(Offsets1),
+  Foo =
+  fun ({Off, Arity}) ->
+      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, Offsets2),
+      {I, Arity}
+  end,
+  Foo2 = fun ({OffList, Arity}) -> lists:map(fun(X) -> Foo({X,Arity}) end,
+        OffList) end,
+  lists:map(Foo2, Closures).
+
 
 %% This function is responssible for correcting the stack descriptors of the
 %% calls that are found in the code and have more than NR_ARG_REGS(so
@@ -219,10 +250,13 @@ fix_reloc_name(Name) ->
 %% correct since at the point of call the frame size is reduced proportionally
 %% to the number of arguments that are passed to the stack. Also the offsets
 %% of the roots need to be readjusted.
-fix_sdescs(RelocsDict, Relocs, SDescs) ->
+fix_sdescs(RelocsDict, Relocs, SDescs, Closures) ->
   NeedsSDescFix  = calls_with_stack_args(RelocsDict),
   OffsetsArity = calls_offsets_arity(Relocs, NeedsSDescFix),
-  hipe_llvm_bin:merge_refs(fix_sdescs1(SDescs, OffsetsArity)).
+  OffsetsArity2 = lists:flatten(closures_offsets_arity(Closures,SDescs)),
+  %io:format("Closures before ~w~n", [Closures]),
+  %io:format("Closures ~w~n", [OffsetsArity2]),
+  hipe_llvm_bin:merge_refs(fix_sdescs1(SDescs, OffsetsArity++OffsetsArity2)).
   %lists:map(fun live_args/1, Foo).
 
 
