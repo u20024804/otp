@@ -62,6 +62,7 @@
 	 get_rela_entry/3,
 	 get_rela_entry_field/2,
 	 get_text_symbol_list/1,
+	 get_text_rodata_list/1,
 	 %% Note
 	 extract_note/2,
 	 %% Executable code
@@ -366,18 +367,64 @@ get_text_symbol_list(Elf) ->
   ShStrTab= extract_shstrtab(Elf),   % Section Header string table (not apparent
 				     %   even with readelf!)
   %% Do the magic!
-  L = get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, []),
+  {LOff, _} =
+    get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
   %% Merge identical function calls to one tuple and a list of offsets
-  flatten_list(L).
+  flatten_list(LOff).
 
--spec get_text_symbol_list( binary(), binary(), binary(), binary(), binary(),
-		     [{string(), integer()}] ) -> [{string(), integer()}].
-get_text_symbol_list(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc) ->
-  Acc;
-get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
+
+%% @spec get_text_rodata_list( binary() ) -> {string(), [integer()]}
+%% @doc Create a tuple of the form {`.rodata', [`Addend']} with all
+%%      ".rela.rodata" switch statement separators. Useful in case you want to
+%%      separate the different case matches of each switch statement in the code.
+
+-spec get_text_rodata_list( binary() ) -> {string(), [integer()]}.
+get_text_rodata_list(Elf) ->
+  %% Extract Symbol, String and Relocation Tables
+  Rela   = extract_rela(Elf, ?TEXT), % All calls are Relocatable data indexing
+				     %   Symbol Table
+  SymTab = extract_symtab(Elf),      % Holds the offsets in Str Table of all
+				     %   symbols
+  StrTab = extract_strtab(Elf),      % Str Table holds all symbols' string names
+  %% But we *also* need (in case of a section header index in R_SYM):
+  SHdrTab = extract_shdrtab(Elf),    % Section Header Table
+  ShStrTab= extract_shstrtab(Elf),   % Section Header string table (not apparent
+				     %   even with readelf!)
+  %% Do the magic!
+  {_, LRodata} =
+    get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
+  %% Filter non-".rodata" symbols
+  Pred = fun({SymName, _}) -> SymName =:= ".rodata" end,
+  LRodata2 = lists:filter(Pred, LRodata),
+  %% Merge to one tuple and a list of addends
+  case LRodata2 of
+    [] ->
+      {".rodata", []};
+    Ros ->
+      hd(flatten_list(Ros))
+  end.
+
+
+%% @spec get_text_symbol_info( binary(), binary(), binary(), binary(), binary(),
+%%	                      [{string(), integer()}], [{string(), integer()}] )
+%%                       -> { [{string(), integer()}], [{string(), integer()}] }.
+%% @doc Extracts information from .text relocations. Both about the Offsets of
+%%      the relocations of the code ([ {`SymbolName', [`Offset']} ]) and about
+%%      the existence of ".rodata" relocations indicating that there exist
+%%      case/switch statements in the code and there Addend in .rela.rodata
+%%      expressing the first pattern matching relocation of each case statement
+%%      ({ ".rodata", [`Addend'] }).
+
+-spec get_text_symbol_info( binary(), binary(), binary(), binary(), binary(),
+		     [{string(), integer()}], [{string(), integer()}] )
+			 -> { [{string(), integer()}], [{string(), integer()}] }.
+get_text_symbol_info(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc1, Acc2) ->
+  {Acc1, Acc2};
+get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, OffAcc, RoAcc) ->
   %% Get Offset and Information about name
   Offset   = get_rela_entry_field(Rela, ?R_OFFSET),
   Info     = get_rela_entry_field(Rela, ?R_INFO),
+  Addend   = get_rela_entry_field(Rela, ?R_ADDEND),
   SymIndex = ?ELF64_R_SYM(Info), % Index in Symbol Table (.symtab)
   %% Get appropriate entry from Symbol Table
   SymTabEntry = get_symtab_entry(SymTab, ?ELF64_SYM_SIZE, SymIndex),
@@ -402,8 +449,8 @@ get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, Rela, Acc) ->
     end,
   %% Continue with next entries in Relocation "table"
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
-  get_text_symbol_list(SymTab, StrTab, SHdrTab, ShStrTab, More,
-		[{SymbolName, Offset} | Acc]).
+  get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, More,
+		[{SymbolName, Offset} | OffAcc], [{SymbolName, Addend} | RoAcc]).
 
 
 %%------------------------------------------------------------------------------
@@ -646,25 +693,22 @@ flatten_list({Key, Val}, [{PrevKey,Vals} | T]) ->
   end.
 
 
-%% @spec split_list( [integer()], [integer()] ) -> [{integer(), [integer()]}]
+%% @spec split_list( [integer()], [integer()] ) -> [ [integer()] ]
 %% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
-%%      the original list to a list of tuples of the form {`Id', `SubList'}
-%%      where `Id' is just a positive integer and `SubList' a sublist of
-%%      atoms (with the specified number of elements), e.g.
-%%      [{0, [...]}, {1, [...]}].
+%%      the original list to a list of lists of integers (with the specified
+%%      number of elements), e.g. [ [...], [...] ].
 
--spec split_list([integer()], [integer()]) -> [{integer(), [integer()]}].
+-spec split_list([integer()], [integer()]) -> [ [integer()] ].
 split_list(List, ElemsPerTuple) ->
-  split_list(List, ElemsPerTuple, 0, []).
+  split_list(List, ElemsPerTuple, []).
 
--spec split_list([integer()], [integer()], integer(),
-		 [{integer(), [integer()]}]) -> [{integer(), [integer()]}].
-split_list(List, [], NextId, Acc) ->
-  lists:reverse([{NextId, List} | Acc]);
-split_list(List, [NumOfElems | MoreNums], NextId, Acc) ->
+-spec split_list([integer()], [integer()], [ [integer()] ]) -> [ [integer()] ].
+split_list([], [], Acc) ->
+  lists:reverse(Acc);
+split_list(List, [NumOfElems | MoreNums], Acc) ->
   {L1, L2} = lists:split(NumOfElems, List),
-  split_list(L2, MoreNums, NextId+1, [{NextId, L1} | Acc]).
+  split_list(L2, MoreNums, [ L1 | Acc]).
 
 
 %% @spec leb128_decode( binary() ) -> {integer(), binary()}
