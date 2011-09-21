@@ -190,14 +190,10 @@ BIF_RETTYPE hipe_debug_bif_wrapper(BIF_ALIST_1)
 #endif /* ERTS_ENABLE_LOCK_CHECK && ERTS_SMP */
 
 /* Stub-BIF for LLVM:
- * Reloads BP, SP (in llvm unwind label) and realigns stack
- * in case of more than 4 arguments) */
+ * Reloads BP, SP (in llvm unwind label) */
 
-BIF_RETTYPE hipe_bifs_llvm_fixstack_1(BIF_ALIST_1)
+BIF_RETTYPE hipe_bifs_llvm_fix_pinned_regs_0(BIF_ALIST_0)
 {
-    Sint n = signed_val(BIF_ARG_1);
-    if (n > 0) 
-        asm volatile("subq %0, %%rsp\t # llvm_fixstack\n" : : "r"(n) : "%rsp");
     BIF_RET(am_ok);
 }
 
