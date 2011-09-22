@@ -1459,7 +1459,7 @@ call_to_decl({Name, {call, MFA}}) ->
 
 %% Create NewData which contains blocks for JumpTables. Also
 %% return necessary information to create LabelMap
-data_from_switches([], NewData, SortedBy) -> {NewData, SortedBy};
+data_from_switches([], NewData, SortedBy) -> {NewData, lists:reverse(SortedBy)};
 data_from_switches([I|Is], Data, Sorted) ->
   case I of
     #switch{} ->
