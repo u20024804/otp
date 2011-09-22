@@ -29,8 +29,9 @@ rtl_to_native(RTL, _Options) ->
   SDescs = note_erlgc:get_sdesc_list(ObjBin),
   %% Get Labels info
   Labels = elf64_format:get_label_list(ObjBin),
+  SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
   %% Create final LabelMap
-  LabelMap = fix_labelmap(TempLabelMap, Labels),
+  LabelMap = fix_labelmap(Relocs, TempLabelMap, Labels, SwitchAddends),
   %% Create relocation list
   {Relocs1, Closures} = fix_relocations(Relocs, RelocsDict, Mod_Name),
   SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs, Closures),
@@ -129,19 +130,21 @@ fix_opts(Opts) ->
 %%----------------------------------------------------------------------------
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
-fix_labels(TempLabelMap, Labels) ->
-  Lengths = lists:map(fun export_length/1, TempLabelMap),
-  Labels2 = elf64_format:split_list(Labels, Lengths),
-  {_, Labels3} = lists:unzip(Labels2),
-  Labels3.
+%%fix_labels(TempLabelMap, Labels) ->
+%%  LabelsLength = length(Labels),
+%%  sort_switches([], LabelsLength),
+%%  Lengths = lists:map(fun export_length/1, TempLabelMap),
+%%  Labels2 = elf64_format:split_list(Labels, Lengths),
+%%  {_, Labels3} = lists:unzip(Labels2),
+%%  Labels3.
 
-export_length({_, L, []}) -> L;
-export_length({_, sorted, L, _}) -> round(L/8).
+%%export_length({_, L, []}) -> L;
+%%export_length({_, sorted, L, _}) -> round(L/8).
 
-fix_labelmap(TempLabelMap, Labels) ->
-  Labels2 = fix_labels(TempLabelMap, Labels),
-  Foo = lists:reverse(lists:nthtail(1, lists:reverse(Labels2))),
-  A = lists:zip(TempLabelMap, Foo),
+fix_labelmap(Relocs, TempLabelMap, LabelList, SwitchAddends) ->
+  Switches = merge_switches(Relocs, SwitchAddends),
+  LabelList2 = split_labels(LabelList, Switches),
+  A = lists:zip(TempLabelMap, LabelList2),
   lists:map(fun fix_labelmap2/1, A).
 
 fix_labelmap2({M, Labels}) ->
@@ -151,6 +154,39 @@ fix_labelmap2({M, Labels}) ->
     {_, sorted, Length, SortedBy} ->
       [{sorted, Length, lists:zip(SortedBy,Labels)}]
   end.
+
+merge_switches(_Relocs, []) -> [];
+merge_switches(_Relocs, {".rodata", []}) -> [];
+merge_switches(Relocs, {".rodata", Addends}) ->
+  case lists:keyfind(".rodata", 1, Relocs) of
+    false ->
+      [];
+    {".rodata", Offsets} ->
+      lists:zip(Offsets,Addends)
+  end.
+
+split_labels(LabelList, Switches) ->
+  LabelsLength = length(LabelList),
+  Switches1 = lists:keysort(2, Switches),
+  Switches2 = find_switch_length(Switches1, LabelsLength),
+  {Offsets, Lengths} = lists:unzip(Switches2),
+  LabelList2 = elf64_format:split_list(LabelList, Lengths),
+  Switches3 = lists:zip(Offsets, LabelList2),
+  Switches4 = lists:keysort(1, Switches3),
+  {_, LabelList3} =  lists:unzip(Switches4),
+  LabelList3.
+
+
+find_switch_length(Switches, LabelsLength) ->
+  Switches1 = lists:map(fun ({X,Y}) -> {X, Y div 8} end, Switches),
+  find_switch_length(Switches1, LabelsLength, []).
+find_switch_length([], _LabelsLength, Acc) ->
+  Acc;
+find_switch_length([{Offset, Addend}], LabelsLength, Acc) ->
+  lists:reverse([{Offset, LabelsLength-Addend}|Acc]);
+find_switch_length([{Offset1, Addend1}, {Offset2, Addend2}|Rest], LL, Acc) ->
+  find_switch_length([{Offset2, Addend2}|Rest], LL, [{Offset1,
+        Addend2-Addend1}|Acc]).
 
 %% Correlate object file relocation symbols with info from translation to llvm
 %% code. Also split relocations according to their type, as expected by the
@@ -209,11 +245,17 @@ fix_rodata([], _, Acc) -> Acc;
 fix_rodata([{Name, Offset}=R|Rs], Num, Acc) ->
   case Name of
     ".rodata" ->
-      NewName = ".rodata"++integer_to_list(Num),
-      fix_rodata(Rs, Num+1, [{NewName, Offset}|Acc]);
+      fix_rodata(Rs, Num+1, fix_rodata_1(Offset)++Acc);
     _ ->
       fix_rodata(Rs, Num, [R|Acc])
   end.
+
+fix_rodata_1(Offset) -> fix_rodata_1(Offset, 0, []).
+
+fix_rodata_1([], _, Acc) -> Acc;
+fix_rodata_1([O|Os], Base, Acc) ->
+  NewName = ".rodata"++integer_to_list(Base),
+  fix_rodata_1(Os, Base+1, [{NewName, [O]}|Acc]).
 
 fix_reloc_name(Name) ->
   case Name of
@@ -327,8 +369,15 @@ fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
     false ->
       [SDesc];
     true ->
-      NewRoots = list_to_tuple(lists:map(DecRoot, tuple_to_list(Roots))),
-      NewSDesc = {{ExnHandler, FrameSize-Arity, StkArity, NewRoots}, [Offset]},
+      NewRootsList = lists:map(DecRoot, tuple_to_list(Roots)),
+      NewSDesc =
+      case length(NewRootsList)>0 andalso (hd(NewRootsList)>=0) of
+        true ->
+          {{ExnHandler, FrameSize-Arity, StkArity, list_to_tuple(NewRootsList)},
+            [Offset]};
+        false ->
+          {{ExnHandler, FrameSize, StkArity, Roots}, [Offset]}
+      end,
       RestOffsets = lists:delete(Offset, OldOffsets),
       RestSDesc = {{ExnHandler, FrameSize, StkArity, Roots},
         RestOffsets},
@@ -337,14 +386,14 @@ fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
 
 %%----------------------------------------------------------------------------
 
-live_args({{ExnHandler, FrameSize, Arity, RootSet},Offs}=A) ->
-  case Arity>0 of
-    false ->A;
-    true ->
-      ArgRoots = lists:seq(1,Arity),
-      ArgRoots2 = lists:map(fun(X) -> X+FrameSize end, ArgRoots),
-      Mpla1 = tuple_to_list(RootSet),
-      NewRootSet = lists:append(Mpla1, ArgRoots2),
-      Mpla2= list_to_tuple(NewRootSet),
-      {{ExnHandler, FrameSize, Arity, Mpla2}, Offs}
-  end.
+%%live_args({{ExnHandler, FrameSize, Arity, RootSet},Offs}=A) ->
+%%  case Arity>0 of
+%%    false ->A;
+%%    true ->
+%%      ArgRoots = lists:seq(1,Arity),
+%%      ArgRoots2 = lists:map(fun(X) -> X+FrameSize end, ArgRoots),
+%%      Mpla1 = tuple_to_list(RootSet),
+%%      NewRootSet = lists:append(Mpla1, ArgRoots2),
+%%      Mpla2= list_to_tuple(NewRootSet),
+%%      {{ExnHandler, FrameSize, Arity, Mpla2}, Offs}
+%%  end.
