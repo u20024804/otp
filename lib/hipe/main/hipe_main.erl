@@ -352,7 +352,9 @@ icode_ssa_unconvert(IcodeSSA, Options) ->
 %% ---------------------------------------------------------------------------
 icode_to_llvm(MFA, Icode, Options, Servers) ->
   debug("ICODE -> LLVM: ~w, ~w~n", [MFA, hash(Icode)], Options),
-  LinearRTL = translate_to_rtl(Icode, Options),
+  %% Fix Options for the llvm back end
+  Options2 = llvm_fix_options(Icode, Options),
+  LinearRTL = translate_to_rtl(Icode, Options2),
   pp(LinearRTL, MFA, rtl_linear, pp_rtl_linear, Options, Servers),
   RtlCfg  = initialize_rtl_cfg(LinearRTL, Options),
   %% hipe_rtl_cfg:pp(RtlCfg),
@@ -370,6 +372,27 @@ icode_to_llvm(MFA, Icode, Options, Servers) ->
   %% hipe_rtl:pp(standard_io, LinearRTL2),
   %% LLVM:
   rtl_to_llvm(RtlCfg1, Options).   %STUB: parse RTL in SSA form
+
+llvm_fix_options(Icode, Options) ->
+  %% If function has more than 1 switch statement the we must disable
+  %% generation of jump tables!
+  case llvm_can_have_switches(Icode) of
+    true -> Options;
+    false -> proplists:delete(use_indexing, Options)
+  end.
+
+%% Currently llvm backend does not support compilation of functions with more
+%% than 1 switch statement.
+llvm_can_have_switches(Icode) ->
+  IsSwitch =
+    fun(X) ->
+        case X of
+          #icode_switch_val{} -> true;
+          _ -> false
+        end
+    end,
+  Switches = lists:filter(IsSwitch, hipe_icode:icode_code(Icode)),
+  (length(Switches)=<1).
 
 %%=====================================================================
 %%
