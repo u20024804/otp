@@ -5,7 +5,7 @@
 -include("../rtl/hipe_rtl.hrl").
 -include("hipe_llvm.hrl").
 -include("../rtl/hipe_literals.hrl").
--export([translate/1, fix_mfa_name/1]).
+-export([translate/2, fix_mfa_name/1]).
 
 %% -ifdef(AMD64_FCALLS_IN_REGISTER).
 %% -define(FCALLS, "fcalls").
@@ -41,7 +41,7 @@
 -define(NR_PINNED_REGS, 2).
 
 
-translate(RTL) ->
+translate(RTL, Roots) ->
   hipe_gensym:init(llvm),
   Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
@@ -62,7 +62,7 @@ translate(RTL) ->
   %% Find all assigned virtual registers
   Destinations = collect_destinations(Code),
   %% Declare virtual and registers, and declare garbage collection roots
-  DestsDeclare = alloca_dsts(Destinations++Params),
+  DestsDeclare = alloca_dsts(Destinations++Params, Roots),
   GcMetadata = hipe_llvm:mk_const_decl("@gc_metadata", "external constant",
     ?BYTE_TYPE, ""),
   GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_void{},
@@ -98,33 +98,39 @@ find_code_entry_label(Code) ->
 collect_destinations(Code) ->
   lists:usort(lists:flatmap(fun insn_dst/1, Code)).
 
-alloca_dsts(Destinations) -> alloca_dsts(Destinations, []).
-alloca_dsts([], Acc) -> Acc;
-alloca_dsts([D|Ds], Acc) ->
+alloca_dsts(Destinations, Roots) -> alloca_dsts(Destinations, Roots, []).
+alloca_dsts([], Roots, Acc) -> Acc;
+alloca_dsts([D|Ds], Roots, Acc) ->
   {Name, _I} = trans_dst(D),
   case hipe_rtl:is_var(D) of
     true ->
+      Num = hipe_rtl:var_index(D),
       I1 = hipe_llvm:mk_alloca(Name, ?WORD_TYPE, [], []),
-      T1 = mk_temp(),
-      BYTE_TYPE_PP = hipe_llvm:mk_pointer(?BYTE_TYPE_P),
-      I2 = hipe_llvm:mk_conversion(T1, bitcast, ?WORD_TYPE_P, Name,
-        BYTE_TYPE_PP),
-      I3 = hipe_llvm:mk_call([], false, [], [], #llvm_void{}, "@llvm.gcroot",
-        [{BYTE_TYPE_PP, T1}, {?BYTE_TYPE_P, "@gc_metadata"}], []),
-      I4 = hipe_llvm:mk_store(?WORD_TYPE, "-5", ?WORD_TYPE_P, Name, [], [],
-        false),
-      alloca_dsts(Ds, [I1, I2, I3, I4 | Acc]);
+      case lists:member(Num, Roots) of
+        true ->
+          T1 = mk_temp(),
+          BYTE_TYPE_PP = hipe_llvm:mk_pointer(?BYTE_TYPE_P),
+          I2 = hipe_llvm:mk_conversion(T1, bitcast, ?WORD_TYPE_P, Name,
+            BYTE_TYPE_PP),
+          I3 = hipe_llvm:mk_call([], false, [], [], #llvm_void{}, "@llvm.gcroot",
+            [{BYTE_TYPE_PP, T1}, {?BYTE_TYPE_P, "@gc_metadata"}], []),
+          I4 = hipe_llvm:mk_store(?WORD_TYPE, "-5", ?WORD_TYPE_P, Name, [], [],
+            false),
+          alloca_dsts(Ds, Roots, [I1, I2, I3, I4 | Acc]);
+        false ->
+          alloca_dsts(Ds, Roots, [I1|Acc])
+      end;
     false ->
       case hipe_rtl:is_reg(D) andalso isPrecoloured(D) of
-        true -> alloca_dsts(Ds, Acc);
+        true -> alloca_dsts(Ds, Roots,  Acc);
         false ->
           case hipe_rtl:is_fpreg(D) of
             true ->
               I1 = hipe_llvm:mk_alloca(Name, ?FLOAT_TYPE, [], []),
-              alloca_dsts(Ds, [I1|Acc]);
+              alloca_dsts(Ds, Roots, [I1|Acc]);
             false ->
               I1 = hipe_llvm:mk_alloca(Name, ?WORD_TYPE, [], []),
-              alloca_dsts(Ds, [I1|Acc])
+              alloca_dsts(Ds, Roots, [I1|Acc])
       end
     end
   end.

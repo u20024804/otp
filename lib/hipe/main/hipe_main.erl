@@ -473,6 +473,7 @@ rtl_to_llvm(RtlCfg0, Options) ->
  % hipe_rtl_liveness:pp(RtlSSA0),
   Live = hipe_rtl_liveness:analyze(RtlCfg2),
   RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg2, Live),
+  Roots = hipe_llvm_liveness:find_roots(RtlCfg2, Live),
   LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
   %hipe_rtl_cfg:pp(RtlSSA0),
   %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
@@ -480,7 +481,7 @@ rtl_to_llvm(RtlCfg0, Options) ->
   %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
   %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
   %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
- Binary = hipe_llvm_main:rtl_to_native(LinearRtl, Options),
+ Binary = hipe_llvm_main:rtl_to_native(LinearRtl, Roots,  Options),
  {llvm_binary, Binary}.
 
 %%----------------------------------------------------------------------
