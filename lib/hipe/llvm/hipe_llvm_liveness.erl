@@ -2,17 +2,17 @@
 
 -include("../flow/cfg.hrl").
 -include("../rtl/hipe_rtl.hrl").
--export([annotate_dead_vars/2]).
+-export([annotate_dead_vars/2, find_roots/2]).
 
 annotate_dead_vars(CFG, Liveness) ->
   Labels = hipe_rtl_cfg:postorder(CFG),
   annotate_dead_vars_bb(Labels, CFG, Liveness).
 
-annotate_dead_vars_bb([], CFG, _Liveness) -> 
+annotate_dead_vars_bb([], CFG, _Liveness) ->
   CFG;
 annotate_dead_vars_bb([L|Ls], CFG, Liveness)  ->
   BB = hipe_rtl_cfg:bb(CFG, L),
-  Code0 = hipe_bb:code(BB), 
+  Code0 = hipe_bb:code(BB),
   LiveIn = strip(hipe_rtl_liveness:livein(Liveness, L)),
   LiveOut = strip(hipe_rtl_liveness:liveout(Liveness, L)),
   InternalDead = find_dead_in_block(Code0, LiveOut),
@@ -30,7 +30,7 @@ strip([{rtl_reg, _, _}|Xs]) ->
 strip([{_, _}|Xs]) ->
    strip(Xs).%
 
-find_dead_in_block(Code, LiveOut) -> 
+find_dead_in_block(Code, LiveOut) ->
   Defines = lists:map(fun hipe_rtl:defines/1, Code),
   Defines2 = lists:flatten(Defines),
   Defines3 = strip(Defines2),
@@ -62,7 +62,7 @@ annotate_in_ins(I, Deads) ->
 kill_var(Index) ->
   hipe_rtl:mk_var(Index, dead).
 
-find_common(Indexes, Deads) -> 
+find_common(Indexes, Deads) ->
   find_common(Indexes, Deads, []).
 find_common([], _Deads, Acc) ->
   Acc;
@@ -71,4 +71,29 @@ find_common([I|Is], Deads, Acc) ->
     true -> find_common(Is, Deads, [I|Acc]);
     false -> find_common(Is, Deads, Acc)
   end.
+
+%% Finds all possible roots of a function
+find_roots(CFG, Liveness) ->
+  Params = strip(hipe_rtl_cfg:params(CFG)),
+  Labels = hipe_rtl_cfg:postorder(CFG),
+  Roots0 = lists:map(fun (X) -> find_roots_bb(X, CFG, Liveness) end, Labels),
+  lists:usort(lists:flatten(Roots0)++Params).
+
+find_roots_bb(L, CFG, Liveness)  ->
+  BB = hipe_rtl_cfg:bb(CFG, L),
+  Code = hipe_bb:code(BB),
+  case has_sp(Code) of
+    true ->
+      LiveIn = strip(hipe_rtl_liveness:livein(Liveness, L)),
+      LiveOut = strip(hipe_rtl_liveness:liveout(Liveness, L)),
+      Internal = find_dead_in_block(Code, LiveOut),
+      LiveIn++Internal;
+    false ->
+      []
+  end.
+
+%% Tests whether a function has a safe point
+has_sp(Code) ->
+  Calls = lists:filter(fun hipe_rtl:is_call/1, Code),
+  length(Calls)>0.
 

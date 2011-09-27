@@ -3,16 +3,17 @@
 %% LLVM Backend Driver Module
 %%
 -module(hipe_llvm_main).
--export([rtl_to_native/2]).
+-export([rtl_to_native/3]).
 
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
 
 -define(NR_ARG_REGS, ?AMD64_NR_ARG_REGS).
 
-rtl_to_native(RTL, _Options) ->
+rtl_to_native(RTL, Roots, _Options) ->
   %% Get LLVM Instruction List
-  {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} = hipe_rtl2llvm:translate(RTL),
+  {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} =
+  hipe_rtl2llvm:translate(RTL, Roots),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
@@ -274,10 +275,10 @@ fix_reloc_name(Name) ->
 closures_offsets_arity([], SDescs) -> SDescs;
 closures_offsets_arity(Closures, SDescs) ->
   {_,Offsets1} = lists:unzip(SDescs),
-  Offsets2 = lists:flatten(Offsets1),
+  Offsets2 = lists:sort(lists:flatten(Offsets1)),
   Foo =
   fun ({Off, Arity}) ->
-      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, Offsets2),
+      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, lists:sort(Offsets2)),
       {I, Arity}
   end,
   Foo2 = fun ({OffList, Arity}) -> lists:map(fun(X) -> Foo({X,Arity}) end,
@@ -296,8 +297,6 @@ fix_sdescs(RelocsDict, Relocs, SDescs, Closures) ->
   NeedsSDescFix  = calls_with_stack_args(RelocsDict),
   OffsetsArity = calls_offsets_arity(Relocs, NeedsSDescFix),
   OffsetsArity2 = lists:flatten(closures_offsets_arity(Closures,SDescs)),
-  %io:format("Closures before ~w~n", [Closures]),
-  %io:format("Closures ~w~n", [OffsetsArity2]),
   hipe_llvm_bin:merge_refs(fix_sdescs1(SDescs, OffsetsArity++OffsetsArity2)).
   %lists:map(fun live_args/1, Foo).
 
