@@ -191,13 +191,13 @@ trans_alu(I, Relocs) ->
   _Dst = hipe_rtl:alu_dst(I),
   _Src1 = hipe_rtl:alu_src1(I),
   _Src2 = hipe_rtl:alu_src2(I),
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src1, I2} = trans_src(_Src1),
-  {Src2, I3} = trans_src(_Src2),
+  Dst = mk_temp(),
+  {Src1, I1} = trans_src(_Src1),
+  {Src2, I2} = trans_src(_Src2),
   Op =  trans_op(hipe_rtl:alu_op(I)),
-  I4 = hipe_llvm:mk_operation(Dst, Op, ?WORD_TYPE, Src1, Src2, []),
-  I5 = store_stack_dst(Dst, _Dst),
-  {[I5, I4, I3, I2, I1], Relocs}.
+  I3 = hipe_llvm:mk_operation(Dst, Op, ?WORD_TYPE, Src1, Src2, []),
+  I4 = store_stack_dst(Dst, _Dst),
+  {[I4, I3, I2, I1], Relocs}.
 
 %%
 %% alub
@@ -217,7 +217,7 @@ trans_alub_overflow(I, Relocs) ->
   {Src1, I1} =  trans_src(hipe_rtl:alub_src1(I)),
   {Src2, I2} =  trans_src(hipe_rtl:alub_src2(I)),
   _Dst = hipe_rtl:alub_dst(I),
-  {Dst, I3} = trans_stack_dst(_Dst),
+  Dst = mk_temp(),
   %% TODO: Fix call
   Name =
   case hipe_rtl:alub_op(I) of
@@ -231,12 +231,12 @@ trans_alub_overflow(I, Relocs) ->
   NewRelocs = relocs_store(Name, {call, {llvm, Name, 2}}, Relocs),
   ReturnType = hipe_llvm:mk_struct([?WORD_TYPE, hipe_llvm:mk_int(1)]),
   T1 = mk_temp(),
-  I4 = hipe_llvm:mk_call(T1, false, [], [], ReturnType, "@"++Name,
+  I3 = hipe_llvm:mk_call(T1, false, [], [], ReturnType, "@"++Name,
                         [{?WORD_TYPE, Src1}, {?WORD_TYPE, Src2}], []),
-  I5 = hipe_llvm:mk_extractvalue(Dst, ReturnType, T1 , "0", []),
-  I6 = store_stack_dst(Dst, _Dst),
+  I4 = hipe_llvm:mk_extractvalue(Dst, ReturnType, T1 , "0", []),
+  I5 = store_stack_dst(Dst, _Dst),
   T2 = mk_temp(),
-  I7 = hipe_llvm:mk_extractvalue(T2, ReturnType, T1, "1", []),
+  I6 = hipe_llvm:mk_extractvalue(T2, ReturnType, T1, "1", []),
   case hipe_rtl:alub_cond(I) of
     overflow ->
       True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
@@ -245,8 +245,8 @@ trans_alub_overflow(I, Relocs) ->
       True_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
       False_label = mk_jump_label(hipe_rtl:alub_true_label(I))
   end,
-  I8 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
-  {[I8, I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
+  I7 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
+  {[I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
 
 trans_alub_no_overflow(I, Relocs) ->
   %% alu
@@ -289,14 +289,8 @@ trans_branch(I, Relocs) ->
 %%
 trans_call(I, Relocs) ->
   OriginalName = hipe_rtl:call_fun(I),
-  {Dst, I1} =
-  case hipe_rtl:call_dstlist(I) of
-    [] ->
-      {mk_temp(), []};
-    [Destination] ->
-      trans_stack_dst(Destination)
-  end,
-  {CallArgs, I0} = trans_call_args(hipe_rtl:call_arglist(I)),
+  Dst = mk_temp(),
+  {CallArgs, I1} = trans_call_args(hipe_rtl:call_arglist(I)),
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I2} = load_fixed_regs(FixedRegs),
   FinalArgs =
@@ -342,7 +336,7 @@ trans_call(I, Relocs) ->
       {II5, _UnusedRelocs} = trans_goto(hipe_rtl:mk_goto(CC), Relocs),
       II5
   end,
-  {[I7, I6, I5, I4, I3, I2, I0, I1], NewRelocs}.
+  {[I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
 
 %%
 %% trans_comment
@@ -374,12 +368,12 @@ trans_enter(I, Relocs) ->
 trans_fconv(I, Relocs) ->
   %% XXX: Can a fconv destination be a precoloured reg?
   _Dst = hipe_rtl:fconv_dst(I),
-  {Dst, I1} = trans_stack_dst(_Dst),
+  Dst = mk_temp(),
   _Src = hipe_rtl:fconv_src(I),
-  {Src, I2} =  trans_float_src(_Src),
-  I3 = hipe_llvm:mk_conversion(Dst, sitofp, ?WORD_TYPE, Src, ?FLOAT_TYPE),
-  I4 = store_float_stack(Dst, _Dst),
-  {[I4, I3, I2, I1], Relocs}.
+  {Src, I1} =  trans_float_src(_Src),
+  I2 = hipe_llvm:mk_conversion(Dst, sitofp, ?WORD_TYPE, Src, ?FLOAT_TYPE),
+  I3 = store_float_stack(Dst, _Dst),
+  {[I3, I2, I1], Relocs}.
 
 
 %% TODO: fload, fstore, fmove, and fp are almost the same with load,store,move
@@ -392,16 +386,16 @@ trans_fload(I, Relocs) ->
   _Dst = hipe_rtl:fload_dst(I),
   _Src = hipe_rtl:fload_src(I),
   _Offset = hipe_rtl:fload_offset(I),
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src, I2} = trans_float_src(_Src),
-  {Offset, I3} = trans_float_src(_Offset),
+  Dst = mk_temp(),
+  {Src, I1} = trans_float_src(_Src),
+  {Offset, I2} = trans_float_src(_Offset),
   T1 = mk_temp(),
-  I4 = hipe_llvm:mk_operation(T1, add, ?WORD_TYPE, Src, Offset, []),
+  I3 = hipe_llvm:mk_operation(T1, add, ?WORD_TYPE, Src, Offset, []),
   T2 = mk_temp(),
-  I5 = hipe_llvm:mk_conversion(T2, inttoptr,  ?WORD_TYPE, T1, ?FLOAT_TYPE_P),
-  I6 = hipe_llvm:mk_load(Dst, ?FLOAT_TYPE_P, T2, [], [], false),
-  I7 = store_float_stack(Dst, _Dst),
-  {[I7, I6, I5, I4, I3, I2, I1], Relocs}.
+  I4 = hipe_llvm:mk_conversion(T2, inttoptr,  ?WORD_TYPE, T1, ?FLOAT_TYPE_P),
+  I5 = hipe_llvm:mk_load(Dst, ?FLOAT_TYPE_P, T2, [], [], false),
+  I6 = store_float_stack(Dst, _Dst),
+  {[I6, I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% fmove
@@ -409,12 +403,9 @@ trans_fload(I, Relocs) ->
 trans_fmove(I, Relocs) ->
   _Dst = hipe_rtl:fmove_dst(I),
   _Src = hipe_rtl:fmove_src(I),
-  %% TODO : Not stack needed?
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src, I2} = trans_float_src(_Src),
-  I3 = hipe_llvm:mk_select(Dst, "true", ?FLOAT_TYPE, Src, ?FLOAT_TYPE, "undef"),
-  I4 = store_float_stack(Dst, _Dst),
-  {[I4, I3, I2, I1], Relocs}.
+  {Src, I1} = trans_float_src(_Src),
+  I2 = store_float_stack(Src, _Dst),
+  {[I2, I1], Relocs}.
 
 %%
 %% fp
@@ -425,17 +416,17 @@ trans_fp(I, Relocs) ->
   _Src1 = hipe_rtl:fp_src1(I),
   _Src2 = hipe_rtl:fp_src2(I),
   %% Destination cannot be a precoloured register
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src1, I2} = trans_float_src(_Src1),
-  {Src2, I3} = trans_float_src(_Src2),
+  Dst = mk_temp(),
+  {Src1, I1} = trans_float_src(_Src1),
+  {Src2, I2} = trans_float_src(_Src2),
   Op = trans_fp_op(hipe_rtl:fp_op(I)),
-  I4 = hipe_llvm:mk_operation(Dst, Op, ?FLOAT_TYPE, Src1, Src2, []),
-  I5 = store_float_stack(Dst, _Dst),
+  I3 = hipe_llvm:mk_operation(Dst, Op, ?FLOAT_TYPE, Src1, Src2, []),
+  I4 = store_float_stack(Dst, _Dst),
   %% Synchronization for floating point exceptions
-  I6 = hipe_llvm:mk_store(?FLOAT_TYPE, Dst, ?FLOAT_TYPE_P, "%exception_sync", [] ,[], true),
+  I5 = hipe_llvm:mk_store(?FLOAT_TYPE, Dst, ?FLOAT_TYPE_P, "%exception_sync", [] ,[], true),
   T1 = mk_temp(),
-  I7 = hipe_llvm:mk_load(T1, ?FLOAT_TYPE_P, "%exception_sync", [], [] ,true),
-  {[I7, I6, I5, I4, I3, I2, I1], Relocs}.
+  I6 = hipe_llvm:mk_load(T1, ?FLOAT_TYPE_P, "%exception_sync", [], [] ,true),
+  {[I6, I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% fp_unop
@@ -444,12 +435,12 @@ trans_fp_unop(I, Relocs) ->
   _Dst = hipe_rtl:fp_unop_dst(I),
   _Src = hipe_rtl:fp_unop_src(I),
   % Destination cannot be a precoloured register
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src, I2} = trans_float_src(_Src),
+  Dst = mk_temp(),
+  {Src, I1} = trans_float_src(_Src),
   Op =  trans_fp_op(hipe_rtl:fp_unop_op(I)),
-  I3 = hipe_llvm:mk_operation(Dst, Op, ?FLOAT_TYPE, "0.0", Src, []),
-  I4 = store_float_stack(Dst, _Dst),
-  {[I4, I3, I2, I1], Relocs}.
+  I2 = hipe_llvm:mk_operation(Dst, Op, ?FLOAT_TYPE, "0.0", Src, []),
+  I3 = store_float_stack(Dst, _Dst),
+  {[I3, I2, I1], Relocs}.
 %% TODO: Fix fp_unop in a way like the following. You must change trans_dest,
 %% in order to call float_to_list in a case of float constant. Maybe the type
 %% check is expensive...
@@ -513,34 +504,34 @@ trans_load(I, Relocs) ->
   _Src = hipe_rtl:load_src(I),
   _Offset = hipe_rtl:load_offset(I),
   %%XXX: can destination be a precoloured register????
-  {Dst, I1} = trans_stack_dst(_Dst),
-  {Src, I2} = trans_src(_Src),
-  {Offset, I3} = trans_src(_Offset),
+  Dst = mk_temp(),
+  {Src, I1} = trans_src(_Src),
+  {Offset, I2} = trans_src(_Offset),
   T1 = mk_temp(),
-  I4 = hipe_llvm:mk_operation(T1, add, ?WORD_TYPE, Src, Offset, []),
-  Ins = case hipe_rtl:load_size(I) of
+  I3 = hipe_llvm:mk_operation(T1, add, ?WORD_TYPE, Src, Offset, []),
+  I4 = case hipe_rtl:load_size(I) of
     word ->
       T2 = mk_temp(),
-      I5 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, ?WORD_TYPE_P),
-      I6 = hipe_llvm:mk_load(Dst, ?WORD_TYPE_P, T2, [], [], false),
-      [I6, I5];
+      II1 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, ?WORD_TYPE_P),
+      II2 = hipe_llvm:mk_load(Dst, ?WORD_TYPE_P, T2, [], [], false),
+      [II2, II1];
     Size ->
       LoadType = type_from_size(Size),
       LoadTypeP = hipe_llvm:mk_pointer(LoadType),
       T2 = mk_temp(),
-      I5 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, LoadTypeP),
+      II1 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, LoadTypeP),
       T3 = mk_temp(),
       LoadTypePointer = hipe_llvm:mk_pointer(LoadType),
-      I6 = hipe_llvm:mk_load(T3, LoadTypePointer, T2, [], [], false),
+      II2 = hipe_llvm:mk_load(T3, LoadTypePointer, T2, [], [], false),
       Conversion = case hipe_rtl:load_sign(I) of
         signed -> sext;
         unsigned -> zext
       end,
-      I7 = hipe_llvm:mk_conversion(Dst, Conversion, LoadType, T3, ?WORD_TYPE),
-      [I7, I6, I5]
+      II3 = hipe_llvm:mk_conversion(Dst, Conversion, LoadType, T3, ?WORD_TYPE),
+      [II3, II2, II1]
   end,
-  I8 = store_stack_dst(Dst, _Dst),
-  {[I8, Ins, I4, I3, I2, I1], Relocs}.
+  I5 = store_stack_dst(Dst, _Dst),
+  {[I5, I4, I3, I2, I1], Relocs}.
 
 %%
 %% load_address
@@ -548,7 +539,6 @@ trans_load(I, Relocs) ->
 trans_load_address(I, Relocs) ->
   _Dst = hipe_rtl:load_address_dst(I),
   _Addr = hipe_rtl:load_address_addr(I),
-  {Dst, I1} = trans_stack_dst(_Dst),
   {Addr, NewRelocs} =
   case hipe_rtl:load_address_type(I) of
     constant ->
@@ -563,9 +553,8 @@ trans_load_address(I, Relocs) ->
       exit({?MODULE,trans_load_address, {"Type not implemented in
           load_address", _Addr}})
   end,
-  I2 = hipe_llvm:mk_select(Dst, true, ?WORD_TYPE, Addr, ?WORD_TYPE, "undef"),
-  I3 = store_stack_dst(Dst, _Dst),
-  {[I3, I2, I1], NewRelocs}.
+  I1 = store_stack_dst(Addr, _Dst),
+  {[I1], NewRelocs}.
 
 %%
 %% load_atom
@@ -573,13 +562,11 @@ trans_load_address(I, Relocs) ->
 trans_load_atom(I, Relocs) ->
   _Dst = hipe_rtl:load_atom_dst(I),
   _Atom = hipe_rtl:load_atom_atom(I),
-  {Dst, I1} = trans_stack_dst(_Dst),
   Name = "atom_"++make_llvm_id(atom_to_list(_Atom)),
   Atom_Name = "%"++Name++"_var",
   NewRelocs = relocs_store(Name, {atom, _Atom}, Relocs),
-  I2 = hipe_llvm:mk_select(Dst, true, ?WORD_TYPE, Atom_Name, ?WORD_TYPE, "undef"),
-  I3 = store_stack_dst(Dst, _Dst),
-  {[I3, I2, I1], NewRelocs}.
+  I1 = store_stack_dst(Atom_Name, _Dst),
+  {[I1], NewRelocs}.
 
 %%
 %% move
@@ -587,11 +574,9 @@ trans_load_atom(I, Relocs) ->
 trans_move(I, Relocs) ->
   _Dst = hipe_rtl:move_dst(I),
   _Src = hipe_rtl:move_src(I),
-  {Dst, I0} = trans_stack_dst(_Dst),
   {Src, I1} = trans_src(_Src),
-  I2 = hipe_llvm:mk_select(Dst, "true", ?WORD_TYPE, Src, ?WORD_TYPE, "undef"),
-  I3 = store_stack_dst(Dst, _Dst),
-  {[I3, I2, I1, I0], Relocs}.
+  I2 = store_stack_dst(Src, _Dst),
+  {[I2, I1], Relocs}.
 
 %%
 %% return
@@ -960,10 +945,6 @@ mk_temp_reg(Name) ->
 
 mk_hp() ->
   "%hp_reg_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
-
-%% TODO: Remove the use of this function!
-trans_stack_dst(_Dst) ->
-  {mk_temp(), []}.
 
 store_stack_dst(TempDst, Dst) ->
   {Dst2, II1} = trans_dst(Dst),
