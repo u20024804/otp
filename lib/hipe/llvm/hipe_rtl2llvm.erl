@@ -42,12 +42,15 @@
 
 
 translate(RTL, Roots) ->
-  hipe_gensym:init(llvm),
   Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
   Fun =  hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
+  {_, MaxLabel} = hipe_rtl:rtl_label_range(RTL),
   {_Mod_Name, Fun_Name, _Arity} = fix_mfa_name(Fun),
+  %% Init Unique Symbol Generator
+  hipe_gensym:init(llvm),
+  put({llvm,label_count}, MaxLabel+1),
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -703,7 +706,7 @@ fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
         [] -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels);
         FailLabel ->
           OldLabel = find_first_label(Acc),
-          NewLabel = 9999999999 - hipe_gensym:new_label(rtl),
+          NewLabel = hipe_gensym:new_label(llvm),
           NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
           SpAdj = find_sp_adj(hipe_rtl:call_arglist(I)),
           case lists:keyfind(FailLabel, 1, FailLabels) of
@@ -714,13 +717,13 @@ fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
                 FailLabels);
             %% Same fail label but with different Stack Pointer adjustment
             {_, _, _} ->
-              NewFailLabel = hipe_gensym:new_label(rtl),
+              NewFailLabel = hipe_gensym:new_label(llvm),
               NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
               fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
                 [{FailLabel, NewFailLabel, SpAdj}|FailLabels]);
             %% New Fail label
             false ->
-              NewFailLabel = hipe_gensym:new_label(rtl),
+              NewFailLabel = hipe_gensym:new_label(llvm),
               NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
               fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
                 [{FailLabel, NewFailLabel, SpAdj}|FailLabels])
