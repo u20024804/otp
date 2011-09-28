@@ -51,6 +51,8 @@ translate(RTL, Roots) ->
   %% Init Unique Symbol Generator
   hipe_gensym:init(llvm),
   put({llvm,label_count}, MaxLabel+1),
+  %% Put first label of RTL code in process dictionary
+  find_code_entry_label(Code),
   %% Print RTL to file
   {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   hipe_rtl:pp(File_rtl, RTL),
@@ -62,35 +64,25 @@ translate(RTL, Roots) ->
     hipe_pack_constants:pack_constants([{Fun, [], NewData}],
                                       ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
-  %% Find all assigned virtual registers
-  Destinations = collect_destinations(Code),
-  %% Declare virtual and registers, and declare garbage collection roots
-  DestsDeclare = alloca_dsts(Destinations++Params, Roots),
-  GcMetadata = hipe_llvm:mk_const_decl("@gc_metadata", "external constant",
-    ?BYTE_TYPE, ""),
-  GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_void{},
-    "@llvm.gcroot", [hipe_llvm:mk_pointer(?BYTE_TYPE_P), ?BYTE_TYPE_P], []),
-  GCExt = [GCROOTDecl, GcMetadata],
-  {Code2, FailLabels} = fix_invoke_calls(Code),
-  Code3 = fix_closure_calls(Code2),
+  AllocaStack = alloca_stack(Code, Params, Roots),
+  {Code2, FailLabels} = fix_code(Code),
   Relocs0 = dict:new(),
-  find_code_entry_label(Code),
-  {LLVM_Code1, Relocs1} = translate_instr_list(Code3, [], Relocs0),
+  {LLVM_Code1, Relocs1} = translate_instr_list(Code2, [], Relocs0),
   {FinalRelocs, ExternalDecl, LocalVars, TempLabelMap} =
     handle_relocations(Relocs1, SC, SwitchValues, Fun),
   LLVM_Code2 = add_landingpads(LLVM_Code1, FailLabels),
   %% Create LLVM Code for the compiled function
   LLVM_Code3 = create_function_definition(Fun, Params, LLVM_Code2,
-    DestsDeclare++LocalVars),
+                                          AllocaStack++LocalVars),
   %% Final Code = CompiledFunction + External Declarations
   FinalLLVMCode = [LLVM_Code3 | ExternalDecl],
-  FinalLLVMCode2 = GCExt ++ FinalLLVMCode,
-  {FinalLLVMCode2, FinalRelocs, SC, ConstAlign, ConstSize, TempLabelMap}.
+  {FinalLLVMCode, FinalRelocs, SC, ConstAlign, ConstSize, TempLabelMap}.
 
 %%-----------------------------------------------------------------------------
+find_code_entry_label([]) ->
+  exit({?MODULE, find_code_entry_label, "Empty Code"});
 find_code_entry_label(Code) ->
-  [I|_] = Code,
-  case I of
+  case I=hd(Code) of
     #label{} ->
       put(first_label, hipe_rtl:label_name(I));
     _ ->
@@ -98,11 +90,20 @@ find_code_entry_label(Code) ->
           label"})
   end.
 
+%% Create a stack slot for each virtual register. The stack slots
+%% that correspond to possible garbage collection roots must be
+%% marked as such.
+alloca_stack(Code, Params, Roots) ->
+  %% Find all assigned virtual registers
+  Destinations = collect_destinations(Code),
+  %% Declare virtual and registers, and declare garbage collection roots
+  alloca_dsts(Destinations++Params, Roots).
+
 collect_destinations(Code) ->
   lists:usort(lists:flatmap(fun insn_dst/1, Code)).
 
 alloca_dsts(Destinations, Roots) -> alloca_dsts(Destinations, Roots, []).
-alloca_dsts([], Roots, Acc) -> Acc;
+alloca_dsts([], _, Acc) -> Acc;
 alloca_dsts([D|Ds], Roots, Acc) ->
   {Name, _I} = trans_dst(D),
   case hipe_rtl:is_var(D) of
@@ -681,6 +682,13 @@ switch_default_label() ->
 
 %%-----------------------------------------------------------------------------
 
+%% Pass on RTL code in order to fix invoke and closure calls.
+%% TODO: merge the 2 passes in one.
+fix_code(Code) ->
+  {Code1, FailLabels} = fix_invoke_calls(Code),
+  Code2 = fix_closure_calls(Code1),
+  {Code2, FailLabels}.
+
 
 %% When a call has a fail continuation label it must be extended with a normal
 %% continuation label to go with the LLVM's invoke instruction. Also all phi
@@ -693,19 +701,16 @@ switch_default_label() ->
 %% invoke instruction is no available, and we cannot get the correct values
 %% of pinned registers). Finnaly when there are stack arguments the stack
 %% needs to be readjusted.
-fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], [], []).
-fix_invoke_calls([], Acc, SubstMap, FailLabels) ->
-  Update = fun (X) -> update_phi_nodes(X, SubstMap) end,
-  {lists:reverse(lists:map(Update, Acc)), FailLabels};
-  %{add_stub_calls(I1, FailLabels), FailLabels};
+fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], []).
+fix_invoke_calls([], Acc, FailLabels) ->
+  {lists:reverse(Acc), FailLabels};
 
-fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
+fix_invoke_calls([I|Is], Acc, FailLabels) ->
   case I of
     #call{} ->
       case hipe_rtl:call_fail(I) of
-        [] -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels);
+        [] -> fix_invoke_calls(Is, [I|Acc], FailLabels);
         FailLabel ->
-          OldLabel = find_first_label(Acc),
           NewLabel = hipe_gensym:new_label(llvm),
           NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
           SpAdj = find_sp_adj(hipe_rtl:call_arglist(I)),
@@ -713,23 +718,22 @@ fix_invoke_calls([I|Is], Acc, SubstMap, FailLabels) ->
             %% Same fail label with same Stack Pointer adjustment
             {FailLabel, NewFailLabel, SpAdj} ->
               NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
-                FailLabels);
+              fix_invoke_calls(Is, [NewCall2|Acc], FailLabels);
             %% Same fail label but with different Stack Pointer adjustment
             {_, _, _} ->
               NewFailLabel = hipe_gensym:new_label(llvm),
               NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
-                [{FailLabel, NewFailLabel, SpAdj}|FailLabels]);
+              fix_invoke_calls(Is, [NewCall2|Acc],
+                                [{FailLabel, NewFailLabel, SpAdj}|FailLabels]);
             %% New Fail label
             false ->
               NewFailLabel = hipe_gensym:new_label(llvm),
               NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc], [{OldLabel, NewLabel}|SubstMap],
-                [{FailLabel, NewFailLabel, SpAdj}|FailLabels])
+              fix_invoke_calls(Is, [NewCall2|Acc],
+                              [{FailLabel, NewFailLabel, SpAdj}|FailLabels])
           end
       end;
-    _ -> fix_invoke_calls(Is, [I|Acc], SubstMap, FailLabels)
+    _ -> fix_invoke_calls(Is, [I|Acc], FailLabels)
   end.
 
 find_sp_adj(ArgList) ->
@@ -739,24 +743,6 @@ find_sp_adj(ArgList) ->
     true -> (NrArgs-RegArgs)*8;
     false -> 0
   end.
-
-find_first_label([]) -> exit({?MODULE, find_first_label, "No label found"});
-find_first_label([I|Is]) ->
-  case I of
-    #label{} -> hipe_rtl:label_name(I);
-    _ -> find_first_label(Is)
-  end.
-
-update_phi_nodes(I, SubstMap) ->
-  case I of
-    #phi{} -> update_phi_node(I, SubstMap);
-    _ -> I
-  end.
-
-update_phi_node(I, []) -> I;
-update_phi_node(I, [{OldPred, NewPred} | SubstMap]) ->
-  I1 = hipe_rtl:phi_redirect_pred(I, OldPred, NewPred),
-  update_phi_node(I1, SubstMap).
 
 %% In case of a call to a closure with more than ?AMD64_NR_ARG_REGS, the
 %% addresss of the call must be exported in order to fix the corresponding
@@ -790,12 +776,14 @@ fix_closure_calls([I|Is], Acc) ->
       fix_closure_calls(Is, [I|Acc])
   end.
 
+%% Add landingpad instruction in Fail Blocks
 add_landingpads(LLVM_Code, FailLabels) ->
   FailLabels2 =
     lists:map(fun({X,Y,Z}) ->
           {"L"++integer_to_list(X), "FL"++integer_to_list(Y), Z}
       end, FailLabels),
   add_landingpads(LLVM_Code, FailLabels2, []).
+
 add_landingpads([], _, Acc) ->
   lists:reverse(Acc);
 add_landingpads([I|Is], FailLabels, Acc) ->
@@ -830,47 +818,9 @@ create_fail_blocks(Label, FailLabels, Acc) ->
       create_fail_blocks(Label, RestFailLabels, Ins++Acc)
   end.
 
-%%add_stub_calls(LLVM_Code, FailLabels) ->
-%%  add_stub_calls(LLVM_Code, FailLabels, []).
-%%
-%%add_stub_calls([], _, Acc) ->
-%%  lists:reverse(Acc);
-%%add_stub_calls([I|Is], FailLabels, Acc) ->
-%%   case I of
-%%     #label{} ->
-%%       Label = hipe_rtl:label_name(I),
-%%        case lists:keymember(Label, 1, FailLabels) of
-%%          true ->
-%%            I1 = hipe_rtl:mk_call([], {hipe_bifs, llvm_stub, 1}, [], [], [],
-%%              remote),
-%%            add_stub_calls(Is, FailLabels, [I1, I| Acc]);
-%%          false ->
-%%            add_stub_calls(Is, FailLabels, [I|Acc])
-%%        end;
-%%      _ ->
-%%        add_stub_calls(Is, FailLabels, [I|Acc])
-%%    end.
-
-
 %%----------------------------------------------------------------------------
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
-
-%%is_call(I) ->
-%%  case I of
-%%    #llvm_call{} -> true;
-%%    #llvm_invoke{} -> true;
-%%    _ -> false
-%%  end.
-%%
-%%call_name(I) ->
-%%  case I of
-%%    #llvm_call{} ->
-%%      hipe_llvm:call_fnptrval(I);
-%%    #llvm_invoke{} ->
-%%      hipe_llvm:invoke_fnptrval(I);
-%%    Other -> exit({?MODULE, call_name, {"Not a call", Other}})
-%%  end.
 
 trans_call_name(Name, Relocs, CallArgs, FinalArgs) ->
   case Name of
@@ -887,12 +837,6 @@ trans_call_name(Name, Relocs, CallArgs, FinalArgs) ->
  		Reg ->
       case hipe_rtl:is_reg(Reg) of
         true ->
-%%          case length(CallArgs) of
-%%            X when X>4 ->
-%%              io:format("Warning: Cannot support compilation of closures "
-%%                "with more than 4 args.~n");
-%%              _ -> ok
-%%            end,
           TT1 = mk_temp(),
           {RegName, II1} = trans_src(Reg),
           II2 = hipe_llvm:mk_conversion(TT1, inttoptr, ?WORD_TYPE, RegName,
@@ -1016,8 +960,6 @@ mk_temp_reg(Name) ->
 
 mk_hp() ->
   "%hp_reg_var_" ++ integer_to_list(hipe_gensym:new_var(llvm)).
-%%mk_hp(N) ->
-%%  "%hp_reg_var_" ++ integer_to_list(N).
 
 %% TODO: Remove the use of this function!
 trans_stack_dst(_Dst) ->
@@ -1069,7 +1011,7 @@ trans_src(A) ->
         false ->
           case hipe_rtl:is_var(A) of
             true ->
-              RootName = "%root" ++ integer_to_list(hipe_rtl:var_index(A)),
+              RootName = "%vr" ++ integer_to_list(hipe_rtl:var_index(A)),
               T1 = mk_temp(),
               I1 = hipe_llvm:mk_load(T1, ?WORD_TYPE_P, RootName, [], [], false),
               I2 =
@@ -1100,10 +1042,10 @@ trans_dst(A) ->
     false ->
       Name = case hipe_rtl:is_var(A) of
         true ->
-          "%root" ++ integer_to_list(hipe_rtl:var_index(A));
+          "%vr" ++ integer_to_list(hipe_rtl:var_index(A));
         false ->
           case hipe_rtl:is_fpreg(A) of
-            true -> "%f" ++ integer_to_list(hipe_rtl:fpreg_index(A));
+            true -> "%fr" ++ integer_to_list(hipe_rtl:fpreg_index(A));
             false ->
               case hipe_rtl:is_const_label(A) of
                 true ->
@@ -1259,17 +1201,6 @@ trans_prim_op(Op) ->
     Other -> atom_to_list(Other)
   end.
 
-%% Return the type of arg A (only integers of 64 bits and floats supported).
-%%arg_type(A) ->
-%%  case hipe_rtl:is_fpreg(A) of
-%%    true -> ?FLOAT_TYPE;
-%%    false ->
-%%      case hipe_rtl:is_var(A) of
-%%        true -> ?WORD_TYPE_P;
-%%        false -> ?WORD_TYPE
-%%      end
-%%  end.
-
 %%-----------------------------------------------------------------------------
 
 %% Create definition for the compiled function
@@ -1378,15 +1309,8 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   %% Find function calls
   IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
   ExternalCallList = lists:filter(IsExternalCall, CallList),
-  %% TODO: Remove this
-  %% Temporary declare landing pad and llvm_fix_pinned_regs
-  LandPad = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_int{width=32},
-    "@__gcc_personality_v0", [#llvm_int{width=32}, #llvm_int{width=64},
-      ?BYTE_TYPE_P, ?BYTE_TYPE_P], []),
-  Bif_Stub = hipe_llvm:mk_fun_decl([], [], [], [], ?FUN_RETURN_TYPE,
-    "@hipe_bifs.llvm_fix_pinned_regs.0", [], []),
   %% Create code to declare external function
-  FunDecl = [LandPad, Bif_Stub | lists:map(fun call_to_decl/1, ExternalCallList)],
+  FunDecl = fixed_fun_decl()++lists:map(fun call_to_decl/1, ExternalCallList),
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = lists:usort(find_constants(SlimedConstMap)),
   %% Create code to declare constants
@@ -1465,6 +1389,19 @@ call_to_decl({Name, {call, MFA}}) ->
   end,
   ArgsTypes = lists:map(fun(_) -> ?WORD_TYPE end, Args),
   hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, "@"++Name, ArgsTypes, []).
+
+%% This functions are always declared, even if not used
+fixed_fun_decl() ->
+  LandPad = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_int{width=32},
+    "@__gcc_personality_v0", [#llvm_int{width=32}, #llvm_int{width=64},
+      ?BYTE_TYPE_P, ?BYTE_TYPE_P], []),
+  GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_void{},
+    "@llvm.gcroot", [hipe_llvm:mk_pointer(?BYTE_TYPE_P), ?BYTE_TYPE_P], []),
+  FixPinnedRegs = hipe_llvm:mk_fun_decl([], [], [], [], ?FUN_RETURN_TYPE,
+    "@hipe_bifs.llvm_fix_pinned_regs.0", [], []),
+  GcMetadata = hipe_llvm:mk_const_decl("@gc_metadata", "external constant",
+    ?BYTE_TYPE, ""),
+  [LandPad, GCROOTDecl, FixPinnedRegs, GcMetadata].
 
 %% Create NewData which contains blocks for JumpTables. Also
 %% return necessary information to create LabelMap
