@@ -87,7 +87,7 @@ find_roots_bb(L, CFG, Liveness)  ->
       LiveIn = strip(hipe_rtl_liveness:livein(Liveness, L)),
       LiveOut = strip(hipe_rtl_liveness:liveout(Liveness, L)),
       Internal = find_dead_in_block(Code, LiveOut),
-      LiveIn++Internal;
+      LiveIn++LiveOut++Internal;
     false ->
       []
   end.
