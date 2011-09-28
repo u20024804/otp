@@ -107,7 +107,7 @@
 	 %% rtl_data_update/2,
 	 %% rtl_var_range/1,
 	 %% rtl_var_range_update/2,
-	 %% rtl_label_range/1,
+	 rtl_label_range/1,
 	 %% rtl_label_range_update/2,
 	 rtl_info/1,
 	 rtl_info_update/2]).
@@ -396,7 +396,7 @@ rtl_data(#rtl{data=Data}) -> Data.
 %% rtl_data_update(Rtl, Data) -> Rtl#rtl{data=Data}.
 %% rtl_var_range(#rtl{var_range=VarRange}) -> VarRange.
 %% rtl_var_range_update(Rtl, VarRange) -> Rtl#rtl{var_range=VarRange}.
-%% rtl_label_range(#rtl{label_range=LabelRange}) -> LabelRange.
+rtl_label_range(#rtl{label_range=LabelRange}) -> LabelRange.
 %% rtl_label_range_update(Rtl, LabelRange) -> Rtl#rtl{label_range=LabelRange}.
 rtl_info(#rtl{info=Info}) -> Info.
 rtl_info_update(Rtl, Info) -> Rtl#rtl{info=Info}.
