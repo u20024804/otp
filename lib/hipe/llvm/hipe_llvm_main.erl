@@ -278,7 +278,7 @@ closures_offsets_arity(Closures, SDescs) ->
   Offsets2 = lists:sort(lists:flatten(Offsets1)),
   Foo =
   fun ({Off, Arity}) ->
-      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, lists:sort(Offsets2)),
+      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, Offsets2),
       {I, Arity}
   end,
   Foo2 = fun ({OffList, Arity}) -> lists:map(fun(X) -> Foo({X,Arity}) end,
