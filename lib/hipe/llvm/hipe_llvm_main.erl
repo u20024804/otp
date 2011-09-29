@@ -220,7 +220,7 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
       NR = {Closure, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, [NR|Acc1], Acc2, Acc3, Acc4);
     {call, {bif, BifName, _}} ->
-      NR = {fix_reloc_name(BifName), Offset},
+      NR = {BifName, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
     {call, {hipe_bifs, llvm_expose_closure, A}} ->
       NR = {{hipe_bifs, llvm_expose_closure, 0}, Offset},
@@ -228,11 +228,11 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
         A}|Acc4]);
     %% MFA calls to functions in the same module are of type 3, while all
     %% other MFA calls are of type 2.
-    {call, {ModName,F,A}} ->
-      NR = {{ModName,fix_reloc_name(F),A}, Offset},
+    {call, {ModName,F,A}=MFA} ->
+      NR = {MFA, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
-    {call, {M,F,A}} ->
-      NR = {{M,fix_reloc_name(F),A}, Offset},
+    {call, {M,F,A}=MFA} ->
+      NR = {MFA, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, [NR|Acc2], Acc3, Acc4);
     Other ->
       exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary", Other}})
@@ -257,17 +257,6 @@ fix_rodata_1([], _, Acc) -> Acc;
 fix_rodata_1([O|Os], Base, Acc) ->
   NewName = ".rodata"++integer_to_list(Base),
   fix_rodata_1(Os, Base+1, [{NewName, [O]}|Acc]).
-
-fix_reloc_name(Name) ->
-  case Name of
-    bif_add -> '+';
-    bif_sub -> '-';
-    bif_mul -> '*';
-    bif_div -> 'div';
-    concat -> '++';
-    unary_plus -> '+';
-    Other -> Other
-  end.
 
 %%----------------------------------------------------------------------------
 %% Fixing Stack Descriptors

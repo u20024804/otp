@@ -904,12 +904,6 @@ llvm_id(C) when C==46; C>47 andalso C<58; C>64 andalso C<91; C==95; C>96 andalso
            C<123 -> C;
 llvm_id(C) ->
  io_lib:format("_~2.16.0B_",[C]).
-fix_name(Name) ->
-  case Name of
-    '+' -> unary_plus;
-    '++' -> concat;
-    Other -> Other
-  end.
 
 fix_mfa_name(Fun) ->
   {Mod_Name, Closure_Name, Arity} = Fun,
@@ -921,7 +915,7 @@ fix_closure_name(ClosureName) ->
   list_to_atom(make_llvm_id(CN)).
 
 trans_mfa_name({M,F,A}) ->
-  N = atom_to_list(M)++"."++atom_to_list(fix_name(F))++"."++integer_to_list(A),
+  N = atom_to_list(M)++"."++atom_to_list(F)++"."++integer_to_list(A),
   make_llvm_id(N).
 
 %%mk_num() -> integer_to_list(hipe_gensym:new_var(llvm)).
