@@ -7,40 +7,58 @@
 -include("../rtl/hipe_literals.hrl").
 -export([translate/2, fix_mfa_name/1]).
 
-%% -ifdef(AMD64_FCALLS_IN_REGISTER).
-%% -define(FCALLS, "fcalls").
-%% -else.
-%% -define(FCALLS, "undef").
-%% -endif.
 
-%% -ifdef(AMD64_HEAP_LIMIT_IN_REGISTER).
-%% -define(HEAP_LIMIT, "heap_limit").
-%% -else.
-%% -define(HEAP_LIMIT, "undef").
-%% -endif.
-
--define(HIPE_AMD64, true).
-
--ifdef(HIPE_AMD64).
+%%--------------------------------------------------------------------------%%
+%%---------------------Target Specific Stuff--------------------------------%%
+%%--------------------------------------------------------------------------%%
 -define(HIPE_X86_REGISTERS, hipe_amd64_registers).
--define(WORD_TYPE, #llvm_int{width=64}).
--else.
--define(HIPE_X86_REGISTERS, hipe_x86_registers).
--define(WORD_TYPE, #llvm_int{width=32}).
--endif.
-%-define(HIPE_X86_REGISTERS, hipe_amd64_registers).
-%-define(WORD_TYPE, #llvm_int{width=64}).
--define(WORD_TYPE_P, #llvm_pointer{type=?WORD_TYPE}).
-
+-define(WORD_TYPE, word_type()).
+-define(WORD_TYPE_P, word_type_p()).
 -define(FLOAT_TYPE, #llvm_double{}).
 -define(FLOAT_TYPE_P, #llvm_pointer{type=?FLOAT_TYPE}).
 -define(BYTE_TYPE, #llvm_int{width=8}).
 -define(BYTE_TYPE_P, #llvm_pointer{type=?BYTE_TYPE}).
--define(FUN_RETURN_TYPE,
-  #llvm_struct{type_list=[?WORD_TYPE, ?WORD_TYPE, ?WORD_TYPE]}).
--define(NR_PINNED_REGS, 2).
+-define(NR_PINNED_REGS, nr_pinned_regs()).
+-define(FUN_RETURN_TYPE, fun_return_type()).
+
+set_arch() ->
+  case get(hipe_target_arch) of
+    amd64 ->
+      put(target_word, #llvm_int{width=64}),
+      put(target_regs, hipe_amd64_registers),
+      put(target_pinned_regs, 2);
+    x86 ->
+      put(target_word, #llvm_int{width=32}),
+      put(target_regs, hipe_amd64_registers),
+      put(target_pinned_regs, 2);
+    Arch ->
+      exit({?MODULE, set_arch, {"Unsupported Target Architecture", Arch}})
+    end.
+
+word_type() ->
+  get(target_word).
+
+registers() ->
+  get(target_regs).
+
+nr_pinned_regs() ->
+  get(target_pinned_regs).
+
+word_type_p() ->
+  #llvm_pointer{type=word_type()}.
+
+fun_return_type() ->
+  RetTyp = lists:duplicate(?NR_PINNED_REGS+1, ?WORD_TYPE),
+  #llvm_struct{type_list=RetTyp}.
 
 
+%%--------------------------------------------------------------------------%%
+%% Main function for translating an RTL function to LLVM Assembly. Takes as
+%% input the RTL code and the variable indexes of possible garbage collection
+%% roots and returns the correspond LLVM, a dictionary with all the relocations
+%% in the code, the size and alignment of constants and a temporary labelmap
+%% that will be used in hipe_llvm_main in order to produce the final labelmap.
+%%--------------------------------------------------------------------------%%
 translate(RTL, Roots) ->
   Data = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
@@ -50,6 +68,7 @@ translate(RTL, Roots) ->
   {_Mod_Name, Fun_Name, _Arity} = fix_mfa_name(Fun),
   %% Init Unique Symbol Generator
   hipe_gensym:init(llvm),
+  set_arch(),
   put({llvm,label_count}, MaxLabel+1),
   %% Put first label of RTL code in process dictionary
   find_code_entry_label(Code),
@@ -143,9 +162,9 @@ alloca_dsts([D|Ds], Roots, Acc) ->
 
 
 %%----------------------------------------------------------------------------
+%% Translation of the linearized RTL Code. Each RTL instruction is translated
+%% to a list of LLVM Assembly instructions.
 %%----------------------------------------------------------------------------
-%%----------------------------------------------------------------------------
-
 translate_instr_list([], Acc, Relocs) ->
   {lists:reverse(lists:flatten(Acc)), Relocs};
 translate_instr_list([I|Is], Acc, Relocs) ->
@@ -665,15 +684,15 @@ switch_default_label() ->
     end,
   "%L"++integer_to_list(FirstLabel).
 
-%%-----------------------------------------------------------------------------
 
+%%-----------------------------------------------------------------------------
 %% Pass on RTL code in order to fix invoke and closure calls.
 %% TODO: merge the 2 passes in one.
+%%-----------------------------------------------------------------------------
 fix_code(Code) ->
   {Code1, FailLabels} = fix_invoke_calls(Code),
   Code2 = fix_closure_calls(Code1),
   {Code2, FailLabels}.
-
 
 %% When a call has a fail continuation label it must be extended with a normal
 %% continuation label to go with the LLVM's invoke instruction. Also all phi
@@ -803,10 +822,9 @@ create_fail_blocks(Label, FailLabels, Acc) ->
       create_fail_blocks(Label, RestFailLabels, Ins++Acc)
   end.
 
+
 %%----------------------------------------------------------------------------
-
-isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
-
+%%----------------------------------------------------------------------------
 trans_call_name(Name, Relocs, CallArgs, FinalArgs) ->
   case Name of
     PrimOp when is_atom(PrimOp) ->
@@ -894,6 +912,7 @@ store_fixed_regs(RegList, Name) ->
           RegList2),
   [I2, I1].
 
+isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
 
 make_llvm_id(Name) ->
   case Name of
