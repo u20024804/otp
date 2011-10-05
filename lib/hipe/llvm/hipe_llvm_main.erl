@@ -131,17 +131,10 @@ fix_opts(Opts) ->
 %%----------------------------------------------------------------------------
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
-%%fix_labels(TempLabelMap, Labels) ->
-%%  LabelsLength = length(Labels),
-%%  sort_switches([], LabelsLength),
-%%  Lengths = lists:map(fun export_length/1, TempLabelMap),
-%%  Labels2 = elf64_format:split_list(Labels, Lengths),
-%%  {_, Labels3} = lists:unzip(Labels2),
-%%  Labels3.
 
-%%export_length({_, L, []}) -> L;
-%%export_length({_, sorted, L, _}) -> round(L/8).
-
+%% Currently we can not handle more than one swich statements in one function.
+%% Thus, the code of this function does not have a lot of meaning.
+%% TODO: Fix Label Maps
 fix_labelmap(Relocs, TempLabelMap, LabelList, SwitchAddends) ->
   Switches = merge_switches(Relocs, SwitchAddends),
   LabelList2 = split_labels(LabelList, Switches),
