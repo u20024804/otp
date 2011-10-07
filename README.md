@@ -107,4 +107,4 @@ Copyright and License
    [2]: http://wiki.github.com/erlang/otp/submitting-patches
    [3]: http://www.erlang.org/faq.html
    [4]: http://github.com/yiannist/otp
-   [5]: http://github.com/yiannist/llvm-2.8
+   [5]: http://github.com/yiannist/llvm
