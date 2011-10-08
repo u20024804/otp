@@ -143,9 +143,7 @@ alloca_dsts([D|Ds], Roots, Acc) ->
             BYTE_TYPE_PP),
           I3 = hipe_llvm:mk_call([], false, [], [], #llvm_void{}, "@llvm.gcroot",
             [{BYTE_TYPE_PP, T1}, {?BYTE_TYPE_P, "@gc_metadata"}], []),
-          I4 = hipe_llvm:mk_store(?WORD_TYPE, "-5", ?WORD_TYPE_P, Name, [], [],
-            false),
-          alloca_dsts(Ds, Roots, [I1, I2, I3, I4 | Acc]);
+          alloca_dsts(Ds, Roots, [I1, I2, I3 | Acc]);
         false ->
           alloca_dsts(Ds, Roots, [I1|Acc])
       end;
