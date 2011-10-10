@@ -13,6 +13,11 @@
     br_cond_true_label/1,
     br_cond_false_label/1,
 
+    mk_indirectbr/3,
+    indirectbr_type/1,
+    indirectbr_address/1,
+    indirectbr_label_list/1,
+
     mk_switch/4,
     switch_type/1,
     switch_value/1,
@@ -368,6 +373,13 @@ br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
   False_label.
 
+%%
+%% indirectbr
+%%
+mk_indirectbr(Type, Address, Label_list) -> #llvm_indirectbr{type=Type, address=Address, label_list=Label_list}.
+indirectbr_type(#llvm_indirectbr{type=Type}) -> Type.
+indirectbr_address(#llvm_indirectbr{address=Address}) -> Address.
+indirectbr_label_list(#llvm_indirectbr{label_list=Label_list}) -> Label_list.
 
 %%
 %% invoke
@@ -936,6 +948,12 @@ pp_ins(Dev, I) ->
     #llvm_br_cond{} ->
       io:format(Dev, "br i1 ~s, label ~s, label ~s~n",
         [br_cond_cond(I), br_cond_true_label(I), br_cond_false_label(I)]);
+    #llvm_indirectbr{} ->
+      io:format(Dev, "indirectbr ", []),
+      pp_type(Dev, indirectbr_type(I)),
+      io:format(Dev, " ~s, [ ", [indirectbr_address(I)]),
+      pp_args(Dev, indirectbr_label_list(I)),
+      io:format(Dev, " ]~n", []);
     #llvm_operation{} ->
       io:format(Dev, "~s = ~s ", [operation_dst(I), operation_op(I)]),
       case op_has_options(operation_op(I)) of
@@ -1152,6 +1170,8 @@ pp_type(Dev, Type) ->
   case Type of
     #llvm_void{} ->
       io:format(Dev, "void", []);
+    #llvm_label_type{} ->
+      io:format(Dev, "label", []);
     %Integer
     #llvm_int{} ->
       io:format(Dev, "i~w", [int_width(Type)]);
