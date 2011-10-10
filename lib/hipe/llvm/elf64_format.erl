@@ -394,7 +394,7 @@ get_text_rodata_list(Elf) ->
   {_, LRodata} =
     get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
   %% Filter non-table symbols (Table symbols are prefixed with "table_")
-  Pred = fun({SymName, _}) -> string:str(SymName, "skata") > 0 end,
+  Pred = fun({SymName, _}) -> string:str(SymName, "table_") =:= 1 end,
   lists:filter(Pred, LRodata).
 
 
