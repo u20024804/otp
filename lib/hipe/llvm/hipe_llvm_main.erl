@@ -132,6 +132,7 @@ fix_opts(Opts) ->
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
 
+extract_switch_infos([], _S, _L) -> [];
 extract_switch_infos(Switches, Symbols, Labels) ->
   %% Extract slice-offsets list.
   {Names, Slices} = lists:unzip(Switches),
