@@ -393,16 +393,9 @@ get_text_rodata_list(Elf) ->
   %% Do the magic!
   {_, LRodata} =
     get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
-  %% Filter non-".rodata" symbols
-  Pred = fun({SymName, _}) -> SymName =:= ".rodata" end,
-  LRodata2 = lists:filter(Pred, LRodata),
-  %% Merge to one tuple and a list of addends
-  case LRodata2 of
-    [] ->
-      {".rodata", []};
-    Ros ->
-      hd(flatten_list(Ros))
-  end.
+  %% Filter non-table symbols (Table symbols are prefixed with "table_")
+  Pred = fun({SymName, _}) -> string:str(SymName, "skata") > 0 end,
+  lists:filter(Pred, LRodata).
 
 
 %% @spec get_text_symbol_info( binary(), binary(), binary(), binary(), binary(),
@@ -419,38 +412,41 @@ get_text_rodata_list(Elf) ->
 		     [{string(), integer()}], [{string(), integer()}] )
 			 -> { [{string(), integer()}], [{string(), integer()}] }.
 get_text_symbol_info(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc1, Acc2) ->
-  {Acc1, Acc2};
+  {lists:reverse(Acc1), lists:reverse(Acc2)}; % Reverse of Acc2 *is* essential!
 get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, OffAcc, RoAcc) ->
   %% Get Offset and Information about name
   Offset   = get_rela_entry_field(Rela, ?R_OFFSET),
   Info     = get_rela_entry_field(Rela, ?R_INFO),
-  Addend   = get_rela_entry_field(Rela, ?R_ADDEND),
+  %% Addend   = get_rela_entry_field(Rela, ?R_ADDEND),
   SymIndex = ?ELF64_R_SYM(Info), % Index in Symbol Table (.symtab)
   %% Get appropriate entry from Symbol Table
   SymTabEntry = get_symtab_entry(SymTab, ?ELF64_SYM_SIZE, SymIndex),
   %% Extract entry's type (it might be a section, function, notype etc.)
-  SInfo = get_symtab_entry_field(SymTabEntry, ?ST_INFO),
-  SType = ?ELF64_ST_TYPE(SInfo),
+  %% SInfo  = get_symtab_entry_field(SymTabEntry, ?ST_INFO),
+  %% SType  = ?ELF64_ST_TYPE(SInfo),
+  SValue = get_symtab_entry_field(SymTabEntry, ?ST_VALUE), % for switch-table
   %% Extract symbol's name
-  SymbolName =
-    case SType of
-      ?STT_SECTION -> %% Get name from Section Header Table (name of section)
-	Shndx = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
-	SHdrEntry = get_shdrtab_entry(SHdrTab, ?ELF64_SHDRENTRY_SIZE, Shndx),
-	SHdrName  = get_header_field(SHdrEntry, ?SH_NAME),
-	<<_Hdr:SHdrName/binary, Names/binary>> = ShStrTab,
-	bin_get_string(Names);
-      %% XXX: Maybe only catch STT_FUNC and STT_NOTYPE?
-      _ -> %%Get name from String Table (undefined symbol)
-	%% Extract SName (contains  offset of name in StrTab)
-	SymName = get_symtab_entry_field(SymTabEntry, ?ST_NAME),
-	<<_Hdr:SymName/binary, Names/binary>> = StrTab,
-	bin_get_string(Names)
-    end,
+  %% SymbolName =
+  %%   case SType of
+  %%     ?STT_SECTION -> %% Get name from Section Header Table (name of section)
+  %% 	Shndx = get_symtab_entry_field(SymTabEntry, ?ST_SHNDX),
+  %% 	SHdrEntry = get_shdrtab_entry(SHdrTab, ?ELF64_SHDRENTRY_SIZE, Shndx),
+  %% 	SHdrName  = get_header_field(SHdrEntry, ?SH_NAME),
+  %% 	<<_Hdr:SHdrName/binary, Names/binary>> = ShStrTab,
+  %% 	bin_get_string(Names);
+  %%     %% XXX: Maybe only catch STT_FUNC and STT_NOTYPE?
+  %%     _ ->
+  %% Get name from String Table (undefined symbol)
+  %% Extract SName (contains  offset of name in StrTab)
+  SymName = get_symtab_entry_field(SymTabEntry, ?ST_NAME),
+  <<_Hdr:SymName/binary, Names/binary>> = StrTab,
+  SymbolName = bin_get_string(Names),
+  %% end,
   %% Continue with next entries in Relocation "table"
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
   get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, More,
-		[{SymbolName, Offset} | OffAcc], [{SymbolName, Addend} | RoAcc]).
+		       [{SymbolName, Offset} | OffAcc],
+		       [{SymbolName, SValue} | RoAcc]).
 
 
 %%------------------------------------------------------------------------------
