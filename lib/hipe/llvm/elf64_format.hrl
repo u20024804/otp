@@ -24,13 +24,13 @@
 
 %%% @doc This header file contains very very useful macros for manipulating
 %%%      various segments of an ELF-64 formated object file, such as sizes,
-%%%      offsets and predefined constants. For further information about 
-%%%      each field take a quick look at 
+%%%      offsets and predefined constants. For further information about
+%%%      each field take a quick look at
 %%%      "[http://www.linuxjournal.com/article/1060?page=0,0]" that contains
 %%%      the current HP/Intel definition of the ELF-64 object file format.
 
 %%------------------------------------------------------------------------------
-%% 
+%%
 %%                        Elf64_format Header File
 %%
 %%------------------------------------------------------------------------------
@@ -55,8 +55,8 @@
 -define(ELF64_EHDR_SIZE, (?E_IDENT_SIZE + ?E_TYPE_SIZE + ?E_MACHINE_SIZE
 			 +?E_VERSION_SIZE + ?E_ENTRY_SIZE + ?E_PHOFF_SIZE
 			 +?E_SHOFF_SIZE + ?E_FLAGS_SIZE + ?E_EHSIZE_SIZE
-			 +?E_PHENTSIZE_SIZE + ?E_PHNUM_SIZE + ?E_SHENTSIZE_SIZE 
-			 +?E_SHNUM_SIZE + ?E_SHSTRNDX_SIZE) 
+			 +?E_PHENTSIZE_SIZE + ?E_PHNUM_SIZE + ?E_SHENTSIZE_SIZE
+			 +?E_SHNUM_SIZE + ?E_SHSTRNDX_SIZE)
        ). % 64 bytes
 
 -define(E_IDENT_SIZE,     (16 * ?ELF64_UNSIGNED_CHAR_SIZE) ). % 16 bytes
@@ -74,7 +74,7 @@
 -define(E_SHNUM_SIZE,     ?ELF64_HALF_SIZE).                  % 2 bytes
 -define(E_SHSTRNDX_SIZE,  ?ELF64_HALF_SIZE).                  % 2 bytes
 
-%% Useful arithmetics for computing byte offsets for various File Header 
+%% Useful arithmetics for computing byte offsets for various File Header
 %% entries from a File Header (erlang) binary
 -define(E_IDENT_OFFSET,     0).                                          % 0 bytes
 -define(E_TYPE_OFFSET,      (?E_IDENT_OFFSET + ?E_IDENT_SIZE) ).         % 16 bytes
@@ -91,7 +91,7 @@
 -define(E_SHNUM_OFFSET,     (?E_SHENTSIZE_OFFSET + ?E_SHENTSIZE_SIZE) ). % 60 bytes
 -define(E_SHSTRNDX_OFFSET,  (?E_SHNUM_OFFSET + ?E_SHNUM_SIZE) ).         % 62 bytes
 
-%% Name aliases of File Header fields information used in get_header_field 
+%% Name aliases of File Header fields information used in get_header_field
 %% function of elf64_format module.
 -define(E_IDENT,     {?E_IDENT_OFFSET, ?E_IDENT_SIZE}).
 -define(E_TYPE,      {?E_TYPE_OFFSET, ?E_TYPE_SIZE}).
@@ -151,9 +151,9 @@
 %%------------------------------------------------------------------------------
 -define(ELF64_SHDRENTRY_SIZE, (?SH_NAME_SIZE + ?SH_TYPE_SIZE + ?SH_FLAGS_SIZE
 			      +?SH_ADDR_SIZE + ?SH_OFFSET_SIZE + ?SH_SIZE_SIZE
-			      +?SH_LINK_SIZE + ?SH_INFO_SIZE 
-			      +?SH_ADDRALIGN_SIZE + ?SH_ENTSIZE_SIZE) 
-       ). % 64 bytes 
+			      +?SH_LINK_SIZE + ?SH_INFO_SIZE
+			      +?SH_ADDRALIGN_SIZE + ?SH_ENTSIZE_SIZE)
+       ). % 64 bytes
 
 -define(SH_NAME_SIZE,      ?ELF64_WORD_SIZE).  % 4 bytes
 -define(SH_TYPE_SIZE,      ?ELF64_WORD_SIZE).  % 4 bytes
@@ -166,7 +166,7 @@
 -define(SH_ADDRALIGN_SIZE, ?ELF64_XWORD_SIZE). % 8 bytes
 -define(SH_ENTSIZE_SIZE,   ?ELF64_XWORD_SIZE). % 8 bytes
 
-%% Useful arithmetics for computing byte offsets for various fields from a 
+%% Useful arithmetics for computing byte offsets for various fields from a
 %% Section Header Entry (erlang) binary
 -define(SH_NAME_OFFSET,      0).                                           % 0 bytes
 -define(SH_TYPE_OFFSET,      (?SH_NAME_OFFSET + ?SH_NAME_SIZE) ).          % 4 bytes
@@ -179,8 +179,8 @@
 -define(SH_ADDRALIGN_OFFSET, (?SH_INFO_OFFSET + ?SH_INFO_SIZE) ).          % 48 bytes
 -define(SH_ENTSIZE_OFFSET,   (?SH_ADDRALIGN_OFFSET + ?SH_ADDRALIGN_SIZE) ).% 56 bytes
 
-%% Name aliases of Section Header Table entry information used in 
-%% get_shdrtab_entry function of elf64_format module. 
+%% Name aliases of Section Header Table entry information used in
+%% get_shdrtab_entry function of elf64_format module.
 -define(SH_NAME,      {?SH_NAME_OFFSET, ?SH_NAME_SIZE}).
 -define(SH_TYPE,      {?SH_TYPE_OFFSET, ?SH_TYPE_SIZE}).
 -define(SH_FLAGS,     {?SH_FLAGS_OFFSET, ?SH_FLAGS_SIZE}).
@@ -254,7 +254,7 @@
 %% ELF-64 Symbol Table Entries
 %%------------------------------------------------------------------------------
 -define(ELF64_SYM_SIZE, (?ST_NAME_SIZE + ?ST_INFO_SIZE + ?ST_OTHER_SIZE
-			+?ST_SHNDX_SIZE + ?ST_VALUE_SIZE + ?ST_SIZE_SIZE) 
+			+?ST_SHNDX_SIZE + ?ST_VALUE_SIZE + ?ST_SIZE_SIZE)
        ). % 24 bytes
 
 -define(ST_NAME_SIZE,  ?ELF64_WORD_SIZE).          % 4 bytes
@@ -308,9 +308,9 @@
 %%------------------------------------------------------------------------------
 %% ELF-64 Relocation Entries
 %%------------------------------------------------------------------------------
--define(ELF64_REL_SIZE,  (?R_OFFSET_SIZE + ?R_INFO_SIZE) ).  % 16 bytes 
--define(ELF64_RELA_SIZE, (?R_OFFSET_SIZE + ?R_INFO_SIZE + ?R_ADDEND_SIZE) 
-       ). % 24 bytes 
+-define(ELF64_REL_SIZE,  (?R_OFFSET_SIZE + ?R_INFO_SIZE) ).  % 16 bytes
+-define(ELF64_RELA_SIZE, (?R_OFFSET_SIZE + ?R_INFO_SIZE + ?R_ADDEND_SIZE)
+       ). % 24 bytes
 
 -define(R_OFFSET_SIZE, ?ELF64_ADDR_SIZE).   % 8 bytes
 -define(R_INFO_SIZE,   ?ELF64_XWORD_SIZE).  % 8 bytes
@@ -338,7 +338,7 @@
 -define(ELF64_PHDR_SIZE, (?P_TYPE_SIZE + ?P_FLAGS_SIZE + ?P_OFFSET_SIZE
 			 +?P_VADDR_SIZE + ?P_PADDR_SIZE + ?P_FILESZ_SIZE
 			 +?P_MEMSZ_SIZE + ?P_ALIGN_SIZE)
-       ). % 56 bytes 
+       ). % 56 bytes
 
 -define(P_TYPE_SIZE,   ?ELF64_WORD_SIZE).  % 4 bytes
 -define(P_FLAGS_SIZE,  ?ELF64_WORD_SIZE).  % 4 bytes
@@ -393,14 +393,14 @@
 %%------------------------------------------------------------------------------
 %% ELF-64 Dynamic Table
 %%------------------------------------------------------------------------------
--define(ELF64_DYN_SIZE, (?D_TAG_SIZE + ?D_VAL_PTR_SIZE) ). % 16 bytes 
+-define(ELF64_DYN_SIZE, (?D_TAG_SIZE + ?D_VAL_PTR_SIZE) ). % 16 bytes
 
 -define(D_TAG_SIZE, ?ELF64_SXWORD_SIZE).   % 8 bytes
 -define(D_VAL_PTR_SIZE, ?ELF64_ADDR_SIZE). % 8 bytes
 
 %% Offsets of each field in Dynamic Table entry in binary
 -define(D_TAG_OFFSET,     0).                             % 0 bytes
--define(D_VAL_PTR_OFFSET, (?D_TAG_OFFSET + ?D_TAG_SIZE)). % 8 bytes 
+-define(D_VAL_PTR_OFFSET, (?D_TAG_OFFSET + ?D_TAG_SIZE)). % 8 bytes
 
 %% Name aliases for each field of a Dynamic Table entry information
 -define(D_TAG,     {?D_TAG_OFFSET, ?D_TAG_SIZE} ).
@@ -443,11 +443,11 @@
 
 
 %%------------------------------------------------------------------------------
-%% ELF-64 GCC Exception Table 
+%% ELF-64 GCC Exception Table
 %%------------------------------------------------------------------------------
 
 %% The DWARF Exception Header Encoding is used to describe the type of data used
-%% in the .eh_frame_hdr (and .gcc_except_table) section. The upper 4 bits 
+%% in the .eh_frame_hdr (and .gcc_except_table) section. The upper 4 bits
 %% indicate how the value is to be applied. The lower 4 bits indicate the format
 %% of the data.
 
@@ -465,7 +465,7 @@
 %% DWARF Exception Header application
 -define(DW_EH_PE_absptr,  16#00). % Value is used with no modification.
 -define(DW_EH_PE_pcrel,   16#10). % Value is relative to the current PC.
--define(DW_EH_PE_datarel, 16#30). % Value is relative to the beginning of the 
+-define(DW_EH_PE_datarel, 16#30). % Value is relative to the beginning of the
                                   %   section.
 
 
