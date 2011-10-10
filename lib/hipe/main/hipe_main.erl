@@ -353,8 +353,8 @@ icode_ssa_unconvert(IcodeSSA, Options) ->
 icode_to_llvm(MFA, Icode, Options, Servers) ->
   debug("ICODE -> LLVM: ~w, ~w~n", [MFA, hash(Icode)], Options),
   %% Fix Options for the llvm back end
-  Options2 = llvm_fix_options(Icode, Options),
-  LinearRTL = translate_to_rtl(Icode, Options2),
+  %Options2 = llvm_fix_options(Icode, Options),
+  LinearRTL = translate_to_rtl(Icode, Options),
   pp(LinearRTL, MFA, rtl_linear, pp_rtl_linear, Options, Servers),
   RtlCfg  = initialize_rtl_cfg(LinearRTL, Options),
   %% hipe_rtl_cfg:pp(RtlCfg),
