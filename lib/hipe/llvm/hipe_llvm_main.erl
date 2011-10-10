@@ -31,8 +31,9 @@ rtl_to_native(RTL, Roots, _Options) ->
   %% Get Labels info
   Labels = elf64_format:get_label_list(ObjBin),
   SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
+  SwitchInfos = extract_switch_infos(SwitchAddends, Relocs, Labels),
   %% Create final LabelMap
-  LabelMap = fix_labelmap(Relocs, TempLabelMap, Labels, SwitchAddends),
+  LabelMap = fix_labelmap(SwitchInfos, TempLabelMap),
   %% Create relocation list
   {Relocs1, Closures} = fix_relocations(Relocs, RelocsDict, Mod_Name),
   SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs, Closures),
@@ -126,61 +127,74 @@ llvmc(Fun_Name, Opts) ->
 fix_opts(Opts) ->
   lists:foldl(fun(X, Acc) -> Acc++" "++X end, "", Opts).
 
-%%----------------------------------------------------------------------------
 
 %%----------------------------------------------------------------------------
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
 
-%% Currently we can not handle more than one swich statements in one function.
-%% Thus, the code of this function does not have a lot of meaning.
-%% TODO: Fix Label Maps
-fix_labelmap(Relocs, TempLabelMap, LabelList, SwitchAddends) ->
-  Switches = merge_switches(Relocs, SwitchAddends),
-  LabelList2 = split_labels(LabelList, Switches),
-  A = lists:zip(TempLabelMap, LabelList2),
-  lists:map(fun fix_labelmap2/1, A).
+extract_switch_infos(Switches, Symbols, Labels) ->
+  %% Extract slice-offsets list.
+  {Names, Slices} = lists:unzip(Switches),
+  %% Convert slice-offsets in slice-indexes.
+  Slices2 = lists:map(fun(X) -> X div 8 end, Slices),
+  %% Perform slicing based on slice-indexes.
+  SlicedLabels = slice_labels(Labels, Slices2),
+  %% Zip back! (combine with names)
+  Sw = lists:zip(Names, SlicedLabels),
+  %% Create list [{SwitchName, SwitchNameOffset, OffsetsOfValues}]
+  create_switch_list(Sw, Symbols).
 
-fix_labelmap2({M, Labels}) ->
-  case M of
-    {_, _, []} ->
+
+create_switch_list(Switches, Symbols) ->
+  create_switch_list(Switches, Symbols, []).
+
+create_switch_list([], _Symbols, Acc) ->
+  lists:reverse(Acc);
+create_switch_list([ {TabName, Labels}|MoreSwitches ], Symbols, Acc) ->
+  %% Extract Offset for "TabName" from "Symbols"
+  %% XXX: Switch symbols should be referenced only once in the code!
+  %%      (error-prone)
+  {TabName, [SymbolOffset]} = lists:keyfind(TabName, 1, Symbols),
+  %% Continue with more Switches
+  create_switch_list(MoreSwitches, Symbols,
+		     [ {TabName, SymbolOffset, Labels}|Acc ]).
+
+
+slice_labels(Labels, Slices) ->
+  %% Convert slice indexes to number of elements (per list).
+  ListOfLengths = convert_slice_indexes(Slices, length(Labels), []),
+  %% Perform slicing based on number of elements (per list).
+  elf64_format:split_list(Labels, ListOfLengths).
+
+
+%% [0,20,30] out of 42 ==> [20,10,12] (first list should be ordered!)
+convert_slice_indexes([X], N, Acc) ->
+  lists:reverse([N-X|Acc]);
+convert_slice_indexes([X,Y|More], N, Acc) ->
+  convert_slice_indexes([Y|More], N, [Y-X|Acc]).
+
+
+%% Merge temporary LabelMap with Jump Table info that is extracted from
+%% the object file in order to create the final LabelMap, to be loaded
+%% to the runtime.
+fix_labelmap([], []) -> [];
+fix_labelmap(SwitchInfos, TempLabelMap) ->
+  SortedSwitches = lists:keysort(1, SwitchInfos),
+  SortedLabelMap = lists:keysort(1, TempLabelMap),
+  lists:zipwith(fun merge_labelmap/2, SortedSwitches, SortedLabelMap).
+
+
+merge_labelmap({Name, _, Labels}, TempLabelMap) ->
+  case TempLabelMap of
+    {Name, _, _, []} ->
       [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
-    {_, sorted, Length, SortedBy} ->
-      [{sorted, Length, lists:zip(SortedBy,Labels)}]
+    {Name, _, sorted, Length, SortedBy} ->
+      [{sorted, Length, lists:zip(SortedBy,Labels)}];
+    _ ->
+      exit({?MODULE, merge_labelmap, "No match in switch infos with temporary
+          label map"})
   end.
 
-merge_switches(_Relocs, []) -> [];
-merge_switches(_Relocs, {".rodata", []}) -> [];
-merge_switches(Relocs, {".rodata", Addends}) ->
-  case lists:keyfind(".rodata", 1, Relocs) of
-    false ->
-      [];
-    {".rodata", Offsets} ->
-      lists:zip(Offsets,Addends)
-  end.
-
-split_labels(LabelList, Switches) ->
-  LabelsLength = length(LabelList),
-  Switches1 = lists:keysort(2, Switches),
-  Switches2 = find_switch_length(Switches1, LabelsLength),
-  {Offsets, Lengths} = lists:unzip(Switches2),
-  LabelList2 = elf64_format:split_list(LabelList, Lengths),
-  Switches3 = lists:zip(Offsets, LabelList2),
-  Switches4 = lists:keysort(1, Switches3),
-  {_, LabelList3} =  lists:unzip(Switches4),
-  LabelList3.
-
-
-find_switch_length(Switches, LabelsLength) ->
-  Switches1 = lists:map(fun ({X,Y}) -> {X, Y div 8} end, Switches),
-  find_switch_length(Switches1, LabelsLength, []).
-find_switch_length([], _LabelsLength, Acc) ->
-  Acc;
-find_switch_length([{Offset, Addend}], LabelsLength, Acc) ->
-  lists:reverse([{Offset, LabelsLength-Addend}|Acc]);
-find_switch_length([{Offset1, Addend1}, {Offset2, Addend2}|Rest], LL, Acc) ->
-  find_switch_length([{Offset2, Addend2}|Rest], LL, [{Offset1,
-        Addend2-Addend1}|Acc]).
 
 %% Correlate object file relocation symbols with info from translation to llvm
 %% code. Also split relocations according to their type, as expected by the
@@ -188,6 +202,7 @@ find_switch_length([{Offset1, Addend1}, {Offset2, Addend2}|Rest], LL, Acc) ->
 fix_relocations(Relocs, RelocsDict, ModName) ->
   Relocs1 = fix_rodata(Relocs),
   fix_relocs(Relocs1, RelocsDict, ModName, [], [], [], [], []).
+
 
 fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3, Acc4) ->
   Relocs = [{0, Acc0}, {1, Acc1}, {2, Acc2}, {3, Acc3}],
@@ -199,7 +214,6 @@ fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3, Acc4) ->
         end
     end,
     {lists:filter(NotEmpty, Relocs), Acc4};
-
 fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
   Acc4) ->
   case dict:fetch(Name, RelocsDict) of
@@ -221,15 +235,16 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
         A}|Acc4]);
     %% MFA calls to functions in the same module are of type 3, while all
     %% other MFA calls are of type 2.
-    {call, {ModName,F,A}=MFA} ->
+    {call, {ModName,_F,_A}=MFA} ->
       NR = {MFA, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
-    {call, {M,F,A}=MFA} ->
+    {call, MFA} ->
       NR = {MFA, Offset},
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, [NR|Acc2], Acc3, Acc4);
     Other ->
       exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary", Other}})
   end.
+
 
 %% Temporary function that gives correct names to symbols that correspond to
 %% .rodata section, which are produced from switch statement translation.
@@ -251,9 +266,11 @@ fix_rodata_1([O|Os], Base, Acc) ->
   NewName = ".rodata"++integer_to_list(Base),
   fix_rodata_1(Os, Base+1, [{NewName, [O]}|Acc]).
 
+
 %%----------------------------------------------------------------------------
 %% Fixing Stack Descriptors
 %%----------------------------------------------------------------------------
+
 closures_offsets_arity([], SDescs) -> SDescs;
 closures_offsets_arity(Closures, SDescs) ->
   {_,Offsets1} = lists:unzip(SDescs),
@@ -309,6 +326,7 @@ calls_with_stack_args(Dict) ->
     end,
   lists:map(FindNameArity, Calls2).
 
+
 %% This functions extracts the stack arity and the offset in the code of the
 %% calls that have stack arguments.
 calls_offsets_arity(Relocs, CallsWithStackArgs) ->
@@ -333,8 +351,10 @@ calls_offsets_arity(Relocs, CallsWithStackArgs) ->
     end, CallsWithStackArgs),
   lists:flatten(OffsetsArity1).
 
+
 fix_sdescs1(SDescs, OffsetsArity) ->
   lists:foldl(fun fix_sdescs2/2, SDescs, OffsetsArity).
+
 
 fix_sdescs2(OffsetsArity, SDescs) ->
   lists:foldl(
