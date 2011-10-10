@@ -12,6 +12,7 @@
 -record(llvm_ret, {ret_list=[]}).
 -record(llvm_br, {dst}).
 -record(llvm_br_cond, {'cond', true_label, false_label}).
+-record(llvm_indirectbr, {type, address, label_list}).
 -record(llvm_switch, {type, value, default_label, value_label_list=[]}).
 -record(llvm_invoke, {dst, cconv=[], ret_attrs=[], type, fnptrval, arglist=[],
     fn_attrs=[], to_label, unwind_label}).
@@ -74,6 +75,7 @@
 
 %% Types
 -record(llvm_void, {}).
+-record(llvm_label_type, {}).
 -record(llvm_int, {width}).
 -record(llvm_float, {}).
 -record(llvm_double, {}).
