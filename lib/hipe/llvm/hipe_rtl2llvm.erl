@@ -672,21 +672,22 @@ trans_switch(I, Relocs) ->
   _Src = hipe_rtl:switch_src(I),
   {Src, I1} = trans_src(_Src),
   LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
-  ValueList = lists:map(fun integer_to_list/1, lists:seq(0,
-                        length(LabelList)-1)),
-  ValueLabelList = lists:zip(ValueList, LabelList),
-  I2 = hipe_llvm:mk_switch(?WORD_TYPE, Src, switch_default_label(),
-                             ValueLabelList),
-  {[I2, I1], Relocs}.
+  NrLabels = length(LabelList),
+  TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
+  TableTypeP = hipe_llvm:mk_pointer(TableType),
+  TypedLabelList = lists:map(fun(X) -> {#llvm_label_type{}, X} end, LabelList),
+  T1 = mk_temp(),
+  {Src2, []} = trans_dst(_Src),
+  TableName = "@table_"++tl(Src2),
+  I2 = hipe_llvm:mk_getelementptr(T1, TableTypeP, TableName,
+    [{?WORD_TYPE, "0"}, {?WORD_TYPE, Src}], false),
+  T2 = mk_temp(),
+  BYTE_TYPE_PP = hipe_llvm:mk_pointer(?BYTE_TYPE_P),
+  I3 = hipe_llvm:mk_load(T2, BYTE_TYPE_PP, T1, [], [], false),
+  I4 = hipe_llvm:mk_indirectbr(?BYTE_TYPE_P, T2, TypedLabelList),
+  Relocs2 = relocs_store(TableName , {switch, {TableType, LabelList}}, Relocs),
+  {[I4, I3, I2, I1], Relocs2}.
 
-switch_default_label() ->
-  FirstLabel =
-    case get(first_label) of
-      undefined -> exit({?MODULE, switch_default_label, "No first_label in
-            process dictionary"});
-      Value -> Value
-    end,
-  "%L"++integer_to_list(FirstLabel).
 
 
 %%-----------------------------------------------------------------------------
@@ -1309,7 +1310,7 @@ relocs_to_list(Relocs) ->
 handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   RelocsList = relocs_to_list(Relocs),
   %% Seperate Relocations according to their type
-  {CallList, AtomList, ClosureList} = seperate_relocs(RelocsList),
+  {CallList, AtomList, ClosureList, JumpTables} = seperate_relocs(RelocsList),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, AtomList),
   %% Create code to create local name for atoms
@@ -1329,6 +1330,8 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
+  %% Create code to create jump tables
+  JumpTableDecl = declare_jump_tables(JumpTables, Fun),
   %% Enter constants to relocations
   Relocs1 = lists:foldl(fun const_to_dict/2, Relocs, ConstLabels),
   %% Temporary Store inc_stack and llvm_fix_pinned_regs to Dictionary
@@ -1342,20 +1345,27 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   TempLabelMap = lists:map(fun create_label_map/1, SwitchValues),
   %% Store Swich Jump Tables to reloactions
   Relocs4 = labels_to_dict(TempLabelMap, Relocs3),
-  ExternalDeclarations = AtomDecl++ClosureDecl++ConstDecl++FunDecl,
+  ExternalDeclarations =
+    AtomDecl++ClosureDecl++ConstDecl++FunDecl++JumpTableDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
   {Relocs4, ExternalDeclarations, LocalVariables, TempLabelMap}.
 
-%%  Seperate Relocations found in the code to calls, atoms and closures
-seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], []).
+%% Seperate Relocations found in the code to calls, atoms, closures and
+%% jump tables.
+seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], [], []).
 
-seperate_relocs([], CallAcc, AtomAcc, ClosureAcc) ->
-  {CallAcc, AtomAcc, ClosureAcc};
-seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc) ->
+seperate_relocs([], CallAcc, AtomAcc, ClosureAcc, JmpTableAcc) ->
+  {CallAcc, AtomAcc, ClosureAcc, JmpTableAcc};
+seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc, JmpTableAcc) ->
   case R of
-    {_,{call,_}} -> seperate_relocs(Rs, [R|CallAcc], AtomAcc, ClosureAcc);
-    {_,{atom,_}} -> seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc);
-    {_,{closure,_}} -> seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc])
+    {_,{call,_}} ->
+      seperate_relocs(Rs, [R|CallAcc], AtomAcc, ClosureAcc, JmpTableAcc);
+    {_,{atom,_}} ->
+      seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc, JmpTableAcc);
+    {_,{closure,_}} ->
+      seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc], JmpTableAcc);
+    {_,{switch,_}} ->
+      seperate_relocs(Rs, CallAcc, AtomAcc, ClosureAcc, [R|JmpTableAcc])
   end.
 
 %% External declaration of an atom
@@ -1377,6 +1387,22 @@ load_closure({ClosureName, _})->
   Dst = "%"++ClosureName++"_var",
   Name = "@"++ClosureName,
   hipe_llvm:mk_conversion(Dst, ptrtoint, ?BYTE_TYPE_P, Name, ?WORD_TYPE).
+
+declare_jump_tables(JumpTableList, Fun) ->
+  FunName = trans_mfa_name(Fun),
+  Fun1 = fun(X) -> declare_jump_table(X, FunName) end,
+  lists:map(Fun1, JumpTableList).
+
+declare_jump_table({Name, {switch, {TableType, LabelList}}}, FunName) ->
+  Fun1 =
+    fun(X) ->
+        "i8* blockaddress(@"++FunName++", "++X++")"
+    end,
+  List2 = lists:map(Fun1, LabelList),
+  List3 = string:join(List2, ",\n"),
+  List4 = "[\n" ++ List3 ++ "\n]\n",
+  hipe_llvm:mk_const_decl(Name, "constant", TableType, List4).
+
 
 %% A call is treated as non external only in a case of a recursive function
 is_external_call({_, {call, Fun}}, Fun) -> false;
@@ -1431,26 +1457,29 @@ data_from_switches([I|Is], Data, Sorted) ->
           hipe_consttab:insert_sorted_block(
             Data, word, LMap, SortOrder)
       end,
-      data_from_switches(Is, NewData, [{JTabLab, length(Labels),hipe_rtl:switch_sort_order(I)}|Sorted]);
+      _Src = hipe_rtl:switch_src(I),
+      {Src, []} = trans_dst(_Src),
+      TableName = "table_"++tl(Src),
+      data_from_switches(Is, NewData, [{TableName, JTabLab, length(Labels), hipe_rtl:switch_sort_order(I)}|Sorted]);
     _ -> data_from_switches(Is, Data, Sorted)
   end.
 
 create_label_map([]) -> [];
-create_label_map({_,_, []}=LM) -> LM;
-create_label_map({ConstNumber, _, SortOrder}) -> {ConstNumber, sorted,
+
+create_label_map({_, _, _ , []}=LM) -> LM;
+create_label_map({TableName, ConstNumber, _, SortOrder}) -> {TableName, ConstNumber, sorted,
     length(SortOrder)*8,SortOrder}.
+
 
 labels_to_dict(TempLabelMap, Dict) ->
   labels_to_dict(TempLabelMap, Dict, 0).
 
-labels_to_dict([], Dict,_) -> Dict;
-labels_to_dict([{ConstNumber, _, []}|Rest], Dict, RodataNumber) ->
-  Dict1 = dict:store(".rodata"++integer_to_list(RodataNumber), {constant,
-      ConstNumber}, Dict),
+labels_to_dict([], Dict, _) -> Dict;
+labels_to_dict([{TableName, ConstNumber, _, []}|Rest], Dict, RodataNumber) ->
+  Dict1 = dict:store(TableName, {constant, ConstNumber}, Dict),
   labels_to_dict(Rest, Dict1, RodataNumber+1);
-labels_to_dict([{ConstNumber, _, _, _}|Rest], Dict, RodataNumber) ->
-  Dict1 = dict:store(".rodata"++integer_to_list(RodataNumber), {constant,
-      ConstNumber}, Dict),
+labels_to_dict([{TableName, ConstNumber, _, _, _}|Rest], Dict, RodataNumber) ->
+  Dict1 = dict:store(TableName, {constant, ConstNumber}, Dict),
   labels_to_dict(Rest, Dict1, RodataNumber+1).
 
 
@@ -1476,7 +1505,6 @@ load_constant(Label) ->
   Dst = "%DL"++integer_to_list(Label)++"_var",
   Name = "@DL"++integer_to_list(Label),
   hipe_llvm:mk_conversion(Dst, ptrtoint, ?BYTE_TYPE_P, Name, ?WORD_TYPE).
-
 
 %% Store external constants and calls to dictionary
 const_to_dict(Elem, Dict) ->
