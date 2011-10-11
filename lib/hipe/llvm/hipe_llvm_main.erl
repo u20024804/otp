@@ -136,8 +136,7 @@ extract_switch_infos([], _S, _L) -> [];
 extract_switch_infos(Switches, Symbols, Labels) ->
   %% Extract slice-offsets list.
   %% io:format("Switches: ~w~n", [Switches]),
-  Ord = fun ({_,X}, {_,Y}) -> X =< Y end,
-  Switches2 = lists:sort(Ord, Switches), % Order "Switches"!
+  Switches2 = lists:ukeysort(2, Switches), % Order "Switches"!
   {Names, Slices} = lists:unzip(Switches2),
   %% io:format("Names: ~w~nSlices: ~w~n", [Names, Slices]),
   %% Convert slice-offsets in slice-indexes.
@@ -146,7 +145,7 @@ extract_switch_infos(Switches, Symbols, Labels) ->
   SlicedLabels = slice_labels(Labels, Slices2),
   %% Zip back! (combine with names)
   Sw = lists:zip(Names, SlicedLabels),
-  %% Create list [{SwitchName, SwitchNameOffset, OffsetsOfValues}]
+  %% Create list [{SwitchName, SwitchNameOffsets, OffsetsOfValues}]
   create_switch_list(Sw, Symbols).
 
 
@@ -159,7 +158,7 @@ create_switch_list([ {TabName, Labels}|MoreSwitches ], Symbols, Acc) ->
   %% Extract Offset for "TabName" from "Symbols"
   %% XXX: Switch symbols should be referenced only once in the code!
   %%      (error-prone)
-  {TabName, [SymbolOffset]} = lists:keyfind(TabName, 1, Symbols),
+  {TabName, SymbolOffset} = lists:keyfind(TabName, 1, Symbols),
   %% Continue with more Switches
   create_switch_list(MoreSwitches, Symbols,
 		     [ {TabName, SymbolOffset, Labels}|Acc ]).
@@ -169,7 +168,7 @@ slice_labels(Labels, Slices) ->
   %% Convert slice indexes to number of elements (per list).
   ListOfLengths = convert_slice_indexes(Slices, length(Labels), []),
   %% Perform slicing based on number of elements (per list).
-  %%io:format("Labels: ~w,~nIndexes: ~w~n", [Labels, ListOfLengths]),
+  %% io:format("Labels: ~w,~nIndexes: ~w~n", [Labels, ListOfLengths]),
   elf64_format:split_list(Labels, ListOfLengths).
 
 
