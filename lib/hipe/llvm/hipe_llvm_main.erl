@@ -135,7 +135,11 @@ fix_opts(Opts) ->
 extract_switch_infos([], _S, _L) -> [];
 extract_switch_infos(Switches, Symbols, Labels) ->
   %% Extract slice-offsets list.
-  {Names, Slices} = lists:unzip(Switches),
+  %% io:format("Switches: ~w~n", [Switches]),
+  Ord = fun ({_,X}, {_,Y}) -> X =< Y end,
+  Switches2 = lists:sort(Ord, Switches), % Order "Switches"!
+  {Names, Slices} = lists:unzip(Switches2),
+  %% io:format("Names: ~w~nSlices: ~w~n", [Names, Slices]),
   %% Convert slice-offsets in slice-indexes.
   Slices2 = lists:map(fun(X) -> X div 8 end, Slices),
   %% Perform slicing based on slice-indexes.
@@ -165,10 +169,13 @@ slice_labels(Labels, Slices) ->
   %% Convert slice indexes to number of elements (per list).
   ListOfLengths = convert_slice_indexes(Slices, length(Labels), []),
   %% Perform slicing based on number of elements (per list).
+  %%io:format("Labels: ~w,~nIndexes: ~w~n", [Labels, ListOfLengths]),
   elf64_format:split_list(Labels, ListOfLengths).
 
 
 %% [0,20,30] out of 42 ==> [20,10,12] (first list should be ordered!)
+convert_slice_indexes([], _, _) ->
+  [];
 convert_slice_indexes([X], N, Acc) ->
   lists:reverse([N-X|Acc]);
 convert_slice_indexes([X,Y|More], N, Acc) ->
