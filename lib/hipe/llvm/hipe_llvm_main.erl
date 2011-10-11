@@ -31,7 +31,7 @@ rtl_to_native(RTL, Roots, _Options) ->
   %% Get Labels info
   Labels = elf64_format:get_label_list(ObjBin),
   SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
-  SwitchInfos = extract_switch_infos(SwitchAddends, Relocs, Labels),
+  SwitchInfos = extract_switch_infos(SwitchAddends, Labels),
   %% Create final LabelMap
   LabelMap = fix_labelmap(SwitchInfos, TempLabelMap),
   %% Create relocation list
@@ -132,53 +132,18 @@ fix_opts(Opts) ->
 %% Functions to manage relocations
 %%----------------------------------------------------------------------------
 
-extract_switch_infos([], _S, _L) -> [];
-extract_switch_infos(Switches, Symbols, Labels) ->
-  %% Extract slice-offsets list.
+extract_switch_infos([], _L) -> [];
+extract_switch_infos(Switches, Labels) ->
+  %% Switches = [{SwitchName, ValueOffsets, Size}]
   %% io:format("Switches: ~w~n", [Switches]),
-  Switches2 = lists:ukeysort(2, Switches), % Order "Switches"!
-  {Names, Slices} = lists:unzip(Switches2),
-  %% io:format("Names: ~w~nSlices: ~w~n", [Names, Slices]),
-  %% Convert slice-offsets in slice-indexes.
-  Slices2 = lists:map(fun(X) -> X div 8 end, Slices),
-  %% Perform slicing based on slice-indexes.
-  SlicedLabels = slice_labels(Labels, Slices2),
-  %% Zip back! (combine with names)
-  Sw = lists:zip(Names, SlicedLabels),
-  %% Create list [{SwitchName, SwitchNameOffsets, OffsetsOfValues}]
-  create_switch_list(Sw, Symbols).
-
-
-create_switch_list(Switches, Symbols) ->
-  create_switch_list(Switches, Symbols, []).
-
-create_switch_list([], _Symbols, Acc) ->
-  lists:reverse(Acc);
-create_switch_list([ {TabName, Labels}|MoreSwitches ], Symbols, Acc) ->
-  %% Extract Offset for "TabName" from "Symbols"
-  %% XXX: Switch symbols should be referenced only once in the code!
-  %%      (error-prone)
-  {TabName, SymbolOffset} = lists:keyfind(TabName, 1, Symbols),
-  %% Continue with more Switches
-  create_switch_list(MoreSwitches, Symbols,
-		     [ {TabName, SymbolOffset, Labels}|Acc ]).
-
-
-slice_labels(Labels, Slices) ->
-  %% Convert slice indexes to number of elements (per list).
-  ListOfLengths = convert_slice_indexes(Slices, length(Labels), []),
-  %% Perform slicing based on number of elements (per list).
-  %% io:format("Labels: ~w,~nIndexes: ~w~n", [Labels, ListOfLengths]),
-  elf64_format:split_list(Labels, ListOfLengths).
-
-
-%% [0,20,30] out of 42 ==> [20,10,12] (first list should be ordered!)
-convert_slice_indexes([], _, _) ->
-  [];
-convert_slice_indexes([X], N, Acc) ->
-  lists:reverse([N-X|Acc]);
-convert_slice_indexes([X,Y|More], N, Acc) ->
-  convert_slice_indexes([Y|More], N, [Y-X|Acc]).
+  %% Sort "Switches" based on "ValueOffsets"
+  OffsetSortedSw = lists:ukeysort(2, Switches),
+  %% Unzip offset-sorted list of "Switches"
+  {Names, Offsets, SwitchSizeList} = lists:unzip3(OffsetSortedSw),
+  %% Associate switch names with labels
+  L = elf64_format:split_list(Labels, SwitchSizeList),
+  %% Zip back! (to [{SwitchName, Offsets, Values}])
+  lists:zip3(Names, Offsets, L).
 
 
 %% Merge temporary LabelMap with Jump Table info that is extracted from
@@ -188,15 +153,24 @@ fix_labelmap([], []) -> [];
 fix_labelmap(SwitchInfos, TempLabelMap) ->
   SortedSwitches = lists:keysort(1, SwitchInfos),
   SortedLabelMap = lists:keysort(1, TempLabelMap),
-  lists:zipwith(fun merge_labelmap/2, SortedSwitches, SortedLabelMap).
+  Merged = lists:zipwith(fun merge_labelmap/2, SortedSwitches, SortedLabelMap),
+  SortedMerged = lists:keysort(1, Merged),
+  Fun1 =
+    fun(X) ->
+        case X of
+          {_,B,C,D} -> {B,C,D};
+          {_,B,C} -> {B,C}
+        end
+    end,
+  lists:map(Fun1, SortedMerged).
 
 
 merge_labelmap({Name, _, Labels}, TempLabelMap) ->
   case TempLabelMap of
-    {Name, _, _, []} ->
-      [{unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)}];
-    {Name, _, sorted, Length, SortedBy} ->
-      [{sorted, Length, lists:zip(SortedBy,Labels)}];
+    {Name, JTLabNum, _, []} ->
+      {JTLabNum, unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)};
+    {Name, JTLabNum, sorted,  Length, SortedBy} ->
+      {JTLabNum, sorted, Length, lists:zip(SortedBy, Labels)};
     _ ->
       exit({?MODULE, merge_labelmap, "No match in switch infos with temporary
           label map"})
