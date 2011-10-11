@@ -394,23 +394,22 @@ get_text_rodata_list(Elf) ->
   {_, LRodata} =
     get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
   %% Filter non-table symbols (Table symbols are prefixed with "table_")
-  Pred = fun({SymName, _}) -> string:str(SymName, "table_") =:= 1 end,
+  Pred = fun({SymName, _, _}) -> string:str(SymName, "table_") =:= 1 end,
   lists:filter(Pred, LRodata).
 
 
 %% @spec get_text_symbol_info( binary(), binary(), binary(), binary(), binary(),
-%%	                      [{string(), integer()}], [{string(), integer()}] )
-%%                       -> { [{string(), integer()}], [{string(), integer()}] }.
+%%	            [{string(), integer()}], [{string(), integer(), integer()}] )
+%%             -> { [{string(), integer()}], [{string(), integer(), integer()}] }.
 %% @doc Extracts information from .text relocations. Both about the Offsets of
 %%      the relocations of the code ([ {`SymbolName', [`Offset']} ]) and about
 %%      the existence of ".rodata" relocations indicating that there exist
 %%      case/switch statements in the code and there Addend in .rela.rodata
-%%      expressing the first pattern matching relocation of each case statement
-%%      ({ ".rodata", [`Addend'] }).
+%%      expressing the first pattern matching relocation of each case statement.
 
 -spec get_text_symbol_info( binary(), binary(), binary(), binary(), binary(),
-		     [{string(), integer()}], [{string(), integer()}] )
-			 -> { [{string(), integer()}], [{string(), integer()}] }.
+		     [{string(), integer()}], [{string(), integer(), integer()}] )
+	        -> { [{string(), integer()}], [{string(), integer(), integer()}] }.
 get_text_symbol_info(_SymTab, _StrTab, _SHdrTab, _ShStrTab, <<>>, Acc1, Acc2) ->
   {lists:reverse(Acc1), lists:reverse(Acc2)}; % Reverse of Acc2 *is* essential!
 get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, OffAcc, RoAcc) ->
@@ -425,6 +424,7 @@ get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, OffAcc, RoAcc) ->
   %% SInfo  = get_symtab_entry_field(SymTabEntry, ?ST_INFO),
   %% SType  = ?ELF64_ST_TYPE(SInfo),
   SValue = get_symtab_entry_field(SymTabEntry, ?ST_VALUE), % for switch-table
+  SSize  = get_symtab_entry_field(SymTabEntry, ?ST_SIZE),  % for switch-table
   %% Extract symbol's name
   %% SymbolName =
   %%   case SType of
@@ -446,7 +446,8 @@ get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, OffAcc, RoAcc) ->
   <<_Head:?ELF64_RELA_SIZE/binary, More/binary>> = Rela,
   get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, More,
 		       [{SymbolName, Offset} | OffAcc],
-		       [{SymbolName, SValue} | RoAcc]).
+		       [{SymbolName, SValue, SSize div 8} | RoAcc]).
+				           % div 8 to transform offsets to sizes
 
 
 %%------------------------------------------------------------------------------
