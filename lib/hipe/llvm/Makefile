@@ -52,7 +52,7 @@ endif
 
 MODULES = $(HIPE_MODULES)
 
-HRL_FILES= elf64_format.hrl note_erlgc.hrl hipe_llvm.hrl
+HRL_FILES= elf64_format.hrl note_erlgc.hrl new_note_erlgc.hrl hipe_llvm.hrl
 ERL_FILES= $(MODULES:%=%.erl)
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 
