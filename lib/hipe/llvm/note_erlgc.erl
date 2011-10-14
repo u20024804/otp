@@ -57,7 +57,9 @@
 	 get_sdesc_list/1
 	]).
 
--include("note_erlgc.hrl").
+%%XXX: uncomment line below to fallback to old GC layout
+%-include("note_erlgc.hrl").
+-include("new_note_erlgc.hrl").
 
 
 %%-------------------------------------------------------------------------------
@@ -208,19 +210,28 @@ get_sdesc_list(Elf) ->
       %% Combine ExnLbls and Safe point addresses (return addresses) properly
       ExnAndSPOffs = combine_ras_and_exns(ExnHandlers, SPOffs),
       %% Do the magic!
-      L = get_sdesc_list(SPEntries, ExnAndSPOffs, SPCount, []),
+      %% Ignore placeholders for SP Addresses (we get the actual addresses from
+      %% .rela.gc, anyway) in order to be compliant with the 'fixed-/var-sized
+      %% part' approach of older GC Layout. This is need only for new GC!
+      SizeOfPlaceholders = SPCount * ?SP_ADDR_SIZE,
+      <<_:SizeOfPlaceholders/binary, SPEntry/binary>> = SPEntries,
+      %XXX: change "SPEntry" to "SPEntries" to fallback to older GC layout
+      L = create_sdesc_list(SPEntry, ExnAndSPOffs, SPCount, []),
       %% Merge same entries in the list
       elf64_format:flatten_list(L)
   end.
 
--spec get_sdesc_list( binary(), [{integer(), integer()}], integer(), 
+-spec create_sdesc_list( binary(), [{integer(), integer()}], integer(),
       [ { {integer() | [], integer(), integer(), {integer()}}, integer() } ] ) ->
       [ { {integer() | [], integer(), integer(), {integer()}}, integer() } ].
-get_sdesc_list(_SPEntries, _ExnAndSPOffs, 0, Acc) ->
+create_sdesc_list(_SPEntries, _ExnAndSPOffs, 0, Acc) ->
   Acc;
-get_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
+create_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
   %% Get first SP entry
-  SPEntry = get_next_safepoint_entry(SPEntries),
+  %%SPEntry = get_next_safepoint_entry(SPEntries),
+  %%XXX: uncomment line above and comment line below to fallback to older GC
+  %%     layout
+  SPEntry = SPEntries,
   %% Get information from fixed-size part of a safe point
   FixedSize = get_fixedsize_part(SPEntry),
   StkFrameSize = get_fixedsize_part_field(FixedSize, ?SP_STKFRAME),
@@ -235,7 +246,7 @@ get_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
   %% Build current entry for sdesc list and continue with more safepoint 
   %% entries
   SdescEntry = {{ExnLbl, StkFrameSize, StkArity, LiveRoots}, SPOff}, 
-  get_sdesc_list(SPEntries, MoreExnAndSPOffs, NumOfEntries-1, 
+  create_sdesc_list(SPEntries, MoreExnAndSPOffs, NumOfEntries-1,
 		 [SdescEntry | Acc]).
 
 
