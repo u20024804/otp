@@ -333,6 +333,6 @@ check_sizes(Constant, Label) ->
     LabelSize ->
       match;
     Other ->
-      io:format("No Constant/Label match:~nconst_size~w~nlabel_size:~w~n", [length(Constant),LabelSize]),
+      %io:format("No Constant/Label match:~nconst_size~w~nlabel_size:~w~n", [length(Constant),LabelSize]),
       no_match
   end.

@@ -79,9 +79,9 @@ translate(RTL, Roots) ->
   %% Put first label of RTL code in process dictionary
   find_code_entry_label(Code),
   %% Print RTL to file
-  {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
-  hipe_rtl:pp(File_rtl, RTL),
-  file:close(File_rtl),
+  %{ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
+  %hipe_rtl:pp(File_rtl, RTL),
+  %file:close(File_rtl),
   %% Create NewData which containts also data for switches
   {NewData, SwitchValues} = data_from_switches(Code, Data, []),
   %% Create constant map
