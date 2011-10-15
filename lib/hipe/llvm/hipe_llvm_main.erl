@@ -135,10 +135,10 @@ myllvmc(Dir, Fun_Name) ->
   AsmFile  = Dir ++ Fun_Name ++ ".ll",
   ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
   %% Write object files to /tmp
-  OptFlags = ["-mem2reg", "-O2", "-strip-debug"],
+  OptFlags = ["-mem2reg", "-strip-debug"],
   LlcFlags = ["-O3", "-load=ErlangGC.so", "-code-model=medium",
       "-stack-alignment=8", "-tailcallopt"],
-  Command = "llvmc -opt -Wopt" ++ fix_opts(OptFlags, ",") ++
+  Command = "llvmc -opt -Wo" ++ fix_opts(OptFlags, ",") ++
      " -Wllc" ++ fix_opts(LlcFlags, ",") ++
      " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
   case os:cmd(Command) of
