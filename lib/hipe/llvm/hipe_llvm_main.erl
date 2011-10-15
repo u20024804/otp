@@ -12,7 +12,7 @@
 
 rtl_to_native(RTL, Roots, _Options) ->
   %% Get LLVM Instruction List
-  {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, TempLabelMap} =
+  {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, SwitchList} =
   hipe_rtl2llvm:translate(RTL, Roots),
   %% Write LLVM Assembly to intermediate file
   Fun = hipe_rtl:rtl_fun(RTL),
@@ -34,10 +34,13 @@ rtl_to_native(RTL, Roots, _Options) ->
   Labels = elf64_format:get_label_list(ObjBin),
   SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
   SwitchInfos = extract_switch_infos(SwitchAddends, Labels),
-  %% Create final LabelMap
-  LabelMap = fix_labelmap(SwitchInfos, TempLabelMap),
+  %% Merge SwitchList labels with label offsets from object file, insert
+  %% switch jump table constants to dictionary and update ConstMap with
+  %% jump table.
+  {FinalConstMap, FinalLabelMap, FinalConstSize, RelocsDict1} =
+        fix_labelmap(SwitchList, SwitchInfos, ConstMap, ConstSize, RelocsDict),
   %% Create relocation list
-  {Relocs1, Closures} = fix_relocations(Relocs, RelocsDict, Mod_Name),
+  {Relocs1, Closures} = fix_relocations(Relocs, RelocsDict1, Mod_Name),
   SDescs2 = fix_sdescs(RelocsDict, Relocs1,  SDescs, Closures),
   FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
@@ -51,15 +54,14 @@ rtl_to_native(RTL, Roots, _Options) ->
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
   Refs = FinalRelocs,
-  {FinalConstMap, FinalLabelMap, FinalConstSize} =
-        create_jump_tables(ConstMap,LabelMap,ConstSize),
   Bin = hipe_llvm_bin:mk_llvm_bin(
     ?VERSION_STRING(),
     ?HIPE_SYSTEM_CRC,
     ConstAlign,
     FinalConstSize,
     FinalConstMap,
-    lists:reverse(lists:flatten(FinalLabelMap)),
+    %% XXX: Remove this reverse!!
+    lists:reverse(FinalLabelMap),
     ExportMap,
     CodeSize,
     CodeBinary,
@@ -173,67 +175,43 @@ extract_switch_infos(Switches, Labels) ->
   %% Zip back! (to [{SwitchName, Offsets, Values}])
   lists:zip3(Names, Offsets, L).
 
-
-%% Merge temporary LabelMap with Jump Table info that is extracted from
-%% the object file in order to create the final LabelMap, to be loaded
-%% to the runtime.
-fix_labelmap([], []) -> [];
-fix_labelmap(SwitchInfos,TempLabelMap) ->
-  Fun1 = fun(X) -> merge_labelmap(X, SwitchInfos) end,
-  lists:map(Fun1, TempLabelMap).
-
-merge_labelmap({Name, _JTLabNum, _, []}, SwitchInfos) ->
-  {Name,_,Labels} =  lists:keyfind(Name,1,SwitchInfos),
-      { unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)};
-merge_labelmap({Name, _JTLabNum, sorted,  Length, SortedBy}, SwitchInfos) ->
-  {Name,_,Labels} =  lists:keyfind(Name,1,SwitchInfos),
-      { sorted, Length, lists:zip(SortedBy, Labels)}.
-
-%%%% Merge temporary LabelMap with Jump Table info that is extracted from
-%%%% the object file in order to create the final LabelMap, to be loaded
-%%%% to the runtime.
-%%fix_labelmap([], []) -> [];
-%%fix_labelmap(SwitchInfos, TempLabelMap) ->
-%%  SortedSwitches = lists:keysort(1, SwitchInfos),
-%%  SortedLabelMap = lists:keysort(1, TempLabelMap),
-%%  Merged = lists:zipwith(fun merge_labelmap/2, SortedSwitches, SortedLabelMap),
-%%  SortedMerged = lists:keysort(1, Merged),
-%%  Fun1 =
-%%    fun(X) ->
-%%        case X of
-%%          {_,B,C,D} -> {B,C,D};
-%%          {_,B,C} -> {B,C}
-%%        end
-%%    end,
-%%  lists:map(Fun1, SortedMerged).
-%%
-%%
-%%merge_labelmap({Name, _, Labels}, TempLabelMap) ->
-%%  case TempLabelMap of
-%%    {Name, _, _, []} ->
-%%      {unsorted, lists:zip(lists:seq(0, length(Labels)*8-1,8), Labels)};
-%%    {Name, _, sorted,  Length, SortedBy} ->
-%%      {sorted, Length, lists:zip(SortedBy, Labels)};
-%%    _ ->
-%%      exit({?MODULE, merge_labelmap, "No match in switch infos with temporary
-%%          label map"})
-%%  end.
-
-%% XXX:
-%% For each entry in LabelMap, create the necessary constant that is a
-%% a list of zeros with the correct size. For sorted labels, the offset in the
-%% LabelMap must correspond to the offset in the ConstMap. Numbering of
-%% constants is sequential in order to go with the naming in
-%% hipe_rtl2llvm:labels_to_dict/3.
-create_jump_tables(ConstMap, LabelMap, ConstSize)->
+%% This function handles the creation and declaration of jump tables
+%% created for switch RTL statements. First switch jump tables are
+%% inserted to relocation dictionary to refer to the jump table constant
+%% in the code. Secondly the switch label list is merged with the label offsets
+%% from the object file in order to create the LabelMap. Finally a jump table
+%% for each entry in LabelMap is created and it is inserted to ConstMap.
+fix_labelmap([], [], ConstMap, ConstSize, Relocs) ->
+  {ConstMap, [], ConstSize, Relocs};
+fix_labelmap(SwitchList, SwitchInfos, ConstMap, ConstSize, Relocs) ->
   MaxConst = case ConstMap of
     [] -> -1;
     _ -> find_max_constant(ConstMap, 0)
   end,
-  {JumpTables, NewConstSize, NewLabelMap} =
+  Relocs1 = labels_to_dict(SwitchList, Relocs, MaxConst+1),
+  Fun1 = fun(X) -> merge_labelmap(X, SwitchInfos) end,
+  LabelMap = lists:map(Fun1, SwitchList),
+  {JumpTables, NewLabelMap, NewConstSize} =
     create_jmp_constants(LabelMap, MaxConst+1, ConstSize),
-  {ConstMap++JumpTables, NewConstSize, NewLabelMap}.
+  {ConstMap++JumpTables, NewLabelMap, NewConstSize, Relocs1}.
 
+
+labels_to_dict([], Dict, _) ->  Dict;
+labels_to_dict([{TableName, _}|Rest], Dict, RodataNumber) ->
+  Dict1 = dict:store(TableName, {constant, RodataNumber}, Dict),
+  labels_to_dict(Rest, Dict1, RodataNumber+1).
+
+%% Merge Switch labels with label offsets from object file
+merge_labelmap({Name, {switch, {_, _LabelList, NrLabels, []}}}, SwitchInfos) ->
+  {Name, _, Labels} =  lists:keyfind(Name, 1, SwitchInfos),
+  {unsorted, lists:zip(lists:seq(0, NrLabels*8-1,8), Labels)};
+merge_labelmap({Name, {switch, {_, _LabelList, NrLabels, SortOrder}}}, SwitchInfos) ->
+  {Name, _, Labels} =  lists:keyfind(Name, 1, SwitchInfos),
+  {sorted, NrLabels, lists:zip(SortOrder, Labels)}.
+
+%% For each entry in LabelMap, create the necessary constant that is a
+%% a list of zeros with the correct size. For sorted labels, the offset in the
+%% LabelMap must correspond to the offset in the ConstMap.
 create_jmp_constants(LabelMap, MaxConst, ConstSize) ->
   create_jmp_constants(LabelMap, MaxConst, ConstSize, [], []).
 
@@ -247,11 +225,11 @@ create_jmp_constants([Label|Ls], ConstNum, ConstSize,  JmpAcc, LabelAcc) ->
 
 %% Change offset in LabelMap
 change_offset({sorted, _Offset, Sorted}, NewOffset) -> {sorted, NewOffset, Sorted};
-change_offset({unsorted, Unsorted},_) -> {unsorted, lists:reverse(Unsorted)}.
+change_offset(Label, _) -> Label.
 
 %% Create a list of zeros of the correct size
 create_zeros({sorted, Size, _Sorted}) ->
-  lists:duplicate(Size, 0);
+  lists:duplicate(Size*8, 0);
 create_zeros({unsorted, Unsorted}) ->
   lists:duplicate(length(Unsorted)*8, 0).
 
@@ -260,7 +238,7 @@ find_max_constant([], Max) -> Max;
 find_max_constant([A,_B,_C,_D|Rest], Max) when A>Max -> find_max_constant(Rest,A);
 find_max_constant([_A,_B,_C,_D|Rest], Max) -> find_max_constant(Rest,Max).
 
-%% Untuplify a ConstMap. Returned in Reversed way.
+%% Untuplify a ConstMap. Returned in Reversed way!!!
 un_tuplify_4(ConstMap) -> un_tuplify_4(ConstMap, []).
 
 un_tuplify_4([], Acc) -> Acc;
