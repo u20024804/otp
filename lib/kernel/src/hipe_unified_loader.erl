@@ -201,7 +201,7 @@ ConstMap: ~w~nLabelMap: ~w~nExportMap ~w~nRefs ~w~n",
     [Version, CheckSum, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
       Refs]),
 
-  file:write_file("erl.o", CodeBinary, [binary]),
+  %file:write_file("erl.o", CodeBinary, [binary]),
 
   %% Check that we are loading up-to-date code.
   version_check(Version, Mod),
