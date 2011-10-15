@@ -10,7 +10,7 @@
 
 -define(NR_ARG_REGS, ?AMD64_NR_ARG_REGS).
 
-rtl_to_native(RTL, Roots, _Options) ->
+rtl_to_native(RTL, Roots, Options) ->
   %% Get LLVM Instruction List
   {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, SwitchList} =
   hipe_rtl2llvm:translate(RTL, Roots),
@@ -22,7 +22,7 @@ rtl_to_native(RTL, Roots, _Options) ->
   {ok, File_llvm} = file:open("/tmp/" ++ Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
-  ObjectFile = compile_with_llvm("/tmp/", Filename),
+  ObjectFile = compile_with_llvm("/tmp/", Filename, Options),
   %% Remove .ll file
   spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".ll"]),
   %% Extract information from object file
@@ -80,11 +80,11 @@ remove_intermediate_file(FileName) ->
 %%----------------------------------------------------------------------------
 %% Compile with LLVM tools
 %%----------------------------------------------------------------------------
-compile_with_llvm(Dir, Fun_Name) ->
+compile_with_llvm(Dir, Fun_Name, Options) ->
   %Opt_filename = opt(Fun_Name),
   %llc(Opt_filename, Fun_Name),  %XXX: Both names needed. FIX THIS SHIT
   %llvmc(Fun_Name).
-  myllvmc(Dir, Fun_Name).
+  myllvmc(Dir, Fun_Name, Options).
 
 
 %% OPT wrapper (.ll -> .ll)
@@ -139,14 +139,19 @@ llvmc(Fun_Name, Opts) ->
 
 
 %% My LLVMC that triggers everything (uses bitcode for intermediate files)
-myllvmc(Dir, Fun_Name) ->
+myllvmc(Dir, Fun_Name, Options) ->
   AsmFile  = Dir ++ Fun_Name ++ ".ll",
-  ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
   %% Write object files to /tmp
+  ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
   OptFlags = ["-mem2reg", "-strip-debug"],
   LlcFlags = ["-O3", "-load=ErlangGC.so", "-code-model=medium",
       "-stack-alignment=8", "-tailcallopt"],
-  Command = "llvmc -opt -Wo" ++ fix_opts(OptFlags, ",") ++
+  SaveTemps =
+    case proplists:get_bool(llvm_save_temps, Options) of
+      true -> "--save-temps";
+      false -> ""
+    end,
+  Command = "llvmc "++SaveTemps++" -opt -Wo" ++ fix_opts(OptFlags, ",") ++
      " -Wllc" ++ fix_opts(LlcFlags, ",") ++
      " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
   case os:cmd(Command) of
