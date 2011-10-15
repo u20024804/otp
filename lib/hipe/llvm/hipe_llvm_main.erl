@@ -3,7 +3,7 @@
 %% LLVM Backend Driver Module
 %%
 -module(hipe_llvm_main).
--export([rtl_to_native/3]).
+-export([rtl_to_native/3, remove_intermediate_file/1]).
 
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
@@ -23,7 +23,8 @@ rtl_to_native(RTL, Roots, _Options) ->
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
   ObjectFile = compile_with_llvm("/tmp/", Filename),
-  %%XXX: Delete all temp/intermediate files (i.e. .ll and .opt.o)!
+  %% Remove .ll file
+  spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".ll"]),
   %% Extract information from object file
   ObjBin = elf64_format:open_object_file(ObjectFile),
   %% Get relocation info
@@ -45,6 +46,8 @@ rtl_to_native(RTL, Roots, _Options) ->
   FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
+  %% Remove .o file
+  spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".opt.o"]),
   %%ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   %%--------------------------------------------------------------------------
   %% Create All Information needed by the hipe_unified_loader
@@ -67,6 +70,9 @@ rtl_to_native(RTL, Roots, _Options) ->
     CodeBinary,
     Refs),
   Bin.
+
+remove_intermediate_file(FileName) ->
+  os:cmd("rm "++FileName).
 
 
 %%----------------------------------------------------------------------------
