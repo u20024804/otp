@@ -82,26 +82,24 @@ translate(RTL, Roots) ->
   %{ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   %hipe_rtl:pp(File_rtl, RTL),
   %file:close(File_rtl),
-  %% Create NewData which containts also data for switches
-  {NewData, SwitchValues} = data_from_switches(Code, Data, []),
   %% Create constant map
   {ConstAlign, ConstSize, ConstMap, _RefsFromConsts} =
-    hipe_pack_constants:pack_constants([{Fun, [], NewData}],
+    hipe_pack_constants:pack_constants([{Fun, [], Data}],
                                       ?HIPE_X86_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
   AllocaStack = alloca_stack(Code, Params, Roots),
   {Code2, FailLabels} = fix_code(Code),
   Relocs0 = dict:new(),
   {LLVM_Code1, Relocs1} = translate_instr_list(Code2, [], Relocs0),
-  {FinalRelocs, ExternalDecl, LocalVars, TempLabelMap} =
-    handle_relocations(Relocs1, SC, SwitchValues, Fun),
+  {FinalRelocs, ExternalDecl, LocalVars, SwitchList} =
+    handle_relocations(Relocs1, SC, Fun),
   LLVM_Code2 = add_landingpads(LLVM_Code1, FailLabels),
   %% Create LLVM Code for the compiled function
   LLVM_Code3 = create_function_definition(Fun, Params, LLVM_Code2,
                                           AllocaStack++LocalVars),
   %% Final Code = CompiledFunction + External Declarations
   FinalLLVMCode = [LLVM_Code3 | ExternalDecl],
-  {FinalLLVMCode, FinalRelocs, SC, ConstAlign, ConstSize, TempLabelMap}.
+  {FinalLLVMCode, FinalRelocs, SC, ConstAlign, ConstSize, SwitchList}.
 
 %%-----------------------------------------------------------------------------
 find_code_entry_label([]) ->
@@ -672,20 +670,22 @@ trans_switch(I, Relocs) ->
   _Src = hipe_rtl:switch_src(I),
   {Src, I1} = trans_src(_Src),
   LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
+  SortOrder = hipe_rtl:switch_sort_order(I),
   NrLabels = length(LabelList),
   TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
   TableTypeP = hipe_llvm:mk_pointer(TableType),
   TypedLabelList = lists:map(fun(X) -> {#llvm_label_type{}, X} end, LabelList),
   T1 = mk_temp(),
   {Src2, []} = trans_dst(_Src),
-  TableName = "@table_"++tl(Src2),
-  I2 = hipe_llvm:mk_getelementptr(T1, TableTypeP, TableName,
+  TableName = "table_"++tl(Src2),
+  I2 = hipe_llvm:mk_getelementptr(T1, TableTypeP, "@"++TableName,
                     [{?WORD_TYPE, "0"}, {?WORD_TYPE, Src}], false),
   T2 = mk_temp(),
   BYTE_TYPE_PP = hipe_llvm:mk_pointer(?BYTE_TYPE_P),
   I3 = hipe_llvm:mk_load(T2, BYTE_TYPE_PP, T1, [], [], false),
   I4 = hipe_llvm:mk_indirectbr(?BYTE_TYPE_P, T2, TypedLabelList),
-  Relocs2 = relocs_store(TableName, {switch, {TableType, LabelList}}, Relocs),
+  Relocs2 = relocs_store(TableName, {switch, {TableType, LabelList, NrLabels,
+                                    SortOrder}}, Relocs),
   {[I4, I3, I2, I1], Relocs2}.
 
 
@@ -1306,11 +1306,10 @@ relocs_to_list(Relocs) ->
 %% 2) Creates LLVM code to declare relocations as external functions/constants
 %% 3) Creates LLVM code in order to create local variables for the external
 %%    constants/labels
-%% 4) Creates a temporary LabelMap
-handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
+handle_relocations(Relocs, SlimedConstMap, Fun) ->
   RelocsList = relocs_to_list(Relocs),
   %% Seperate Relocations according to their type
-  {CallList, AtomList, ClosureList, JumpTables} = seperate_relocs(RelocsList),
+  {CallList, AtomList, ClosureList, SwitchList} = seperate_relocs(RelocsList),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, AtomList),
   %% Create code to create local name for atoms
@@ -1331,7 +1330,7 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   %% Create code to create local name for constants
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   %% Create code to create jump tables
-  JumpTableDecl = declare_jump_tables(JumpTables, Fun),
+  SwitchDecl = declare_switches(SwitchList, Fun),
   %% Enter constants to relocations
   Relocs1 = lists:foldl(fun const_to_dict/2, Relocs, ConstLabels),
   %% Temporary Store inc_stack and llvm_fix_pinned_regs to Dictionary
@@ -1341,14 +1340,10 @@ handle_relocations(Relocs, SlimedConstMap, SwitchValues, Fun) ->
   Relocs3 = dict:store("hipe_bifs.llvm_fix_pinned_regs.0", {call, {hipe_bifs,
         llvm_fix_pinned_regs, 0}},
                         Relocs2),
-  %% Create LabelMap
-  TempLabelMap = lists:map(fun create_label_map/1, SwitchValues),
-  %% Store Swich Jump Tables to reloactions
-  Relocs4 = labels_to_dict(TempLabelMap, Relocs3, ConstLabels),
   ExternalDeclarations =
-    AtomDecl++ClosureDecl++ConstDecl++FunDecl++JumpTableDecl,
+    AtomDecl++ClosureDecl++ConstDecl++FunDecl++SwitchDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
-  {Relocs4, ExternalDeclarations, LocalVariables, TempLabelMap}.
+  {Relocs3, ExternalDeclarations, LocalVariables, SwitchList}.
 
 %% Seperate Relocations    %% other MFA calls are of type 2. found in the code to calls, atoms, closures and
 %% jump tables.
@@ -1388,12 +1383,12 @@ load_closure({ClosureName, _})->
   Name = "@"++ClosureName,
   hipe_llvm:mk_conversion(Dst, ptrtoint, ?BYTE_TYPE_P, Name, ?WORD_TYPE).
 
-declare_jump_tables(JumpTableList, Fun) ->
+declare_switches(JumpTableList, Fun) ->
   FunName = trans_mfa_name(Fun),
-  Fun1 = fun(X) -> declare_jump_table(X, FunName) end,
+  Fun1 = fun(X) -> declare_switch_table(X, FunName) end,
   lists:map(Fun1, JumpTableList).
 
-declare_jump_table({Name, {switch, {TableType, LabelList}}}, FunName) ->
+declare_switch_table({Name, {switch, {TableType, LabelList, _, _}}}, FunName) ->
   Fun1 =
     fun(X) ->
         "i8* blockaddress(@"++FunName++", "++X++")"
@@ -1401,7 +1396,7 @@ declare_jump_table({Name, {switch, {TableType, LabelList}}}, FunName) ->
   List2 = lists:map(Fun1, LabelList),
   List3 = string:join(List2, ",\n"),
   List4 = "[\n" ++ List3 ++ "\n]\n",
-  hipe_llvm:mk_const_decl(Name, "constant", TableType, List4).
+  hipe_llvm:mk_const_decl("@"++Name, "constant", TableType, List4).
 
 
 %% A call is treated as non external only in a case of a recursive function
@@ -1440,53 +1435,6 @@ fixed_fun_decl() ->
   GcMetadata = hipe_llvm:mk_const_decl("@gc_metadata", "external constant",
     ?BYTE_TYPE, ""),
   [LandPad, GCROOTDecl, FixPinnedRegs, GcMetadata].
-
-%% XXX:
-%% Find all the information that are needed to create the labelmaps.
-data_from_switches([], NewData, SortedBy) -> {NewData, lists:reverse(SortedBy)};
-data_from_switches([I|Is], Data, Sorted) ->
-  case I of
-    #switch{} ->
-      Labels = hipe_rtl:switch_labels(I),
-      LMap = [{label,L} || L <- Labels],
-      %% Do not enter jump table into Data. We will create them explicitly.
-%%      {NewData, JTabLab} =
-%%      case hipe_rtl:switch_sort_order(I) of
-%%        [] ->
-%%          hipe_consttab:insert_block(Data, word, LMap);
-%%        SortOrder ->
-%%          hipe_consttab:insert_sorted_block(
-%%            Data, word, LMap, SortOrder)
-%%      end,
-      _Src = hipe_rtl:switch_src(I),
-      {Src, []} = trans_dst(_Src),
-      TableName = "table_"++tl(Src),
-      data_from_switches(Is, Data, [{TableName, 0, length(Labels), hipe_rtl:switch_sort_order(I)}|Sorted]);
-    _ -> data_from_switches(Is, Data, Sorted)
-  end.
-
-create_label_map([]) -> [];
-
-create_label_map({_, _, _ , []}=LM) -> LM;
-create_label_map({TableName, ConstNumber, _, SortOrder}) -> {TableName, ConstNumber, sorted,
-    length(SortOrder)*8,SortOrder}.
-
-%% Insert Jump Table labels to dictionary. They are stored as constants as they
-%% correspond to the address of the jump table(Constant x in 'refs' of
-%% hipe_llvm_bin). ConstLabels is needed in order to find the maximum constant
-%% label.
-labels_to_dict([], Dict, []) -> Dict;
-labels_to_dict(TempLabelMap, Dict, []) -> labels_to_dict2(TempLabelMap,Dict,0);
-labels_to_dict(TempLabelMap, Dict, ConstLabels) ->
-  labels_to_dict2(TempLabelMap, Dict, lists:max(ConstLabels)+1).
-
-labels_to_dict2([], Dict, _) -> Dict;
-labels_to_dict2([{TableName, ConstNumber, _, []}|Rest], Dict, RodataNumber) ->
-  Dict1 = dict:store(TableName, {constant, RodataNumber}, Dict),
-  labels_to_dict2(Rest, Dict1, RodataNumber+1);
-labels_to_dict2([{TableName, ConstNumber, _, _, _}|Rest], Dict, RodataNumber) ->
-  Dict1 = dict:store(TableName, {constant, RodataNumber}, Dict),
-  labels_to_dict2(Rest, Dict1, RodataNumber+1).
 
 
 %% Extract Type of Constants from ConstMap
