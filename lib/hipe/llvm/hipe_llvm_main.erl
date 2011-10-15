@@ -18,12 +18,14 @@ rtl_to_native(RTL, Roots, _Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
-  {ok, File_llvm} = file:open(Filename ++ ".ll", [write]),
+  %% Save temp files in /tmp. (XXX: Use a random folder)
+  {ok, File_llvm} = file:open("/tmp/" ++ Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
-  Object_filename = compile_with_llvm(Filename),
+  ObjectFile = compile_with_llvm("/tmp/", Filename),
+  %%XXX: Delete all temp/intermediate files (i.e. .ll and .opt.o)!
   %% Extract information from object file
-  ObjBin = elf64_format:open_object_file(Object_filename),
+  ObjBin = elf64_format:open_object_file(ObjectFile),
   %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
@@ -40,7 +42,7 @@ rtl_to_native(RTL, Roots, _Options) ->
   FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
-  ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
+  %%ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   %%--------------------------------------------------------------------------
   %% Create All Information needed by the hipe_unified_loader
   %% No Labelmap Used yet..
@@ -70,10 +72,11 @@ rtl_to_native(RTL, Roots, _Options) ->
 %%----------------------------------------------------------------------------
 %% Compile with LLVM tools
 %%----------------------------------------------------------------------------
-compile_with_llvm(Fun_Name) ->
-  Opt_filename = opt(Fun_Name),
-  llc(Opt_filename, Fun_Name),  %XXX: Both names needed. FIX THIS SHIT
-  llvmc(Fun_Name).
+compile_with_llvm(Dir, Fun_Name) ->
+  %Opt_filename = opt(Fun_Name),
+  %llc(Opt_filename, Fun_Name),  %XXX: Both names needed. FIX THIS SHIT
+  %llvmc(Fun_Name).
+  myllvmc(Dir, Fun_Name).
 
 
 %% OPT wrapper (.ll -> .ll)
@@ -126,8 +129,31 @@ llvmc(Fun_Name, Opts) ->
   end,
   Object_filename.
 
+
+%% My LLVMC that triggers everything (uses bitcode for intermediate files)
+myllvmc(Dir, Fun_Name) ->
+  AsmFile  = Dir ++ Fun_Name ++ ".ll",
+  ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
+  %% Write object files to /tmp
+  OptFlags = ["-mem2reg", "-O2", "-strip-debug"],
+  LlcFlags = ["-O3", "-load=ErlangGC.so", "-code-model=medium",
+      "-stack-alignment=8", "-tailcallopt"],
+  Command = "llvmc -opt -Wopt" ++ fix_opts(OptFlags, ",") ++
+     " -Wllc" ++ fix_opts(LlcFlags, ",") ++
+     " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
+  case os:cmd(Command) of
+    [] -> ok;
+    Error -> exit({?MODULE, llvmc, Error})
+  end,
+  ObjectFile.
+
+
 fix_opts(Opts) ->
-  lists:foldl(fun(X, Acc) -> Acc++" "++X end, "", Opts).
+  lists:foldl(fun(X, Acc) -> Acc ++ X end, "", Opts).
+
+-define(Stringify(S), "\"" ++ S ++ "\"").
+fix_opts(Opts, Sep) ->
+  lists:foldl(fun(X, Acc) -> Acc ++ Sep ++ ?Stringify(X) end, "", Opts).
 
 
 %%----------------------------------------------------------------------------
