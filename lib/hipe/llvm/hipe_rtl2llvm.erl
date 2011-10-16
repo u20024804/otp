@@ -692,58 +692,69 @@ trans_switch(I, Relocs) ->
 
 %%-----------------------------------------------------------------------------
 %% Pass on RTL code in order to fix invoke and closure calls.
-%% TODO: merge the 2 passes in one.
 %%-----------------------------------------------------------------------------
 fix_code(Code) ->
-  {Code1, FailLabels} = fix_invoke_calls(Code),
-  Code2 = fix_closure_calls(Code1),
-  {Code2, FailLabels}.
+  fix_calls(Code).
+
+
+%% Fix invoke calls and closure calls with more than ?NR_ARG_REGS arguments
+fix_calls(Code) ->
+  fix_calls(Code, [], []).
+
+fix_calls([], Acc, FailLabels) ->
+  {lists:reverse(Acc), FailLabels};
+fix_calls([I|Is], Acc, FailLabels) ->
+  case I of
+    #call{} ->
+      {NewCall, NewFailLabels} =
+      case hipe_rtl:call_fail(I) of
+        [] ->
+          {I, FailLabels};
+        FailLabel ->
+          fix_invoke_call(I, FailLabel, FailLabels)
+      end,
+      Fun = hipe_rtl:call_fun(NewCall),
+      case hipe_rtl:is_reg(Fun) of
+        false ->
+          fix_calls(Is, [NewCall|Acc], NewFailLabels);
+        true ->
+          NewCall2 = fix_closure_call(NewCall),
+          fix_calls(Is, NewCall2++Acc, NewFailLabels)
+      end;
+    _ -> fix_calls(Is, [I|Acc], FailLabels)
+  end.
+
 
 %% When a call has a fail continuation label it must be extended with a normal
-%% continuation label to go with the LLVM's invoke instruction. Also all phi
-%% nodes that are correlated with the block that holds tha call instruction
-%% must be updated. FailLabels is the list of labels of all fail blocks, which
-%% is needed to be declared as landing pads. Also we must go to fail labels
-%% and add a call to
+%% continuation label to go with the LLVM's invoke instruction. FailLabels is
+%% the list of labels of all fail blocks, which is needed to be declared as
+%% landing pads. Also we must go to fail labels and add a call to
 %% hipe_bifs:llvm_fix_pinned_regs:0 in order to avoid the reloading of old values of
 %% pinned registers(This happens because at fail labels, the result of an
 %% invoke instruction is no available, and we cannot get the correct values
 %% of pinned registers). Finnaly when there are stack arguments the stack
 %% needs to be readjusted.
-fix_invoke_calls(Code) -> fix_invoke_calls(Code, [], []).
-fix_invoke_calls([], Acc, FailLabels) ->
-  {lists:reverse(Acc), FailLabels};
-
-fix_invoke_calls([I|Is], Acc, FailLabels) ->
-  case I of
-    #call{} ->
-      case hipe_rtl:call_fail(I) of
-        [] -> fix_invoke_calls(Is, [I|Acc], FailLabels);
-        FailLabel ->
-          NewLabel = hipe_gensym:new_label(llvm),
-          NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
-          SpAdj = find_sp_adj(hipe_rtl:call_arglist(I)),
-          case lists:keyfind(FailLabel, 1, FailLabels) of
-            %% Same fail label with same Stack Pointer adjustment
-            {FailLabel, NewFailLabel, SpAdj} ->
-              NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc], FailLabels);
-            %% Same fail label but with different Stack Pointer adjustment
-            {_, _, _} ->
-              NewFailLabel = hipe_gensym:new_label(llvm),
-              NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc],
-                                [{FailLabel, NewFailLabel, SpAdj}|FailLabels]);
-            %% New Fail label
-            false ->
-              NewFailLabel = hipe_gensym:new_label(llvm),
-              NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
-              fix_invoke_calls(Is, [NewCall2|Acc],
-                              [{FailLabel, NewFailLabel, SpAdj}|FailLabels])
-          end
-      end;
-    _ -> fix_invoke_calls(Is, [I|Acc], FailLabels)
+fix_invoke_call(I, FailLabel, FailLabels) ->
+  NewLabel = hipe_gensym:new_label(llvm),
+  NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
+  SpAdj = find_sp_adj(hipe_rtl:call_arglist(I)),
+  case lists:keyfind(FailLabel, 1, FailLabels) of
+    %% Same fail label with same Stack Pointer adjustment
+    {FailLabel, NewFailLabel, SpAdj} ->
+      NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
+      {NewCall2, FailLabels};
+    %% Same fail label but with different Stack Pointer adjustment
+    {_, _, _} ->
+      NewFailLabel = hipe_gensym:new_label(llvm),
+      NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
+      {NewCall2, [{FailLabel, NewFailLabel, SpAdj}|FailLabels]};
+    %% New Fail label
+    false ->
+      NewFailLabel = hipe_gensym:new_label(llvm),
+      NewCall2 = hipe_rtl:call_fail_update(NewCall1, NewFailLabel),
+      {NewCall2, [{FailLabel, NewFailLabel, SpAdj}|FailLabels]}
   end.
+
 
 find_sp_adj(ArgList) ->
   NrArgs = length(ArgList),
@@ -753,37 +764,23 @@ find_sp_adj(ArgList) ->
     false -> 0
   end.
 
+
 %% In case of a call to a closure with more than ?NR_ARG_REGS, the
 %% addresss of the call must be exported in order to fix the corresponding
 %% SDesc. This is achieved by introducing a call to
 %% hipe_bifs:llvm_expose_closure/0 before the closure call.
-fix_closure_calls(Code) ->
-  fix_closure_calls(Code, []).
-
-fix_closure_calls([], Acc) ->
-  lists:reverse(Acc);
-fix_closure_calls([I|Is], Acc) ->
-  case I of
-    #call{} ->
-      Fun = hipe_rtl:call_fun(I),
-      case hipe_rtl:is_reg(Fun) of
-        true ->
-          CallArgs = hipe_rtl:call_arglist(I),
-          StackArgs = length(CallArgs)-?NR_ARG_REGS,
-          case StackArgs > 0 of
-            true ->
-              NewCall = hipe_rtl:mk_call([], {hipe_bifs, llvm_expose_closure, StackArgs},
-                [], [], [], remote),
-              fix_closure_calls(Is, [I, NewCall|Acc]);
-            false ->
-              fix_closure_calls(Is, [I|Acc])
-          end;
-        false ->
-          fix_closure_calls(Is, [I|Acc])
-      end;
-    _ ->
-      fix_closure_calls(Is, [I|Acc])
+fix_closure_call(I) ->
+  CallArgs = hipe_rtl:call_arglist(I),
+  StackArgs = length(CallArgs)-?NR_ARG_REGS,
+  case StackArgs > 0 of
+    true ->
+      NewCall = hipe_rtl:mk_call([], {hipe_bifs, llvm_expose_closure, StackArgs},
+        [], [], [], remote),
+      [I,NewCall];
+    false ->
+      [I]
   end.
+
 
 %% Add landingpad instruction in Fail Blocks
 add_landingpads(LLVM_Code, FailLabels) ->
