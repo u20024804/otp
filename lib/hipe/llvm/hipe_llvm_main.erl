@@ -143,8 +143,13 @@ myllvmc(Dir, Fun_Name, Options) ->
   AsmFile  = Dir ++ Fun_Name ++ ".ll",
   %% Write object files to /tmp
   ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
+  OptLevel =
+    case proplists:get_value(llvm_opts, Options) of
+      o3 -> "-O3";
+      _ -> "-O2"
+    end,
   OptFlags = ["-mem2reg", "-strip-debug"],
-  LlcFlags = ["-O3", "-load=ErlangGC.so", "-code-model=medium",
+  LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
       "-stack-alignment=8", "-tailcallopt"],
   SaveTemps =
     case proplists:get_bool(llvm_save_temps, Options) of
