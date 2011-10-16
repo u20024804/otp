@@ -167,11 +167,12 @@ myllvmc(Dir, Fun_Name, Options) ->
 
 
 fix_opts(Opts) ->
-  lists:foldl(fun(X, Acc) -> Acc ++ X end, "", Opts).
+  string:join(Opts, "").
 
 -define(Stringify(S), "\"" ++ S ++ "\"").
 fix_opts(Opts, Sep) ->
-  lists:foldl(fun(X, Acc) -> Acc ++ Sep ++ ?Stringify(X) end, "", Opts).
+  Opts2 = lists:map(fun(X) -> ?Stringify(X) end, Opts),
+  Sep++string:join(Opts2, Sep).
 
 
 %%----------------------------------------------------------------------------
