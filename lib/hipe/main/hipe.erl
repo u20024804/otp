@@ -1405,6 +1405,7 @@ opt_keys() ->
      to_rtl,
      to_llvm, % STUB: new flag for llvm!
      llvm_save_temps, % STUB: new flag for llvm
+     llvm_opts, % STUB: new flag for llvm options
      use_indexing,
      use_inline_atom_search,
      use_callgraph,
