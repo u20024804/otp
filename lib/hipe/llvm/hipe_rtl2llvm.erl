@@ -1024,7 +1024,8 @@ trans_src(A) ->
                 [] ->
                   [];
                 dead ->
-                  hipe_llvm:mk_store(?WORD_TYPE, "-5", ?WORD_TYPE_P, RootName, [],
+                  NilValue = hipe_tagscheme:mk_nil(),
+                  hipe_llvm:mk_store(?WORD_TYPE, integer_to_list(NilValue), ?WORD_TYPE_P, RootName, [],
                     [], false)
               end,
               {T1, [I2, I1]};
