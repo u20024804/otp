@@ -167,7 +167,7 @@ myllvmc(Dir, Fun_Name, Options) ->
 
 
 fix_opts(Opts) ->
-  string:join(Opts, "").
+  string:join(Opts, " ").
 
 -define(Stringify(S), "\"" ++ S ++ "\"").
 fix_opts(Opts, Sep) ->
