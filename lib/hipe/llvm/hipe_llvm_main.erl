@@ -49,7 +49,6 @@ rtl_to_native(RTL, Roots, Options) ->
   %% Remove .o file
   spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".opt.o"]),
   %%ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
-  %%--------------------------------------------------------------------------
   %% Create All Information needed by the hipe_unified_loader
   %% No Labelmap Used yet..
   %% As Fun Name we must pass the original name
@@ -75,17 +74,16 @@ remove_intermediate_file(FileName) ->
   os:cmd("rm "++FileName).
 
 
-%%----------------------------------------------------------------------------
-%%------------------------- LLVM TOOL CHAIN ---------------------------------
-%%----------------------------------------------------------------------------
+%%------------------------------------------------------------------------------
+%%------------------------- LLVM TOOL CHAIN ------------------------------------
+%%------------------------------------------------------------------------------
+
 %% Compile with LLVM tools
-%%----------------------------------------------------------------------------
 compile_with_llvm(Dir, Fun_Name, Options) ->
   %Opt_filename = opt(Fun_Name),
   %llc(Opt_filename, Fun_Name),  %XXX: Both names needed. FIX THIS SHIT
   %llvmc(Fun_Name).
   myllvmc(Dir, Fun_Name, Options).
-
 
 %% OPT wrapper (.ll -> .ll)
 opt(Fun_Name) ->
@@ -104,7 +102,6 @@ opt(Fun_Name, Opts) ->
   end,
   Opt_llvm_filename.
 
-
 %% LLC wrapper (.ll -> .s)
 llc(Opt_filename, Fun_Name) ->
   Options = ["-O3", "-code-model=medium", "-load=ErlangGC.so",
@@ -120,7 +117,6 @@ llc(Opt_filename, Fun_Name, Opts) ->
     Error -> exit({?MODULE, llvmc, Error})
   end.
 
-
 %% LLVMC wrapper (.s -> .o)
 llvmc(Fun_Name) ->
   Options = [],
@@ -129,14 +125,13 @@ llvmc(Fun_Name) ->
 llvmc(Fun_Name, Opts) ->
   Asm_File = Fun_Name++".s",
   Object_filename = Fun_Name ++ ".o",
-  Command = "llvmc " ++ fix_opts(Opts) ++ " -c " ++ Asm_File ++ " -o " ++
-    Object_filename,
+  Command = "llvmc " ++ fix_opts(Opts) ++ " -c " ++ Asm_File ++ " -o "
+    ++ Object_filename,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, llvmc, Error})
   end,
   Object_filename.
-
 
 %% My LLVMC that triggers everything (uses bitcode for intermediate files)
 myllvmc(Dir, Fun_Name, Options) ->
@@ -150,29 +145,29 @@ myllvmc(Dir, Fun_Name, Options) ->
     end,
   OptFlags = ["-mem2reg", "-strip-debug"],
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
-      "-stack-alignment=8", "-tailcallopt"],
+	      "-stack-alignment=8", "-tailcallopt"],
   SaveTemps =
     case proplists:get_bool(llvm_save_temps, Options) of
       true -> "--save-temps";
       false -> ""
     end,
-  Command = "llvmc "++SaveTemps++" -opt -Wo" ++ fix_opts(OptFlags, ",") ++
-     " -Wllc" ++ fix_opts(LlcFlags, ",") ++
-     " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
+  Command = "llvmc "++SaveTemps++" -opt -Wo" ++ fix_opts(OptFlags, ",")
+    ++ " -Wllc" ++ fix_opts(LlcFlags, ",")
+    ++ " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, llvmc, Error})
   end,
   ObjectFile.
 
-
+%% Join options
 fix_opts(Opts) ->
   string:join(Opts, " ").
 
 -define(Stringify(S), "\"" ++ S ++ "\"").
 fix_opts(Opts, Sep) ->
   Opts2 = lists:map(fun(X) -> ?Stringify(X) end, Opts),
-  Sep++string:join(Opts2, Sep).
+  Sep ++ string:join(Opts2, Sep).
 
 
 %%----------------------------------------------------------------------------
@@ -212,7 +207,7 @@ fix_labelmap(SwitchList, SwitchInfos, ConstMap, ConstSize, Relocs) ->
     create_jmp_constants(LabelMap, MaxConst+1, ConstSize),
   {ConstMap++JumpTables, NewLabelMap, NewConstSize, Relocs1}.
 
-
+%%
 labels_to_dict([], Dict, _) ->  Dict;
 labels_to_dict([{TableName, _}|Rest], Dict, RodataNumber) ->
   Dict1 = dict:store(TableName, {constant, RodataNumber}, Dict),
@@ -241,8 +236,10 @@ create_jmp_constants([Label|Ls], ConstNum, ConstSize,  JmpAcc, LabelAcc) ->
   create_jmp_constants(Ls, ConstNum+1, ConstSize+length(ZeroBlock), [NewJmpTable|JmpAcc], [NewLabel|LabelAcc]).
 
 %% Change offset in LabelMap
-change_offset({sorted, _Offset, Sorted}, NewOffset) -> {sorted, NewOffset, Sorted};
-change_offset(Label, _) -> Label.
+change_offset({sorted, _Offset, Sorted}, NewOffset) ->
+  {sorted, NewOffset, Sorted};
+change_offset(Label, _) ->
+  Label.
 
 %% Create a list of zeros of the correct size
 create_zeros({sorted, Size, _Sorted}) ->
@@ -252,14 +249,19 @@ create_zeros({unsorted, Unsorted}) ->
 
 %% Find the max constant that exists in a LabelMap
 find_max_constant([], Max) -> Max;
-find_max_constant([A,_B,_C,_D|Rest], Max) when A>Max -> find_max_constant(Rest,A);
-find_max_constant([_A,_B,_C,_D|Rest], Max) -> find_max_constant(Rest,Max).
+find_max_constant([A,_B,_C,_D|Rest], Max) when A>Max ->
+  find_max_constant(Rest,A);
+find_max_constant([_A,_B,_C,_D|Rest], Max) ->
+  find_max_constant(Rest,Max).
 
 %% Untuplify a ConstMap. Returned in Reversed way!!!
-un_tuplify_4(ConstMap) -> un_tuplify_4(ConstMap, []).
+un_tuplify_4(ConstMap) ->
+  un_tuplify_4(ConstMap, []).
 
-un_tuplify_4([], Acc) -> Acc;
-un_tuplify_4([{A,B,C,D}|Rest], Acc) -> un_tuplify_4(Rest, [A,B,C,D|Acc]).
+un_tuplify_4([], Acc) ->
+  Acc;
+un_tuplify_4([{A,B,C,D}|Rest], Acc) ->
+  un_tuplify_4(Rest, [A,B,C,D|Acc]).
 
 %% Correlate object file relocation symbols with info from translation to llvm
 %% code. Also split relocations according to their type, as expected by the
@@ -278,9 +280,9 @@ fix_relocs([], _, _, Acc0, Acc1, Acc2, Acc3, Acc4) ->
           _ -> true
         end
     end,
-    {lists:filter(NotEmpty, Relocs), Acc4};
-fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
-  Acc4) ->
+  {lists:filter(NotEmpty, Relocs), Acc4};
+fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1,
+	   Acc2, Acc3, Acc4) ->
   case dict:fetch(Name, RelocsDict) of
     {atom, AtomName} ->
       NR = {AtomName, Offset},
@@ -296,8 +298,8 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
       fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], Acc4);
     {call, {hipe_bifs, llvm_expose_closure, A}} ->
       NR = {{hipe_bifs, llvm_expose_closure, 0}, Offset},
-      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3], [{Offset,
-        A}|Acc4]);
+      fix_relocs(Rs, RelocsDict, ModName, Acc0, Acc1, Acc2, [NR|Acc3],
+		 [{Offset,A} | Acc4]);
     %% MFA calls to functions in the same module are of type 3, while all
     %% other MFA calls are of type 2.
     {call, {ModName,_F,_A}=MFA} ->
@@ -315,7 +317,9 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, ModName, Acc0, Acc1, Acc2, Acc3,
 %% .rodata section, which are produced from switch statement translation.
 fix_rodata(Relocs) ->
   fix_rodata(Relocs, 0, []).
-fix_rodata([], _, Acc) -> Acc;
+
+fix_rodata([], _, Acc) ->
+  Acc;
 fix_rodata([{Name, Offset}=R|Rs], Num, Acc) ->
   case Name of
     ".rodata" ->
@@ -324,11 +328,13 @@ fix_rodata([{Name, Offset}=R|Rs], Num, Acc) ->
       fix_rodata(Rs, Num, [R|Acc])
   end.
 
-fix_rodata_1(Offset) -> fix_rodata_1(Offset, 0, []).
+fix_rodata_1(Offset) ->
+  fix_rodata_1(Offset, 0, []).
 
-fix_rodata_1([], _, Acc) -> Acc;
+fix_rodata_1([], _, Acc) ->
+  Acc;
 fix_rodata_1([O|Os], Base, Acc) ->
-  NewName = ".rodata"++integer_to_list(Base),
+  NewName = ".rodata" ++ integer_to_list(Base),
   fix_rodata_1(Os, Base+1, [{NewName, [O]}|Acc]).
 
 
@@ -336,7 +342,8 @@ fix_rodata_1([O|Os], Base, Acc) ->
 %% Fixing Stack Descriptors
 %%----------------------------------------------------------------------------
 
-closures_offsets_arity([], SDescs) -> SDescs;
+closures_offsets_arity([], SDescs) ->
+  SDescs;
 closures_offsets_arity(Closures, SDescs) ->
   {_,Offsets1} = lists:unzip(SDescs),
   Offsets2 = lists:sort(lists:flatten(Offsets1)),
@@ -345,8 +352,10 @@ closures_offsets_arity(Closures, SDescs) ->
       [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, Offsets2),
       {I, Arity}
   end,
-  Foo2 = fun ({OffList, Arity}) -> lists:map(fun(X) -> Foo({X,Arity}) end,
-        OffList) end,
+  Foo2 =
+    fun ({OffList, Arity}) ->
+	lists:map(fun(X) -> Foo({X,Arity}) end, OffList)
+    end,
   lists:map(Foo2, Closures).
 
 
@@ -395,31 +404,32 @@ calls_with_stack_args(Dict) ->
 %% This functions extracts the stack arity and the offset in the code of the
 %% calls that have stack arguments.
 calls_offsets_arity(Relocs, CallsWithStackArgs) ->
-  {_, Calls1} = lists:unzip(lists:filter(
-    fun ({X,_}) ->
-        case X of 3 -> true;
-          2-> true;
-          _ -> false
-        end
-    end, Relocs)),
+  {_, Calls1} =
+    lists:unzip(
+      lists:filter(fun ({X,_}) ->
+		       case X of 3 -> true;
+			 2-> true;
+			 _ -> false
+		       end
+		   end, Relocs)
+     ),
   Calls2 = lists:flatten(Calls1),
-  OffsetsArity1 = lists:map(
-    fun(X) -> case lists:keyfind(X, 1, Calls2) of
-          {X, Offs} ->
-            Arity = case X of
-              {_, A} -> A;
-              {_, _, A} -> A
-            end,
-            lists:map(fun(Z) -> {Z+4, Arity-?NR_ARG_REGS} end, Offs);
-          false -> []
-        end
-    end, CallsWithStackArgs),
+  OffsetsArity1 =
+    lists:map(fun(X) ->
+		  case lists:keyfind(X, 1, Calls2) of
+		    {X, Offs} ->
+		      Arity = case X of
+				{_, A} -> A;
+				{_, _, A} -> A
+			      end,
+		      lists:map(fun(Z) -> {Z+4, Arity-?NR_ARG_REGS} end, Offs);
+		    false -> []
+		  end
+	      end, CallsWithStackArgs),
   lists:flatten(OffsetsArity1).
-
 
 fix_sdescs1(SDescs, OffsetsArity) ->
   lists:foldl(fun fix_sdescs2/2, SDescs, OffsetsArity).
-
 
 fix_sdescs2(OffsetsArity, SDescs) ->
   lists:foldl(
@@ -428,8 +438,8 @@ fix_sdescs2(OffsetsArity, SDescs) ->
 %% If the offset of the call belongs to the offsets of the sdesc then
 %% remove the offset from the sdesc and create a new desc with the correct
 %% frame size and roots offsets.
-fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
-            OldOffsets} = SDesc) ->
+fix_sdescs3({Offset, Arity},
+	    {{ ExnHandler, FrameSize, StkArity, Roots}, OldOffsets} = SDesc) ->
   DecRoot = fun(X) -> X-Arity end,
   case lists:member(Offset, OldOffsets) of
     false ->
@@ -439,18 +449,16 @@ fix_sdescs3({Offset, Arity}, {{ ExnHandler, FrameSize, StkArity, Roots},
       NewSDesc =
       case length(NewRootsList)>0 andalso (hd(NewRootsList)>=0) of
         true ->
-          {{ExnHandler, FrameSize-Arity, StkArity, list_to_tuple(NewRootsList)},
-            [Offset]};
+          {{ExnHandler, FrameSize-Arity, StkArity,
+	    list_to_tuple(NewRootsList)}, [Offset]};
         false ->
           {{ExnHandler, FrameSize, StkArity, Roots}, [Offset]}
       end,
       RestOffsets = lists:delete(Offset, OldOffsets),
       RestSDesc = {{ExnHandler, FrameSize, StkArity, Roots},
-        RestOffsets},
+		   RestOffsets},
       [NewSDesc,  RestSDesc]
   end.
-
-%%----------------------------------------------------------------------------
 
 %%live_args({{ExnHandler, FrameSize, Arity, RootSet},Offs}=A) ->
 %%  case Arity>0 of
