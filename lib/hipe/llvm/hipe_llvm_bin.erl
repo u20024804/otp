@@ -17,6 +17,8 @@
   merge_refs/1
 ]).
 
+-include("hipe_llvm_arch.hrl").
+
 %%----------------------------------------------------------------------------
 %% Abstraction For LLVM Object File
 %%----------------------------------------------------------------------------
@@ -52,11 +54,9 @@ llvm_bin_codebinary(#llvm_bin{codebinary=Codebinary}) ->
   Codebinary.
 llvm_bin_refs(#llvm_bin{refs=Refs}) -> Refs.
 
-%%----------------------------------------------------------------------------
 
-
-%%----------------------------------------------------------------------------
-%% Join llvm_binaries as produced by whole module compilation.
+%%------------------------------------------------------------------------------
+%% @doc Join llvm_binaries as produced by whole module compilation.
 %% We join the binary code and compute total code size.
 %% Also update offsets to exportmap, labelmap and refs.
 %% Finally we assign unique labels to constants and
@@ -64,21 +64,18 @@ llvm_bin_refs(#llvm_bin{refs=Refs}) -> Refs.
 %% While joining constmaps and labelmaps special care must be taken in order
 %% to preserve the order of constants/labels because it is critical for the
 %% way compute_const_size/2 works.
-%%----------------------------------------------------------------------------
+%% @end
+%%------------------------------------------------------------------------------
 join_binaries(Binaries, Closures, Exports) ->
   Version = llvm_bin_version(lists:nth(1,Binaries)),
   CheckSum = llvm_bin_checksum(lists:nth(1,Binaries)),
   {CodeSize, CodeBinary, ExportMap} = join_code(Binaries),
-  %io:format("CodeSize
-  %  ~w~nCodeBinary~w~nExportMap~w~n",[CodeSize,CodeBinary,ExportMap]),
   LabelMap = join_labelmaps(Binaries, ExportMap),
- % io:format("LabelMap ~w~n",[LabelMap]),
   {ConstAlign, ConstSize} = correct_align_size(Binaries),
   {ConstMap, Refs} = join_relocations(Binaries, ExportMap),
   ConstMap1 = remove_empty_lists(ConstMap),
   LabelMap1 = remove_empty_lists(LabelMap),
   FinalRefs = merge_refs(Refs),
-%  io:format("ConstMap ~w ~nRefs ~wn",[ConstMap, Refs]),
   FinalExportMap = fix_exportmap(ExportMap, Closures, Exports),
   {FinalConstMap, FinalLabelMap} = compute_const_size(ConstMap1, LabelMap1),
   term_to_binary([{Version, CheckSum},
@@ -88,18 +85,15 @@ join_binaries(Binaries, Closures, Exports) ->
  ]).
 
 %%----------------------------------------------------------------------------
-
-%%----------------------------------------------------------------------------
 %% Misc Functions
 %%----------------------------------------------------------------------------
 
-%% Join binary code and compute code size.
+%% @doc Join binary code and compute code size.
 %% Also fix exportmap with correct code offset
 join_code(Binaries) -> join_code(Binaries, 0, <<>>, []).
 
 join_code([], CodeSize, CodeBinary, ExportMap) ->
   {CodeSize, CodeBinary, lists:reverse(ExportMap)};
-
 join_code([#llvm_bin{codesize=CodeSize, codebinary=CodeBinary,
       exportmap=ExportMap} | Rest], SizeAcc, BinaryAcc, ExportAcc) ->
   {M,F,A} = ExportMap,
@@ -107,19 +101,21 @@ join_code([#llvm_bin{codesize=CodeSize, codebinary=CodeBinary,
   join_code(Rest, SizeAcc+CodeSize, <<BinaryAcc/binary, CodeBinary/binary>>,
             [NewExportMap|ExportAcc]).
 
-%%----------------------------------------------------------------------------
 
-%% Add correct offset to each label in LabelMap
+%% @doc Add correct offset to each label in LabelMap
 join_labelmaps(Binaries, ExportMap) ->
   join_labelmaps(Binaries, ExportMap, []).
 
+%% XXX: The LabelAcc is a list of lists, because we want
+%% to reverse it in the end of the function, but we do not
+%% want to loose the order in each of the seperate LabelMaps.
 join_labelmaps([], [], LabelAcc) ->
-  lists:reverse(lists:flatten(LabelAcc));
+  lists:flatten(lists:reverse(LabelAcc));
 join_labelmaps([#llvm_bin{labelmap=LabelMap}|Rest],
                     [E|Es], LabelAcc) ->
   {Offset, _, _, _} = E,
   NewLabelMap = add_offset_to_labels(LabelMap, Offset),
-  join_labelmaps(Rest, Es, [NewLabelMap|LabelAcc]).
+  join_labelmaps(Rest, Es, [[NewLabelMap]|LabelAcc]).
 
 add_offset_to_labels(LabelMap, Offset) ->
   AddOffSet1 =
@@ -137,9 +133,8 @@ add_offset_to_labels(LabelMap, Offset) ->
     end,
   lists:map(AddOffSet2, LabelMap).
 
-%%----------------------------------------------------------------------------
 
-%% Find ConstAlign and ConstSize. They are the max of the ConstAlign
+%% @doc Find ConstAlign and ConstSize. They are the max of the ConstAlign
 %% and the sum of ConstSize of each MFA.
 correct_align_size(Binaries) ->
   MaxAlign = fun (#llvm_bin{constalign=Align}, Acc) -> max(Align, Acc) end,
@@ -148,8 +143,6 @@ correct_align_size(Binaries) ->
   ConstSize = lists:foldl(AddSize, 0, Binaries),
   {ConstAlign, ConstSize}.
 
-
-%%----------------------------------------------------------------------------
 
 %% Remove Empty Lists from a list
 remove_empty_lists(List) ->
@@ -162,16 +155,16 @@ remove_empty_lists(List) ->
     end,
   lists:filter(IsNotEmptyList, List).
 
-%% Give unique labels to constants, and update them in Refs.
+%% @doc Give unique labels to constants, and update them in Refs.
 %% Also add correct offset to each relocation in Refs.
+%% TODO: Remove hard-coded 10000. Find a better way to assign constant
+%% numbers.
 join_relocations(Binaries, ExportMap) ->
   join_relocations(Binaries, ExportMap, [] ,[], 10000).
 
 join_relocations([], [], ConstAcc, RefAcc, _) ->
   ConstAcc1 = un_tuplify_4(ConstAcc),
   {ConstAcc1, RefAcc};
-
-
 join_relocations([Bin|Bs], [Export|Es], ConstAcc, RefAcc, BaseLabel) ->
   {Offset, _, _, _} = Export,
   ConstMap = llvm_bin_constmap(Bin),
@@ -180,7 +173,7 @@ join_relocations([Bin|Bs], [Export|Es], ConstAcc, RefAcc, BaseLabel) ->
   {ConstMap2, Refs2, NewBaseLabel} =
     unique_const_labels(ConstMap1, Refs, BaseLabel),
   ConstMap3 = lists:reverse(ConstMap2),
-  NewRefs = add_offset_to_relocs(Refs2, Offset),
+  NewRefs = add_offset_to_refs(Refs2, Offset),
   join_relocations(Bs, Es, ConstMap3++ConstAcc, NewRefs++RefAcc,
                   NewBaseLabel).
 
@@ -193,7 +186,7 @@ unique_const_labels(ConstMap, Refs, BaseLabel) ->
   NewRefs = substitute_const_label(Refs, BaseLabel),
   {ConstMap1, NewRefs, BaseLabel+ConstLength}.
 
-%% Convert constmap in tuples of 4 elements
+%% @doc Convert constmap in tuples of 4 elements
 %% List is return in the some order!
 tuplify_4(ConstMap) -> tuplify_4(ConstMap, []).
 tuplify_4([], Acc) -> lists:reverse(Acc);
@@ -204,6 +197,7 @@ un_tuplify_4(ConstMap) -> un_tuplify_4(ConstMap, []).
 un_tuplify_4([], Acc) -> Acc;
 un_tuplify_4([{A,B,C,D}|Rest], Acc) -> un_tuplify_4(Rest, [A,B,C,D|Acc]).
 
+%% @doc Substitute constant labels. Constant exist only in relocations of type 1.
 substitute_const_label(Refs, Base) ->
   Subst_if_const =
     fun ({X, List}) ->
@@ -221,7 +215,8 @@ substitute_const_label(Refs, Base) ->
     end,
   lists:map(Subst_if_type, Refs).
 
-add_offset_to_relocs(Refs, Size) ->
+%% @doc Update the RAs and Exception Hanlers of refs
+add_offset_to_refs(Refs, Size) ->
   Update_offset = fun (X) -> X+Size end,
   %% In case of an SDesc update exception handling label
   Update_exn_label =
@@ -239,11 +234,10 @@ add_offset_to_relocs(Refs, Size) ->
     end,
   lists:keymap(fun (X) -> lists:map(Update_relocs, X) end, 2, Refs).
 
-%%----------------------------------------------------------------------------
 
-%% In case of whole module compilation the same relocation must appear in many
-%% functions. This function merges same relocation of differents functions in
-%% one relocation with many offsets.
+%% @doc In case of whole module compilation the same relocation must appear in
+%% many functions. This function merges same relocation of differents functions
+%% in one relocation with many offsets.
 merge_refs(Refs) -> merge_refs(Refs, []).
 
 merge_refs([], Acc) -> Acc;
@@ -261,7 +255,6 @@ merge_refs([{Type, _ElemList}=R|Rs], Acc) ->
 merge_refs([N|_]=List, _) when is_integer(N) ->
   List.
 
-%%----------------------------------------------------------------------------
 
 %% Update ExportMap with information about whether a function is a closure
 %% and whether it is exported.
@@ -273,15 +266,13 @@ fix_exportmap([],_,_) -> [].
 
 is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
 
-%%----------------------------------------------------------------------------
 
 %% Fix Constant offsets in Constmap. Also update corresponding
-%% offsets in LabelMap
+%% offsets in LabelMap (Each constant of type 1 is a jump table, so an
+%% entry in the LabelMap must occur).
 compute_const_size(ConstMap, LabelMap) ->
   ConstMap1 = tuplify_4(ConstMap),
   {ConstMap2, LabelMap2} = compute_const_size(ConstMap1, LabelMap, 0, [], []),
-  %io:format("--> ConstMap2 ~w~n", [ConstMap2]),
-  %ConstMap4= lists:reverse(ConstMap3),
   ConstMap3 = un_tuplify_4(ConstMap2),
   {ConstMap3, LabelMap2}.
 
@@ -299,8 +290,7 @@ compute_const_size([{Label, Offset, Type, Constant}|Rest], LabelMap,
         [] ->
           compute_const_size(Rest, LabelMap, Base+length(Constant), [{Label, Base, Type,
                               Constant}|ConstAcc], LabelAcc);
-        Other ->
-          [L|Ls] =LabelMap,
+        [L|Ls] ->
           %% Check whether the sizes of the constant and the label match
           case check_sizes(Constant, L) of
             match ->
@@ -311,10 +301,10 @@ compute_const_size([{Label, Offset, Type, Constant}|Rest], LabelMap,
               compute_const_size(Rest, LabelMap, Base+length(Constant), [{Label, Base, Type,
                     Constant}|ConstAcc], LabelAcc)
           end
-    end;
-  2 -> compute_const_size(Rest, LabelMap, Base+8*length(Constant), [{Label, Base, Type,
-          Constant}|ConstAcc], LabelAcc)
-end.
+      end;
+    2 -> compute_const_size(Rest, LabelMap, Base+8*length(Constant), [{Label, Base, Type,
+            Constant}|ConstAcc], LabelAcc)
+  end.
 
 fix_label_offset({sorted, _, Sorted}, Offset) ->
   [{sorted,Offset,Sorted}];
@@ -325,14 +315,14 @@ check_sizes(Constant, Label) ->
   LabelSize =
   case Label of
     {sorted,_, Sorted} ->
-      length(Sorted)*8;
+      length(Sorted)*(?WORD_WIDTH div 8);
     {unsorted, Unsorted} ->
-      length(Unsorted)*8
+      length(Unsorted)*(?WORD_WIDTH div 8)
   end,
-  case length(Constant) of
-    LabelSize ->
+  case length(Constant) =:= LabelSize of
+    true ->
       match;
-    Other ->
+    false ->
       %io:format("No Constant/Label match:~nconst_size~w~nlabel_size:~w~n", [length(Constant),LabelSize]),
       no_match
   end.
