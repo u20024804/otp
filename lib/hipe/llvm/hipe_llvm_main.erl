@@ -24,7 +24,7 @@ rtl_to_native(RTL, Roots, Options) ->
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
-  DirName = "llvm_ " ++ unique_id() ++ "/",
+  DirName = "llvm_" ++ unique_id() ++ "/",
   Dir =
     case proplists:get_bool(llvm_save_temps, Options) of
       true ->  %% Store folder in current directory
@@ -38,7 +38,6 @@ rtl_to_native(RTL, Roots, Options) ->
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
   ObjectFile = compile_with_llvm(Dir, Filename, Options),
-  %% Remove .ll file
   %% Extract information from object file
   ObjBin = elf64_format:open_object_file(ObjectFile),
   %% Get relocation info
