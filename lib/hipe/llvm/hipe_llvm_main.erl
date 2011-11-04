@@ -2,7 +2,7 @@
 -module(hipe_llvm_main).
 
 -export([rtl_to_native/3]).
--export([remove_intermediate_file/1]).
+-export([remove_folder/1]).
 
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
@@ -23,15 +23,23 @@ rtl_to_native(RTL, Roots, Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
-  %% Save temp files in /tmp. (TODO: Use a random folder)
-  {ok, File_llvm} = file:open("/tmp/" ++ Filename ++ ".ll", [write]),
+  %% Save temp files in in a unique folder in /tmp/ or in current dir
+  %% if llvm_save_temps in enabled
+  Dir =
+    case proplists:get_bool(llvm_save_temps, Options) of
+      true ->
+        "llvm_"++integer_to_list(erlang:phash2({node(),now()}))++"/";
+      false ->
+        "/tmp/llvm_"++integer_to_list(erlang:phash2({node(),now()}))++"/"
+    end,
+  os:cmd("mkdir "++Dir),
+  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [write]),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
-  ObjectFile = compile_with_llvm("/tmp/", Filename, Options),
+  compile_with_llvm(Dir, Filename, Options),
   %% Remove .ll file
-  spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".ll"]),
   %% Extract information from object file
-  ObjBin = elf64_format:open_object_file(ObjectFile),
+  ObjBin = elf64_format:open_object_file(Dir++Filename++".o"),
   %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
@@ -52,9 +60,12 @@ rtl_to_native(RTL, Roots, Options) ->
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
   %% Remove .o file
-  spawn(?MODULE, remove_intermediate_file, ["/tmp/"++Filename++".opt.o"]),
   %% ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
   %% Create All Information needed by the hipe_unified_loader
+  case proplists:get_bool(llvm_save_temps, Options) of
+    true -> ok;
+    false -> spawn(?MODULE, remove_folder, [Dir])
+  end,
   ExportMap = Fun,
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
@@ -73,108 +84,83 @@ rtl_to_native(RTL, Roots, Options) ->
   Bin.
 
 %%
-remove_intermediate_file(FileName) ->
-  os:cmd("rm "++FileName).
+remove_folder(FolderName) ->
+  os:cmd("rm -r "++FolderName).
 
 %%-----------------------------------------------------------------------------
 %%------------------------- LLVM TOOL CHAIN ------------------------------------
 %%------------------------------------------------------------------------------
 
-%% @doc Compile .ll file with LLVM tools
+%% @doc Compile file with LLVM tools
 compile_with_llvm(Dir, Fun_Name, Options) ->
-  %% Opt_filename = opt(Fun_Name),
-  %% llc(Opt_filename, Fun_Name),
-  %% llvmc(Fun_Name).
-  myllvmc(Dir, Fun_Name, Options).
+  llvm_as(Dir, Fun_Name),
+  llvm_opt(Dir,Fun_Name, Options),
+  llvm_llc(Dir, Fun_Name, Options),
+  llvm_llvmc(Dir, Fun_Name).
 
-%%%% OPT wrapper (.ll -> .ll)
-%%opt(Fun_Name) ->
-%%  Options = ["-mem2reg", "-O2"], %XXX: Do we want -O3?
-%%  opt(Fun_Name, Options).
-%%
-%%opt(Fun_Name, Opts) ->
-%%  Llvm_file = Fun_Name ++ ".ll",
-%%  Opt_llvm_filename = Fun_Name ++ "_42_", %New (optimized) file
-%%  Opt_llvm_file = Opt_llvm_filename ++ ".ll",
-%%  Command = "opt " ++ fix_opts(Opts) ++ " -S" ++ " -o " ++ Opt_llvm_file ++ " "
-%%    ++ Llvm_file,
-%%  case os:cmd(Command) of
-%%    [] -> ok;
-%%    Error -> exit({?MODULE, opt, Error})
-%%  end,
-%%  Opt_llvm_filename.
-%%
-%%%% LLC wrapper (.ll -> .s)
-%%llc(Opt_filename, Fun_Name) ->
-%%  Options = ["-O3", "-code-model=medium", "-load=ErlangGC.so",
-%%	     "-stack-alignment=8", "-tailcallopt"],
-%%  llc(Opt_filename, Fun_Name, Options).
-%%
-%%llc(Opt_filename, Fun_Name, Opts) ->
-%%  Llvm_file = Opt_filename ++ ".ll",
-%%  Asm_file = Fun_Name ++ ".s",
-%%  Command = "llc " ++ fix_opts(Opts) ++ " " ++ Llvm_file ++ " -o " ++ Asm_file,
-%%  case os:cmd(Command) of
-%%    [] -> ok;
-%%    Error -> exit({?MODULE, llvmc, Error})
-%%  end.
+%% @doc Invoke llvm-as tool to convert LLVM Asesmbly to bitcode.
+llvm_as(Dir, Fun_Name) ->
+  Source = Dir++Fun_Name++".ll",
+  Dest = Dir++Fun_Name++".bc",
+  Command= "llvm-as "++Source++" -o "++Dest,
+  case os:cmd(Command) of
+    [] -> ok;
+    Error -> exit({?MODULE, opt, Error})
+  end.
 
-%%%% LLVMC wrapper (.s -> .o)
-%%llvmc(Fun_Name) ->
-%%  Options = [],
-%%  llvmc(Fun_Name, Options).
-%%
-%%llvmc(Fun_Name, Opts) ->
-%%  Asm_File = Fun_Name++".s",
-%%  Object_filename = Fun_Name ++ ".o",
-%%  Command = "llvmc " ++ fix_opts(Opts) ++ " -c " ++ Asm_File ++ " -o "
-%%    ++ Object_filename,
-%%  case os:cmd(Command) of
-%%    [] -> ok;
-%%    Error -> exit({?MODULE, llvmc, Error})
-%%  end,
-%%  Object_filename.
+%% @doc Invoke opt tool to optimize the bitcode.
+llvm_opt(Dir, Fun_Name, _Optons) ->
+  Source = Dir++Fun_Name++".bc",
+  Dest = Source,
+  OptFlags = ["-mem2reg", "-O2", "-strip-debug"],
+  Command= "opt "++fix_opts(OptFlags)++" "++Source++" -o "++Dest,
+  case os:cmd(Command) of
+    [] -> ok;
+    Error -> exit({?MODULE, opt, Error})
+  end.
 
-%% @doc My LLVMC that triggers everything (uses bitcode for intermediate files)
-myllvmc(Dir, Fun_Name, Options) ->
-  AsmFile  = Dir ++ Fun_Name ++ ".ll",
-  %% Write object files to /tmp
-  ObjectFile = "/tmp/" ++ Fun_Name ++ ".opt.o",
+%% @doc Invoke llc tool to compile the bitcode to native assembly.
+llvm_llc(Dir, Fun_Name, Options) ->
+  Source = Dir++Fun_Name++".bc",
   OptLevel =
     case proplists:get_value(llvm_opts, Options) of
       o1 -> "-O1";
       o2 -> "-O2";
       o3 -> "-O3";
+      undefined -> "-O2";
       Other ->
         io:format("Unknown optimization Level: ~w~n",[Other]),
         "-O2"
     end,
-  OptFlags = ["-mem2reg", "-strip-debug"],
   Align = integer_to_list(?WORD_WIDTH div 8),
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
 	      "-stack-alignment="++Align, "-tailcallopt"],
-  SaveTemps =
-    case proplists:get_bool(llvm_save_temps, Options) of
-      true -> "--save-temps";
-      false -> ""
-    end,
-  Command = "llvmc "++SaveTemps++" -opt -Wo" ++ fix_opts(OptFlags, ",")
-    ++ " -Wllc" ++ fix_opts(LlcFlags, ",")
-    ++ " -c " ++ AsmFile ++ " -o " ++ ObjectFile,
+  Command= "llc "++fix_opts(LlcFlags)++" "++Source,
+  case os:cmd(Command) of
+    [] -> ok;
+    Error -> exit({?MODULE, opt, Error})
+  end.
+
+%% @doc Invoke the llvmc tool to generate and object file from the native
+%% assembly.
+llvm_llvmc(Dir, Fun_Name) ->
+  Source = Dir++Fun_Name++".s",
+  Dest = Dir++Fun_Name++".o",
+  Command = "gcc -c " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, llvmc, Error})
-  end,
-  ObjectFile.
+  end.
+
 
 %% Join options
 fix_opts(Opts) ->
   string:join(Opts, " ").
 
--define(Stringify(S), "\"" ++ S ++ "\"").
-fix_opts(Opts, Sep) ->
-  Opts2 = lists:map(fun(X) -> ?Stringify(X) end, Opts),
-  Sep ++ string:join(Opts2, Sep).
+%%-define(Stringify(S), "\"" ++ S ++ "\"").
+%%fix_opts(Opts, Sep) ->
+%%  Opts2 = lists:map(fun(X) -> ?Stringify(X) end, Opts),
+%%  Sep ++ string:join(Opts2, Sep).
 
 %%------------------------------------------------------------------------------
 %% Functions to manage relocations
