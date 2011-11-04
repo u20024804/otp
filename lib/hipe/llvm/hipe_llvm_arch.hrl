@@ -1,0 +1,4 @@
+-define(WORD_WIDTH, 64).
+-define(NR_PINNED_REGS, 2).
+-define(NR_ARG_REGS, 4).
+-define(ARCH_REGISTERS, hipe_amd64_registers).
