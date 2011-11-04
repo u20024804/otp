@@ -23,23 +23,24 @@ rtl_to_native(RTL, Roots, Options) ->
   Fun = hipe_rtl:rtl_fun(RTL),
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
-  %% Save temp files in in a unique folder in /tmp/ or in current dir
-  %% if llvm_save_temps in enabled
+  %% Save temp files in a unique folder
+  DirName = "llvm_ " ++ unique_id() ++ "/",
   Dir =
     case proplists:get_bool(llvm_save_temps, Options) of
-      true ->
-        "llvm_"++integer_to_list(erlang:phash2({node(),now()}))++"/";
-      false ->
-        "/tmp/llvm_"++integer_to_list(erlang:phash2({node(),now()}))++"/"
+      true ->  %% Store folder in current directory
+          DirName;
+      false -> %% Temporarily store folder in "/tmp" (rm afterwards)
+        "/tmp/" ++ DirName
     end,
-  os:cmd("mkdir "++Dir),
+  create_folder(Dir),
   {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [write]),
+  %% Print LLVM assembly to file
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% Invoke LLVM compiler tool to produce an object file
-  compile_with_llvm(Dir, Filename, Options),
+  ObjectFile = compile_with_llvm(Dir, Filename, Options),
   %% Remove .ll file
   %% Extract information from object file
-  ObjBin = elf64_format:open_object_file(Dir++Filename++".o"),
+  ObjBin = elf64_format:open_object_file(ObjectFile),
   %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
@@ -83,9 +84,15 @@ rtl_to_native(RTL, Roots, Options) ->
     Refs),
   Bin.
 
-%%
+%% Misc. functions
+create_folder(FolderName) ->
+  os:cmd("mkdir " ++ FolderName).
+
 remove_folder(FolderName) ->
-  os:cmd("rm -r "++FolderName).
+  os:cmd("rm -r " ++ FolderName).
+
+unique_id() ->
+  integer_to_list(erlang:phash2({node(),now()})).
 
 %%-----------------------------------------------------------------------------
 %%------------------------- LLVM TOOL CHAIN ------------------------------------
@@ -96,13 +103,13 @@ compile_with_llvm(Dir, Fun_Name, Options) ->
   llvm_as(Dir, Fun_Name),
   llvm_opt(Dir,Fun_Name, Options),
   llvm_llc(Dir, Fun_Name, Options),
-  llvm_llvmc(Dir, Fun_Name).
+  compile(Dir, Fun_Name, "gcc").
 
 %% @doc Invoke llvm-as tool to convert LLVM Asesmbly to bitcode.
 llvm_as(Dir, Fun_Name) ->
-  Source = Dir++Fun_Name++".ll",
-  Dest = Dir++Fun_Name++".bc",
-  Command= "llvm-as "++Source++" -o "++Dest,
+  Source = Dir ++ Fun_Name ++ ".ll",
+  Dest = Dir ++ Fun_Name ++ ".bc",
+  Command= "llvm-as " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, opt, Error})
@@ -110,10 +117,10 @@ llvm_as(Dir, Fun_Name) ->
 
 %% @doc Invoke opt tool to optimize the bitcode.
 llvm_opt(Dir, Fun_Name, _Optons) ->
-  Source = Dir++Fun_Name++".bc",
+  Source = Dir ++ Fun_Name ++ ".bc",
   Dest = Source,
   OptFlags = ["-mem2reg", "-O2", "-strip-debug"],
-  Command= "opt "++fix_opts(OptFlags)++" "++Source++" -o "++Dest,
+  Command= "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, opt, Error})
@@ -121,7 +128,7 @@ llvm_opt(Dir, Fun_Name, _Optons) ->
 
 %% @doc Invoke llc tool to compile the bitcode to native assembly.
 llvm_llc(Dir, Fun_Name, Options) ->
-  Source = Dir++Fun_Name++".bc",
+  Source = Dir ++ Fun_Name ++ ".bc",
   OptLevel =
     case proplists:get_value(llvm_opts, Options) of
       o1 -> "-O1";
@@ -134,33 +141,29 @@ llvm_llc(Dir, Fun_Name, Options) ->
     end,
   Align = integer_to_list(?WORD_WIDTH div 8),
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
-	      "-stack-alignment="++Align, "-tailcallopt"],
-  Command= "llc "++fix_opts(LlcFlags)++" "++Source,
+	      "-stack-alignment=" ++ Align, "-tailcallopt"],
+  Command= "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, opt, Error})
   end.
 
-%% @doc Invoke the llvmc tool to generate and object file from the native
-%% assembly.
-llvm_llvmc(Dir, Fun_Name) ->
-  Source = Dir++Fun_Name++".s",
-  Dest = Dir++Fun_Name++".o",
-  Command = "gcc -c " ++ Source ++ " -o " ++ Dest,
+%% @doc Invoke the compiler tool ("gcc", "llvmc", etc.) to generate an object
+%%      file from native assembly.
+compile(Dir, Fun_Name, Compiler) ->
+  Source = Dir ++ Fun_Name ++ ".s",
+  Dest = Dir ++ Fun_Name ++ ".o",
+  Command = Compiler ++ " -c " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, llvmc, Error})
-  end.
+  end,
+  Dest.
 
 
 %% Join options
 fix_opts(Opts) ->
   string:join(Opts, " ").
-
-%%-define(Stringify(S), "\"" ++ S ++ "\"").
-%%fix_opts(Opts, Sep) ->
-%%  Opts2 = lists:map(fun(X) -> ?Stringify(X) end, Opts),
-%%  Sep ++ string:join(Opts2, Sep).
 
 %%------------------------------------------------------------------------------
 %% Functions to manage relocations
