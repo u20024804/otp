@@ -18,12 +18,12 @@
 %% %CopyrightEnd%
 %%
 %% ====================================================================
-%% Copyright (c) 1998 by Erik Johansson.  All Rights Reserved 
+%% Copyright (c) 1998 by Erik Johansson.  All Rights Reserved
 %% ====================================================================
 %%  Filename : hipe.erl
 %%  Module   : hipe
-%%  Purpose  :  
-%%  Notes    : 
+%%  Purpose  :
+%%  Notes    :
 %%  History  : * 1998-01-28 Erik Johansson (happi@it.uu.se): Created.
 %% ====================================================================
 %% @doc This is the direct interface to the HiPE compiler.
@@ -79,7 +79,7 @@
 %%     <dd>Make the HiPE compiler output information about what it is
 %%     being done.</dd>
 %% </dl>
-%% 
+%%
 %% <h3>Advanced Options</h3>
 %%
 %% Note: You can also specify <code>{Option, false}</code> to turn a
@@ -173,7 +173,7 @@
 %%
 %%   <dt><code>use_callgraph</code></dt>
 %%     <dd>Use a static call graph for determining the order in which
-%%         the functions of a module should be compiled (in reversed 
+%%         the functions of a module should be compiled (in reversed
 %%         topological sort order).</dd>
 %% </dl></p>
 %%
@@ -237,7 +237,7 @@
 %% @spec load(Mod) -> {module, Mod} | {error, Reason}
 %%     Mod = mod()
 %%     Reason = term()
-%% 
+%%
 %% @doc Like load/2, but tries to locate a BEAM file automatically.
 %%
 %% @see load/2
@@ -255,7 +255,7 @@ load(Mod) ->
 %%     filename() = term()
 %%
 %% @type mod() = atom(). A module name.
-%% 
+%%
 %% @doc User interface for loading code into memory. The code can be
 %% given as a native code binary or as the file name of a BEAM file
 %% which should contain a native-code chunk. If only the module name is
@@ -295,7 +295,7 @@ c(Name) ->
 %% @type fun() = atom(). A function identifier.
 %%
 %% @type arity() = integer(). A function arity; always nonnegative.
-%% 
+%%
 %% @doc User-friendly native code compiler interface. Reads BEAM code
 %% from the corresponding "Module<code>.beam</code>" file in the
 %% system path, and compiles the whole module to native code. By
@@ -377,7 +377,7 @@ user_compile_opts(Opts) ->
 %%       Name = mod()
 %%       Binary = binary()
 %%       Reason = term()
-%% 
+%%
 %% @equiv compile(Name, [])
 
 -spec compile(mod()) -> {'ok', compile_ret()} | {'error', term()}.
@@ -427,7 +427,7 @@ beam_file(Module) when is_atom(Module) ->
 %%       File = filename() | binary()
 %%       Binary = binary()
 %%       Reason = term()
-%% 
+%%
 %% @doc Like <code>compile/2</code>, but reads BEAM code from the
 %% specified <code>File</code>.
 %%
@@ -491,7 +491,7 @@ compile_core(Name, Core0, File, Opts) ->
 %%       File = filename() | binary()
 %%       Binary = binary()
 %%       Reason = term()
-%% 
+%%
 %% @doc Like <code>compile/3</code>, but unless <code>Core</code> is
 %% <code>[]</code>, low-level code is generated from the given Core
 %% Erlang code instead of from the BEAM code.
@@ -518,7 +518,7 @@ compile(Name, Core, File, Opts) when is_atom(Name) ->
 %%       Name = mod() | mfa()
 %%       Binary = binary()
 %%       Reason = term()
-%% 
+%%
 %% @equiv file(File, [])
 
 -spec file(Mod) -> {'ok', Mod, compile_ret()} | {'error', term()}
@@ -532,7 +532,7 @@ file(File) ->
 %%       Name = mod() | mfa()
 %%       Binary = binary()
 %%       Reason = term()
-%% 
+%%
 %% @doc Like <code>compile/2</code>, but takes the module name from the
 %% specified <code>File</code>. Returns both the name and the final
 %% binary if successful.
@@ -604,7 +604,7 @@ get_core_icode(Mod, Core, File, Options) ->
 	       (catch {ok, cerl_to_icode:module(Core, Options)}),
 	       "BEAM-to-Icode", Options),
   NeedBeamCode = not proplists:get_bool(load, Options),
-  BeamBin = 
+  BeamBin =
     case NeedBeamCode of
       true -> [];
       false -> get_beam_code(File)
@@ -664,7 +664,7 @@ run_compiler_1(DisasmFun, IcodeFun, Options) ->
 	      infinity -> infinity;
 	      Other ->
 		?WARNING_MSG("Bad timeout value: ~P\n"
-			     "Using default timeout limit.\n",	
+			     "Using default timeout limit.\n",
 			     [Other, 5]),
 		?DEFAULT_TIMEOUT
 	    end,
@@ -712,12 +712,12 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
     hipe_icode:icode_is_closure(Icode)],
   Bin =
   case proplists:get_value(use_callgraph, Opts) of
-    true -> 
+    true ->
       %% Compiling the functions bottom-up by using a call graph
       CallGraph = hipe_icode_callgraph:construct(List),
       OrdList = hipe_icode_callgraph:to_list(CallGraph),
       finalize_fun(OrdList, Exports, Opts);
-    _ -> 
+    _ ->
       %% Compiling the functions bottom-up by reversing the list
       OrdList = lists:reverse(List),
       finalize_fun(OrdList, Exports, Opts)
@@ -739,12 +739,12 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
   {T1Compile,_} = erlang:statistics(runtime),
   CompiledCode =
   case proplists:get_value(use_callgraph, Opts) of
-    true -> 
+    true ->
       %% Compiling the functions bottom-up by using a call graph
       CallGraph = hipe_icode_callgraph:construct(List),
       OrdList = hipe_icode_callgraph:to_list(CallGraph),
       finalize_fun(OrdList, Exports, Opts);
-    _ -> 
+    _ ->
       %% Compiling the functions bottom-up by reversing the list
       OrdList = lists:reverse(List),
       finalize_fun(OrdList, Exports, Opts)
@@ -759,22 +759,22 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
     false ->
       Closures =
       [MFA || {MFA, Icode} <- List,
-        hipe_icode:icode_is_closure(Icode)],
+	hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
       try assemble(CompiledCode, Closures, Exports, Opts) of
-        Bin ->
-          {T2,_} = erlang:statistics(runtime),
-          ?when_option(verbose, Opts,
-            ?debug_untagged_msg(" in ~.2f s\n",
-              [(T2-T1)/1000])),
-          {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
-          TargetArch = get(hipe_target_arch),
-          {ok, {TargetArch,Bin}}
-        catch
-          error:Error ->
-            {error,Error,erlang:get_stacktrace()}
-        end
+	Bin ->
+	  {T2,_} = erlang:statistics(runtime),
+	  ?when_option(verbose, Opts,
+	    ?debug_untagged_msg(" in ~.2f s\n",
+	      [(T2-T1)/1000])),
+	  {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
+	  TargetArch = get(hipe_target_arch),
+	  {ok, {TargetArch,Bin}}
+	catch
+	  error:Error ->
+	    {error,Error,erlang:get_stacktrace()}
+	end
     end.
 
 finalize_fun(MfaIcodeList, Exports, Opts) ->
@@ -794,7 +794,7 @@ finalize_fun_concurrent(MfaIcodeList, Exports, Opts) ->
       Closures = [{MFA, true} || {MFA, Icode} <- MfaIcodeList,
 				 hipe_icode:icode_is_closure(Icode)],
       Exported = [{{M, F, A}, false} || {F, A} <- Exports],
-      NonEscaping = [MFA || {{_M, F, A} = MFA, Icode} <- MfaIcodeList, 
+      NonEscaping = [MFA || {{_M, F, A} = MFA, Icode} <- MfaIcodeList,
 			    not lists:member({F, A}, Exports),
 			    not hipe_icode:icode_is_closure(Icode)],
       Escaping = Closures ++ Exported,
@@ -874,7 +874,7 @@ pp_server() ->
       Fun(), pp_server();
     {stop, Pid} ->
       Pid ! {done, self()};
-    _ -> 
+    _ ->
       pp_server()
   end.
 
@@ -995,13 +995,13 @@ init(_Options) ->
 %% --------------------------------------------------------------------
 
 post(Res, Icode, Options) ->
-  TimerVals = 
+  TimerVals =
     case proplists:get_value(timers, Options) of
       Timers when is_list(Timers) ->
 	[{Timer, ?get_hipe_timer_val(Timer)} || Timer <- Timers];
       _ -> []
     end,
-  CounterVals = 
+  CounterVals =
     case proplists:get_value(counters, Options) of
       Counters when is_list(Counters) ->
 	[case Counter of
@@ -1011,7 +1011,7 @@ post(Res, Icode, Options) ->
 	 || Counter <- Counters];
       _ -> []
     end,
-  Measures = 
+  Measures =
     case proplists:get_bool(measure_regalloc, Options) of
       true ->
 	get();  % return whole process dictionary list (simplest way...)
@@ -1045,7 +1045,7 @@ version() ->
   ?VERSION_STRING().
 
 %% --------------------------------------------------------------------
-%% D O C U M E N T A T I O N   -   H E L P 
+%% D O C U M E N T A T I O N   -   H E L P
 %% --------------------------------------------------------------------
 
 %% @doc Prints on-line documentation to the standard output.
@@ -1086,25 +1086,25 @@ help_hiper() ->
   M =
     " This interface is supposed to be used by HiPE-developers only!\n" ++
     " Note that all options are specific to the HiPE compiler.\n" ++
-    "   c(Name,Options)\n" ++ 
+    "   c(Name,Options)\n" ++
     "     Compiles the module or function Name and loads it\n" ++
     "     to memory. Name is an atom or a tuple {M,F,A}.\n" ++
     "   c(Name)\n" ++
     "     As above, but using only default options.\n" ++
-    "   f(File,Options)\n" ++ 
+    "   f(File,Options)\n" ++
     "     As c(Name,File,Options), but taking the module name\n" ++
     "     from File.\n" ++
-    "   f(File)\n" ++ 
+    "   f(File)\n" ++
     "     As above, but using only default options.\n" ++
     "   compile(Name,Options)\n" ++
     "     Compiles the module or function Name to a binary.\n" ++
     "     By default, this does not load to memory.\n" ++
-    "   compile(Name)\n" ++ 
+    "   compile(Name)\n" ++
     "     As above, but using only default options.\n" ++
-    "   file(File,Options)\n" ++ 
+    "   file(File,Options)\n" ++
     "     As compile(Name,File,Options), but taking the\n" ++
     "     module name from File.\n" ++
-    "   file(File)\n" ++ 
+    "   file(File)\n" ++
     "     As above, but using only default options.\n" ++
     "   load(Module)\n" ++
     "     Loads the named module into memory.\n",
@@ -1252,12 +1252,12 @@ help_option(Opt) ->
 		tuple_size(Opt) =:= 2 -> element(1, Opt)
 	     end,
       case option_text(Name) of
-	"" ->  
+	"" ->
 	  case lists:member(Name, opt_keys()) of
 	    true ->
 	      io:format("~w - Sorry, this option is not documented yet.\n",
 			[Name]);
-	    _ -> 
+	    _ ->
 	      io:format("Unknown option ~p.\n", [Name])
 	  end;
 	Txt ->
@@ -1274,7 +1274,7 @@ help_option(Opt) ->
 
 help_debug_options() ->
   io:format("HiPE compiler debug options:\n" ++
-	    "  Might require that some modules have been compiled " ++ 
+	    "  Might require that some modules have been compiled " ++
 	    "with the debug flag.\n" ++
 	    "    rtl_show_translation - Prints each step in the\n" ++
 	    "                           translation from Icode to RTL\n",
@@ -1285,7 +1285,7 @@ hipe_timers() ->
   [time_ra].
 
 %% ____________________________________________________________________
-%% 
+%%
 %% Option expansion
 
 %% These are currently in use, but not documented:
@@ -1365,7 +1365,8 @@ opt_keys() ->
      to_rtl,
      to_llvm, % STUB: new flag for llvm!
      llvm_save_temps, % STUB: new flag for llvm
-     llvm_opts, % STUB: new flag for llvm options
+     llvm_llc, % STUB: LLC optimization-level flag (o1, o2, o3, undefined)
+     llvm_opt, % STUB: OPT optimization-level flag (o1, o2, o3, undefined)
      use_indexing,
      use_inline_atom_search,
      use_callgraph,
@@ -1375,7 +1376,7 @@ opt_keys() ->
      %% verbose_spills,
      x87].
 
-%% Definitions: 
+%% Definitions:
 
 o1_opts() ->
   Common = [inline_fp, pmatch, peephole],
@@ -1400,7 +1401,7 @@ o2_opts() ->
   Common = [icode_ssa_const_prop, icode_ssa_copy_prop, % icode_ssa_struct_reuse,
 	    icode_type, icode_inline_bifs, rtl_lcm,
 	    rtl_ssa, rtl_ssa_const_prop,
-	    spillmin_color, use_indexing, remove_comments, 
+	    spillmin_color, use_indexing, remove_comments,
 	    concurrent_comp, binary_opt | o1_opts()],
   case get(hipe_target_arch) of
     ultrasparc ->
@@ -1438,6 +1439,9 @@ o3_opts() ->
     Arch ->
       ?EXIT({executing_on_an_unsupported_architecture,Arch})
   end.
+
+llvm_opts(O) ->
+  [to_llvm, {llvm_opt, O}, {llvm_llc, O}].
 
 %% Note that in general, the normal form for options should be positive.
 %% This is a good programming convention, so that tests in the code say
@@ -1504,6 +1508,10 @@ opt_expansions() ->
   [{o1, o1_opts()},
    {o2, o2_opts()},
    {o3, o3_opts()},
+   {to_llvm, llvm_opts(o2)},
+   {{to_llvm, o1}, llvm_opts(o1)},
+   {{to_llvm, o2}, llvm_opts(o2)},
+   {{to_llvm, o3}, llvm_opts(o3)},
    {x87, [x87, inline_fp]},
    {inline_fp, case get(hipe_target_arch) of %% XXX: Temporary until x86
 		 x86 -> [x87, inline_fp];    %%       has sse2
@@ -1521,9 +1529,9 @@ expand_basic_options(Opts) ->
 
 -spec expand_kt2(comp_options()) -> comp_options().
 
-expand_kt2(Opts) -> 
+expand_kt2(Opts) ->
   proplists:normalize(Opts, [{expand, [{kt2_type,
-					[{use_callgraph, fixpoint}, core, 
+					[{use_callgraph, fixpoint}, core,
 					 {core_transform, cerl_typean}]}]}]).
 
 %% Note that set_architecture/1 must be called first, and that the given
