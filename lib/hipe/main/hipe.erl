@@ -1551,6 +1551,7 @@ opt_expansions() ->
    {o2, o2_opts()},
    {o3, o3_opts()},
    {to_llvm, llvm_opts(o2)},
+   {{to_llvm, o0}, llvm_opts(o0)},
    {{to_llvm, o1}, llvm_opts(o1)},
    {{to_llvm, o2}, llvm_opts(o2)},
    {{to_llvm, o3}, llvm_opts(o3)},
