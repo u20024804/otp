@@ -166,6 +166,7 @@ trans_optlev_flag(Tool, Options) ->
       llc -> llvm_llc
     end,
   case proplists:get_value(Flag, Options) of
+    o0 -> ""; % "-O0" does not exist in opt tool
     o1 -> "-O1";
     o2 -> "-O2";
     o3 -> "-O3";
