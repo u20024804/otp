@@ -726,11 +726,13 @@ compiler_return(Res, Client) ->
   Client ! {self(), Res}.
 
 compile_finish({Mod, Exports, Icode}, WholeModule, Options) ->
-  %% LLVM:
-  case proplists:get_bool(to_llvm, Options) of
-    true -> Res =  llvm_finalize(Icode, Mod, Exports, WholeModule, Options);
-    false -> Res = finalize(Icode, Mod, Exports, WholeModule, Options)
-  end,
+  Res =
+  	case proplists:get_bool(to_llvm, Options) of
+    	true ->
+			llvm_finalize(Icode, Mod, Exports, WholeModule, Options);
+    	false ->
+			finalize(Icode, Mod, Exports, WholeModule, Options)
+  	end,
   post(Res, Icode, Options).
 
 %%% LLVM:
@@ -744,12 +746,12 @@ llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
     hipe_icode:icode_is_closure(Icode)],
   Bin =
   case proplists:get_value(use_callgraph, Opts) of
-    true -> 
+    true ->
       %% Compiling the functions bottom-up by using a call graph
       CallGraph = hipe_icode_callgraph:construct(List),
       OrdList = hipe_icode_callgraph:to_list(CallGraph),
       finalize_fun(OrdList, Exports, Opts);
-    _ -> 
+    _ ->
       %% Compiling the functions bottom-up by reversing the list
       OrdList = lists:reverse(List),
       finalize_fun(OrdList, Exports, Opts)
@@ -770,44 +772,44 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
   List = icode_multret(OrigList, Mod, Opts, Exports),
   {T1Compile,_} = erlang:statistics(runtime),
   CompiledCode =
-  case proplists:get_value(use_callgraph, Opts) of
-    true -> 
-      %% Compiling the functions bottom-up by using a call graph
-      CallGraph = hipe_icode_callgraph:construct(List),
-      OrdList = hipe_icode_callgraph:to_list(CallGraph),
-      finalize_fun(OrdList, Exports, Opts);
-    _ -> 
-      %% Compiling the functions bottom-up by reversing the list
-      OrdList = lists:reverse(List),
-      finalize_fun(OrdList, Exports, Opts)
-  end,
+    case proplists:get_value(use_callgraph, Opts) of
+      true -> 
+	%% Compiling the functions bottom-up by using a call graph
+	CallGraph = hipe_icode_callgraph:construct(List),
+	OrdList = hipe_icode_callgraph:to_list(CallGraph),
+	finalize_fun(OrdList, Exports, Opts);
+      _ -> 
+	%% Compiling the functions bottom-up by reversing the list
+	OrdList = lists:reverse(List),
+	finalize_fun(OrdList, Exports, Opts)
+    end,
   {T2Compile,_} = erlang:statistics(runtime),
   ?when_option(verbose, Opts,
-    ?debug_msg("Compiled ~p in ~.2f s\n",
-      [Mod,(T2Compile-T1Compile)/1000])),
+	       ?debug_msg("Compiled ~p in ~.2f s\n",
+			  [Mod,(T2Compile-T1Compile)/1000])),
   case proplists:get_bool(to_rtl, Opts) of
     true ->
       {ok, CompiledCode};
     false ->
       Closures =
-      [MFA || {MFA, Icode} <- List,
-        hipe_icode:icode_is_closure(Icode)],
+	[MFA || {MFA, Icode} <- List,
+		hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
       try assemble(CompiledCode, Closures, Exports, Opts) of
-        Bin ->
-          {T2,_} = erlang:statistics(runtime),
-          ?when_option(verbose, Opts,
-            ?debug_untagged_msg(" in ~.2f s\n",
-              [(T2-T1)/1000])),
-          {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
-          TargetArch = get(hipe_target_arch),
-          {ok, {TargetArch,Bin}}
-        catch
-          error:Error ->
-            {error,Error,erlang:get_stacktrace()}
-        end
-    end.
+	Bin ->
+	  {T2,_} = erlang:statistics(runtime),
+	  ?when_option(verbose, Opts,
+		       ?debug_untagged_msg(" in ~.2f s\n",
+					   [(T2-T1)/1000])),
+	  {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
+	  TargetArch = get(hipe_target_arch),
+	  {ok, {TargetArch,Bin}}
+      catch
+	error:Error ->
+	  {error,Error,erlang:get_stacktrace()}
+      end
+  end.
 
 finalize_fun(MfaIcodeList, Exports, Opts) ->
   case proplists:get_value(concurrent_comp, Opts) of
@@ -857,7 +859,7 @@ finalize_fun_concurrent(MfaIcodeList, Exports, Opts) ->
 	     set_architecture(Opts),
 	     pre_init(Opts),
 	     init(Opts),
-       Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
+	     Self ! finalize_fun_sequential(IcodeFun, Opts, Servers)
 	 end || IcodeFun <- MfaIcodeList],
       lists:foreach(fun (F) -> spawn_link(F) end, CompFuns),
       Final = [receive Res when element(1, Res) =:= MFA -> Res end
@@ -1405,7 +1407,8 @@ opt_keys() ->
      to_rtl,
      to_llvm, % STUB: new flag for llvm!
      llvm_save_temps, % STUB: new flag for llvm
-     llvm_opts, % STUB: new flag for llvm options
+     llvm_llc, % STUB: LLC optimization-level flag (o1, o2, o3, undefined)
+     llvm_opt, % STUB: OPT optimization-level flag (o1, o2, o3, undefined)
      use_indexing,
      use_inline_atom_search,
      use_callgraph,
@@ -1479,6 +1482,9 @@ o3_opts() ->
       ?EXIT({executing_on_an_unsupported_architecture,Arch})
   end.
 
+llvm_opts(O) ->
+  [to_llvm, {llvm_opt, O}, {llvm_llc, O}].
+
 %% Note that in general, the normal form for options should be positive.
 %% This is a good programming convention, so that tests in the code say
 %% "if 'x' ..." instead of "if not 'no_x' ...".
@@ -1544,6 +1550,10 @@ opt_expansions() ->
   [{o1, o1_opts()},
    {o2, o2_opts()},
    {o3, o3_opts()},
+   {to_llvm, llvm_opts(o2)},
+   {{to_llvm, o1}, llvm_opts(o1)},
+   {{to_llvm, o2}, llvm_opts(o2)},
+   {{to_llvm, o3}, llvm_opts(o3)},
    {x87, [x87, inline_fp]},
    {inline_fp, case get(hipe_target_arch) of %% XXX: Temporary until x86
 		 x86 -> [x87, inline_fp];    %%       has sse2
