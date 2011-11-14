@@ -371,7 +371,7 @@ icode_to_llvm(MFA, Icode, Options, Servers) ->
   %%LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
   %% LLVM:
-  rtl_to_llvm(RtlCfg1, Options).   %STUB: parse RTL in SSA form
+  rtl_to_llvm(MFA, RtlCfg1, Options).   %STUB: parse RTL in SSA form
 
 llvm_fix_options(Icode, Options) ->
   %% If function has more than 1 switch statement the we must disable
@@ -465,7 +465,7 @@ rtl_symbolic(RtlCfg, Options) ->
 %% We want naive (no-optimized) code to check LLVM optimizations.
 %%
 %%----------------------------------------------------------------------
-rtl_to_llvm(RtlCfg0, Options) ->
+rtl_to_llvm(MFA, RtlCfg0, Options) ->
   RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
   RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
   RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
@@ -481,7 +481,7 @@ rtl_to_llvm(RtlCfg0, Options) ->
   %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
   %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
   %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
- Binary = hipe_llvm_main:rtl_to_native(LinearRtl, Roots,  Options),
+ Binary = hipe_llvm_main:rtl_to_native(MFA, LinearRtl, Roots,  Options),
  {llvm_binary, Binary}.
 
 %%----------------------------------------------------------------------
