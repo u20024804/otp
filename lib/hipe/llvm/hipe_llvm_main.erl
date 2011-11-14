@@ -1,27 +1,27 @@
 %% -*- erlang-indent-level: 2 -*-
 -module(hipe_llvm_main).
 
--export([rtl_to_native/3]).
--export([remove_folder/1]).
+-export([rtl_to_native/4,
+         remove_folder/1]).
 
 -include("../main/hipe.hrl").
 -include("../rtl/hipe_literals.hrl").
 -include("hipe_llvm_arch.hrl").
 
 %% @doc Translation of RTL to a loadable object. This functions takes the RTL
-%% code and calls hipe_rtl2llvm/translate/2 to translate the RTL code to LLVM
-%% code. After this, LLVM is printed to a file and the LLVM tool chain is
-%% invokes in order to produce an object file. Then the elf64_format and the
-%% note_erlc models are used in order to extract all necessary informations the
-%% object file. It returns a record with the binary code and all the necessary
-%% information for the hipe_unified_loader.
-rtl_to_native(RTL, Roots, Options) ->
+%% code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to LLVM
+%% code. After this, LLVM asm is printed to a file and the LLVM tool chain is
+%% invoked in order to produce an object file. Then the elf64_format and the
+%% note_erlc modules are used in order to extract all the necessary informations
+%% on the object file. It returns a record with the binary code and all the
+%% necessary information for the hipe_unified_loader.
+rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Get LLVM Instruction List
   {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, SwitchList} =
     hipe_rtl2llvm:translate(RTL, Roots),
-  %% Write LLVM Assembly to intermediate file
-  Fun = hipe_rtl:rtl_fun(RTL),
-  {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(Fun),
+  %% Fix Fun_Name if closure:
+  {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
+  %% Write LLVM Assembly to intermediate file (on disk)
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
   DirName = "llvm_" ++ unique_id() ++ "/",
@@ -66,7 +66,7 @@ rtl_to_native(RTL, Roots, Options) ->
     true -> ok;
     false -> spawn(?MODULE, remove_folder, [Dir])
   end,
-  ExportMap = Fun,
+  ExportMap = MFA,
   CodeSize = byte_size(BinCode),
   CodeBinary = BinCode,
   Refs = FinalRelocs,
