@@ -115,12 +115,10 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   pp(IcodeCfg7, MFA, icode_liveness, pp_icode_liveness, Options, Servers),
   FinalIcode = hipe_icode_cfg:cfg_to_linear(IcodeCfg7),
   ?opt_stop_timer("Icode"),
-  LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
-			   "RTL", Options),
+  {LinearRTL, Roots} = ?option_time(icode_to_rtl(MFA, FinalIcode, Options,
+                                                 Servers), "RTL", Options),
   case proplists:get_bool(to_llvm, Options) of
     false ->
-      LinearRTL = ?option_time(icode_to_rtl(MFA,FinalIcode,Options, Servers), 
-             "RTL", Options),
       case proplists:get_bool(to_rtl, Options) of
         false ->
           rtl_to_native(MFA, LinearRTL, Options, DebugState);
@@ -130,6 +128,7 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
       end;
     true ->
       icode_to_llvm(MFA, FinalIcode, Options, Servers)
+      %rtl_to_llvm_to_native(MFA, LinearRTL, Roots, Options, DebugState)
   end.
 
 %%----------------------------------------------------------------
@@ -352,8 +351,6 @@ icode_ssa_unconvert(IcodeSSA, Options) ->
 %% ---------------------------------------------------------------------------
 icode_to_llvm(MFA, Icode, Options, Servers) ->
   debug("ICODE -> LLVM: ~w, ~w~n", [MFA, hash(Icode)], Options),
-  %% Fix Options for the llvm back end
-  %Options2 = llvm_fix_options(Icode, Options),
   LinearRTL = translate_to_rtl(Icode, Options),
   pp(LinearRTL, MFA, rtl_linear, pp_rtl_linear, Options, Servers),
   RtlCfg  = initialize_rtl_cfg(LinearRTL, Options),
@@ -361,38 +358,24 @@ icode_to_llvm(MFA, Icode, Options, Servers) ->
   RtlCfg0 = hipe_rtl_cfg:remove_unreachable_code(RtlCfg),
   RtlCfg1 = hipe_rtl_cfg:remove_trivial_bbs(RtlCfg0),
   %% hipe_rtl_cfg:pp(RtlCfg1),
-  %% RtlCfg2 = rtl_ssa(RtlCfg1, Options),
   RtlCfg2 = rtl_symbolic(RtlCfg1, Options),
-  %% hipe_rtl_cfg:pp(RtlCfg2),
-  %%pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
-  %%RtlCfg4 = rtl_lcm(RtlCfg3, Options),
-  %%pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers),
-  %%LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
-  %%LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
-  %% hipe_rtl:pp(standard_io, LinearRTL2),
-  %% LLVM:
-  rtl_to_llvm(MFA, RtlCfg1, Options).   %STUB: parse RTL in SSA form
+  RtlSSA0 = rtl_ssa_convert(RtlCfg2, Options),
+  RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
+  RtlCfg3 = rtl_ssa_unconvert(RtlSSA10, Options),
+  %% hipe_rtl_liveness:pp(RtlSSA0),
+  Live = hipe_rtl_liveness:analyze(RtlCfg3),
+  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg3, Live),
+  Roots = hipe_llvm_liveness:find_roots(RtlCfg3, Live),
+  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
+  Binary = hipe_llvm_main:rtl_to_native(MFA, LinearRtl, Roots, Options),
+  {llvm_binary, Binary}.
 
-llvm_fix_options(Icode, Options) ->
-  %% If function has more than 1 switch statement the we must disable
-  %% generation of jump tables!
-  case llvm_can_have_switches(Icode) of
-    true -> Options;
-    false -> proplists:delete(use_indexing, Options)
-  end.
-
-%% Currently llvm backend does not support compilation of functions with more
-%% than 1 switch statement.
-llvm_can_have_switches(Icode) ->
-  IsSwitch =
-    fun(X) ->
-        case X of
-          #icode_switch_val{} -> true;
-          _ -> false
-        end
-    end,
-  Switches = lists:filter(IsSwitch, hipe_icode:icode_code(Icode)),
-  (length(Switches)=<1).
+rtl_to_llvm_to_native(MFA, LinearRTL, Roots, Options, DebugState) ->
+  ?opt_start_timer("LLVM native code"),
+  NativeCode = hipe_llvm_main:rtl_to_native(MFA, LinearRTL, Roots, Options),
+  ?opt_stop_timer("LLVM native code"),
+  put(hipe_debug, DebugState),
+  {llvm_binary, NativeCode}.
 
 %%=====================================================================
 %%
@@ -439,11 +422,16 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   %% hipe_rtl_cfg:pp(RtlCfg3),
   pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
   RtlCfg4 = rtl_lcm(RtlCfg3, Options),
-  pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers),
+  %% Liveness analysis to reduce GC roots:
+  Live = hipe_rtl_liveness:analyze(RtlCfg4),
+  RtlCfg5 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg4, Live),
+  Roots = hipe_llvm_liveness:find_roots(RtlCfg4, Live),
+  %%
+  pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers), %XXX: Change to RtlCfg4
   LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
   LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
-  LinearRTL2.
+  {LinearRTL2, Roots}.
 
 translate_to_rtl(Icode, Options) ->
   %% GC tests should have been added in the conversion to Icode.
@@ -456,33 +444,6 @@ initialize_rtl_cfg(LinearRTL, Options) ->
 rtl_symbolic(RtlCfg, Options) ->
   ?option_time(hipe_rtl_symbolic:expand(RtlCfg),
 	       "Expansion of symbolic instructions", Options).
-
-
-%%----------------------------------------------------------------------
-%%
-%% Perform translation to LLVM assembly code when in rtl_ssa form.
-%%
-%% We want naive (no-optimized) code to check LLVM optimizations.
-%%
-%%----------------------------------------------------------------------
-rtl_to_llvm(MFA, RtlCfg0, Options) ->
-  RtlCfg1 = rtl_symbolic(RtlCfg0, Options),
-  RtlSSA0 = rtl_ssa_convert(RtlCfg1, Options),
-  RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
-  RtlCfg2 = rtl_ssa_unconvert(RtlSSA10, Options),
- % hipe_rtl_liveness:pp(RtlSSA0),
-  Live = hipe_rtl_liveness:analyze(RtlCfg2),
-  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg2, Live),
-  Roots = hipe_llvm_liveness:find_roots(RtlCfg2, Live),
-  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
-  %hipe_rtl_cfg:pp(RtlSSA0),
-  %% RtlSSA1 = rtl_ssa_const_prop(RtlSSA0, Options),
-  %% RtlSSA1a = rtl_ssa_copy_prop(RtlSSA1, Options),
-  %% RtlSSA3 = rtl_ssa_avail_expr(RtlSSA2, Options),
-  %% RtlSSA4 = rtl_ssapre(RtlSSA3, Options),
-  %% rtl_ssa_check(RtlSSA4, Options), %% just for sanity
- Binary = hipe_llvm_main:rtl_to_native(MFA, LinearRtl, Roots,  Options),
- {llvm_binary, Binary}.
 
 %%----------------------------------------------------------------------
 %%
