@@ -1,9 +1,15 @@
 -module(hipe_llvm_liveness).
 
--export([annotate_dead_vars/2, find_roots/2]).
+-export([analyze/1]).
 
--include("../flow/cfg.hrl").
--include("../rtl/hipe_rtl.hrl").
+%% @doc Find gc roots and explicitly mark when they go out of scope, based
+%% on the liveness analyzis performed by the hipe_rtl_liveness:analyze/1.
+analyze(RtlCfg) ->
+  Live = hipe_rtl_liveness:analyze(RtlCfg),
+  %% hipe_rtl_liveness:pp(RtlCfg),
+  NewRtlCfg = annotate_dead_vars(RtlCfg, Live),
+  Roots = find_roots(RtlCfg, Live),
+  {NewRtlCfg, Roots}.
 
 %% @doc This function is responsible for marking when RTL variables (rtl_var)
 %% go out of scope (dead), based on the liveness analysis performed in RTL.
@@ -47,7 +53,9 @@ strip([_|Xs]) ->
 find_dead_in_block(Code, LiveOut) ->
   Defines = lists:map(fun hipe_rtl:defines/1, Code),
   Defines2 = lists:flatten(Defines),
-  Defines3 = strip(Defines2),
+  %% The list of defines(variables that are being defined in a block) must not have
+  %% duplicate elements!
+  Defines3 = lists:usort(strip(Defines2)),
   lists:subtract(Defines3, LiveOut).
 
 annotate_in_bb(Code, DeadVars) ->
@@ -73,15 +81,15 @@ annotate_in_ins(I, Deads) ->
  %% So we remove the dead ones to avoid extra checks.
  RestDeads = lists:subtract(Deads, CommonIndexes),
  OldVars = lists:map(fun hipe_rtl:mk_var/1, CommonIndexes),
- NewVars = lists:map(fun kill_var/1, CommonIndexes),
+ NewVars = lists:map(fun kill_var/1, OldVars),
  %% Create a list with the substitution of the old vars with the new
  %% ones which are marked with the dead keyword
  Subtitution = lists:zip(OldVars, NewVars),
  {hipe_rtl:subst_uses_llvm(Subtitution, I), RestDeads}.
 
-%% Make a new var, and mark that this is the last use.
-kill_var(Index) ->
-  hipe_rtl:mk_var(Index, dead).
+%% Update the liveness of a var,in order to mark that this is the last use.
+kill_var(Var) ->
+  hipe_rtl:var_liveness_update(Var, dead).
 
 %% Find the common elements of two lists
 find_common(List1, List2) ->
