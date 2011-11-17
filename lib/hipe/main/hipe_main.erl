@@ -118,7 +118,7 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   {LinearRTL, Roots} = ?option_time(icode_to_rtl(MFA, FinalIcode, Options,
                                                  Servers), "RTL", Options),
   case proplists:get_bool(to_llvm, Options) of
-    false ->
+    false -> % "to_llvm" shadows "to_rtl"!
       case proplists:get_bool(to_rtl, Options) of
         false ->
           rtl_to_native(MFA, LinearRTL, Options, DebugState);
@@ -127,8 +127,9 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
           {rtl, LinearRTL}
       end;
     true ->
-      icode_to_llvm(MFA, FinalIcode, Options, Servers)
-      %rtl_to_llvm_to_native(MFA, LinearRTL, Roots, Options, DebugState)
+      %% The LLVM back end returns binary code, unlike the rest HiPE back ends
+      %% which return native assembly
+      rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState)
   end.
 
 %%----------------------------------------------------------------
@@ -345,37 +346,6 @@ icode_ssa_unconvert(IcodeSSA, Options) ->
   ?option_time(hipe_icode_ssa:unconvert(IcodeSSA),
 	       "Icode SSA unconversion", Options).
 
-%% LLVM:
-%% ---------------------------------------------------------------------------
-%% Translate Icode to Binary using LLVM
-%% ---------------------------------------------------------------------------
-icode_to_llvm(MFA, Icode, Options, Servers) ->
-  debug("ICODE -> LLVM: ~w, ~w~n", [MFA, hash(Icode)], Options),
-  LinearRTL = translate_to_rtl(Icode, Options),
-  pp(LinearRTL, MFA, rtl_linear, pp_rtl_linear, Options, Servers),
-  RtlCfg  = initialize_rtl_cfg(LinearRTL, Options),
-  %% hipe_rtl_cfg:pp(RtlCfg),
-  RtlCfg0 = hipe_rtl_cfg:remove_unreachable_code(RtlCfg),
-  RtlCfg1 = hipe_rtl_cfg:remove_trivial_bbs(RtlCfg0),
-  %% hipe_rtl_cfg:pp(RtlCfg1),
-  RtlCfg2 = rtl_symbolic(RtlCfg1, Options),
-  RtlSSA0 = rtl_ssa_convert(RtlCfg2, Options),
-  RtlSSA10 = rtl_ssa_dead_code_elimination(RtlSSA0, Options),
-  RtlCfg3 = rtl_ssa_unconvert(RtlSSA10, Options),
-  %% hipe_rtl_liveness:pp(RtlSSA0),
-  Live = hipe_rtl_liveness:analyze(RtlCfg3),
-  RtlSSA1 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg3, Live),
-  Roots = hipe_llvm_liveness:find_roots(RtlCfg3, Live),
-  LinearRtl = hipe_rtl_cfg:linearize(RtlSSA1),
-  Binary = hipe_llvm_main:rtl_to_native(MFA, LinearRtl, Roots, Options),
-  {llvm_binary, Binary}.
-
-rtl_to_llvm_to_native(MFA, LinearRTL, Roots, Options, DebugState) ->
-  ?opt_start_timer("LLVM native code"),
-  NativeCode = hipe_llvm_main:rtl_to_native(MFA, LinearRTL, Roots, Options),
-  ?opt_stop_timer("LLVM native code"),
-  put(hipe_debug, DebugState),
-  {llvm_binary, NativeCode}.
 
 %%=====================================================================
 %%
@@ -422,13 +392,17 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   %% hipe_rtl_cfg:pp(RtlCfg3),
   pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
   RtlCfg4 = rtl_lcm(RtlCfg3, Options),
-  %% Liveness analysis to reduce GC roots:
-  Live = hipe_rtl_liveness:analyze(RtlCfg4),
-  RtlCfg5 = hipe_llvm_liveness:annotate_dead_vars(RtlCfg4, Live),
-  Roots = hipe_llvm_liveness:find_roots(RtlCfg4, Live),
+  %% LLVM: Only when the LLVM backend is used, a liveness analysis on RTL must
+  %% be performed in order to find the gc roots and explicitly mark in RTL when
+  %% they go out of scope.
+  {RtlCfg5, Roots} =
+    case proplists:get_bool(to_llvm, Options) of
+      false -> {RtlCfg4, []};
+      true -> hipe_llvm_liveness:analyze(RtlCfg4)
+    end,
   %%
-  pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers), %XXX: Change to RtlCfg4
-  LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg4),
+  pp(RtlCfg5, MFA, rtl, pp_rtl, Options, Servers),
+  LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg5),
   LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
   {LinearRTL2, Roots}.
@@ -581,6 +555,22 @@ rtl_to_native(MFA, LinearRTL, Options, DebugState) ->
   ?opt_stop_timer("Native code"),
   put(hipe_debug, DebugState),
   LinearNativeCode.
+
+
+%% LLVM:
+%%=====================================================================
+%% Translate Linear RTL to Binary using LLVM
+%%=====================================================================
+
+%% BinaryCode is a llvm_bin record, as defined in llvm/hipe_llvm_bin module,
+%% which contains the binary code together with info for the loader.
+rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState) ->
+  ?opt_start_timer("LLVM native code"),
+  BinaryCode = hipe_llvm_main:rtl_to_native(MFA, LinearRTL, Roots, Options),
+  ?opt_stop_timer("LLVM native code"),
+  put(hipe_debug, DebugState),
+  {llvm_binary, BinaryCode}.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Debugging stuff ...
