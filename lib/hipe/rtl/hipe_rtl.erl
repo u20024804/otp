@@ -883,10 +883,10 @@ is_reg(_) -> false.
 
 mk_var(Num) when is_integer(Num), Num >= 0 -> #rtl_var{index=Num}.
 mk_var(Num, Liveness) when is_integer(Num), Num>=0 -> #rtl_var{index=Num, liveness=Liveness}.
-var_liveness(#rtl_var{liveness=Liveness}) -> Liveness.
-var_liveness_update(RtlVar, Liveness) -> RtlVar#rtl_var{liveness=Liveness}.
 mk_new_var() -> mk_var(hipe_gensym:get_next_var(rtl)).
 var_index(#rtl_var{index=Index}) -> Index.
+var_liveness(#rtl_var{liveness=Liveness}) -> Liveness.
+var_liveness_update(RtlVar, Liveness) -> RtlVar#rtl_var{liveness=Liveness}.
 is_var(#rtl_var{}) -> true;
 is_var(_) -> false.
 
