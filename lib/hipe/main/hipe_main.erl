@@ -391,9 +391,9 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   %% hipe_rtl_cfg:pp(RtlCfg3),
   pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
   RtlCfg4 = rtl_lcm(RtlCfg3, Options),
-  %% LLVM: Only when the LLVM backend is used, a liveness analysis on RTL must
-  %% be performed in order to find the gc roots and explicitly mark in RTL when
-  %% they go out of scope.
+  %% LLVM: A liveness analysis on RTL must be performed in order to find the
+  %% GC roots and explicitly mark them in RTL when they go out of scope (only
+  %% when the LLVM backend is used).
   {RtlCfg5, Roots} =
     case proplists:get_bool(to_llvm, Options) of
       false -> {RtlCfg4, []};
@@ -555,21 +555,18 @@ rtl_to_native(MFA, LinearRTL, Options, DebugState) ->
   put(hipe_debug, DebugState),
   LinearNativeCode.
 
-
-%% LLVM:
 %%=====================================================================
 %% Translate Linear RTL to Binary using LLVM
 %%=====================================================================
 
-%% BinaryCode is a llvm_bin record, as defined in llvm/hipe_llvm_bin module,
-%% which contains the binary code together with info for the loader.
 rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState) ->
   ?opt_start_timer("LLVM native code"),
+  %% BinaryCode is a llvm_bin record, as defined in llvm/hipe_llvm_bin module,
+  %% which contains the binary code together with info for the loader.
   BinaryCode = hipe_llvm_main:rtl_to_native(MFA, LinearRTL, Roots, Options),
   ?opt_stop_timer("LLVM native code"),
   put(hipe_debug, DebugState),
   {llvm_binary, BinaryCode}.
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Debugging stuff ...

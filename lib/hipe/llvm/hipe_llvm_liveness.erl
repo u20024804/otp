@@ -60,10 +60,8 @@ find_dead_in_block(Code, LiveOut) ->
 
 annotate_in_bb(Code, DeadVars) ->
   annotate_in_bb(lists:reverse(Code), DeadVars, []).
-
 annotate_in_bb([], _DeadVars, NewCode) ->
   NewCode;
-
 annotate_in_bb([I|Is], DeadVars, CodeAcc) ->
   {NewI, RestDeadVars} = annotate_in_ins(I, DeadVars),
   annotate_in_bb(Is, RestDeadVars, [NewI|CodeAcc]).
