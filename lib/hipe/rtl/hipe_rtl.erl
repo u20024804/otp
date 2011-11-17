@@ -300,6 +300,7 @@
 	 is_var/1,
 	 var_index/1,
 	 var_liveness/1,
+	 var_liveness_update/2,
 
 	 %% change_vars_to_regs/1,
 	 
@@ -663,9 +664,6 @@ mk_call(DstList, Fun, ArgList, Continuation, FailContinuation,
 	continuation=Continuation,
 	failcontinuation=FailContinuation,
   normalcontinuation=NormalContinuation}.
-call_normal(#call{normalcontinuation=NormalContinuation}) -> NormalContinuation.
-call_normal_update(C, NewNormalContinuation) ->
-  C#call{normalcontinuation=NewNormalContinuation}.
 
 mk_call(DstList, Fun, ArgList, Continuation, FailContinuation, Type) ->
   case Type of
@@ -675,6 +673,10 @@ mk_call(DstList, Fun, ArgList, Continuation, FailContinuation, Type) ->
   #call{dstlist=DstList, 'fun'=Fun, arglist=ArgList, type=Type,
 	continuation=Continuation,
 	failcontinuation=FailContinuation}.
+
+call_normal(#call{normalcontinuation=NormalContinuation}) -> NormalContinuation.
+call_normal_update(C, NewNormalContinuation) ->
+  C#call{normalcontinuation=NewNormalContinuation}.
 call_dstlist(#call{dstlist=DstList}) -> DstList.
 call_dstlist_update(C, NewDstList) -> C#call{dstlist=NewDstList}.
 call_fun(#call{'fun'=Fun}) -> Fun.
@@ -877,11 +879,12 @@ reg_is_gcsafe(#rtl_reg{is_gc_safe=IsGcSafe}) -> IsGcSafe.
 is_reg(#rtl_reg{}) -> true;
 is_reg(_) -> false.
 
--record(rtl_var, {index :: non_neg_integer(), liveness=[]}).
+-record(rtl_var, {index :: non_neg_integer(), liveness=live :: dead | live}).
 
 mk_var(Num) when is_integer(Num), Num >= 0 -> #rtl_var{index=Num}.
-mk_var(Num, Liveness) -> #rtl_var{index=Num, liveness=Liveness}.
+mk_var(Num, Liveness) when is_integer(Num), Num>=0 -> #rtl_var{index=Num, liveness=Liveness}.
 var_liveness(#rtl_var{liveness=Liveness}) -> Liveness.
+var_liveness_update(RtlVar, Liveness) -> RtlVar#rtl_var{liveness=Liveness}.
 mk_new_var() -> mk_var(hipe_gensym:get_next_var(rtl)).
 var_index(#rtl_var{index=Index}) -> Index.
 is_var(#rtl_var{}) -> true;
@@ -1767,8 +1770,8 @@ pp_var(Dev, Arg) ->
     false ->
       io:format(Dev, "v~w", [var_index(Arg)]),
       case var_liveness(Arg) of
-        [] -> ok;
-        dead -> io:format(Dev, "(dead)", [])
+        dead -> io:format(Dev, "(dead)", []);
+        _ -> ok
       end
   end.
 

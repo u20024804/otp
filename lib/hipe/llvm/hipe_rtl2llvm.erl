@@ -1002,7 +1002,7 @@ trans_src(A) ->
               I1 = hipe_llvm:mk_load(T1, ?WORD_TYPE_P, RootName, [], [], false),
               I2 =
               case hipe_rtl:var_liveness(A) of
-                [] ->
+                live ->
                   [];
                 dead ->
                   NilValue = hipe_tagscheme:mk_nil(),
