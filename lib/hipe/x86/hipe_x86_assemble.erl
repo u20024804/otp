@@ -80,6 +80,7 @@ assemble(CompiledCode, Closures, Exports, Options) ->
   %%	       ?debug_msg("Constants are ~w bytes\n",[ConstSize])),
   %%
   SC = hipe_pack_constants:slim_constmap(ConstMap),
+  io:format("X86 Slim ConstMap: ~w~n", [SC]),
   DataRelocs = mk_data_relocs(RefsFromConsts, LabelMap),
   SSE = slim_sorted_exportmap(ExportMap,Closures,Exports),
   SlimRefs = hipe_pack_constants:slim_refs(AccRefs),

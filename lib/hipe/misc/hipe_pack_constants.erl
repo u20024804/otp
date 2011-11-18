@@ -51,6 +51,8 @@ pack_constants(Data, Align) ->
 
 pack_constants([{MFA,_,ConstTab}|Rest], Size, Align, ConstNo, Acc, Refs) ->
   Labels = hipe_consttab:labels(ConstTab),
+  io:format("ConstTab: ~w~n", [ConstTab]),
+  io:format("Labels: ~w~n", [Labels]),
   %% RefToLabels = hipe_consttab:referred_labels(ConstTab),
   {NewSize, NewAlign, Map, NewConstNo, RefToLabels} =
     pack_labels(Labels, MFA, ConstTab, Size, Align, ConstNo, Acc, []),
@@ -218,11 +220,12 @@ slim_constmap([], _Inserted, Acc) -> Acc.
 %% to the slimmed and flattened format ConstMap which is to be returned
 %% to the hipe_unified_loader
 %%
+-spec llvm_slim_constmap([#pcm_entry{}]) -> [raw_data()].
 llvm_slim_constmap(Map) ->
   llvm_slim_constmap(Map, []).
 
+-spec llvm_slim_constmap([#pcm_entry{}], [raw_data()]) -> [raw_data()].
 llvm_slim_constmap([], Acc) -> Acc;
-llvm_slim_constmap([#pcm_entry{label=Label, start=Offset, type=Type,
-      raw_data = Term}|Rest], Acc) ->
+llvm_slim_constmap([#pcm_entry{label=Label, start=Offset,
+                               type=Type, raw_data = Term}|Rest], Acc) ->
   llvm_slim_constmap(Rest, [Label, Offset, Type, Term | Acc]).
-%%----------------------------------------------------------------------------
