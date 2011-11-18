@@ -27,7 +27,7 @@ fun_return_type() ->
 %%------------------------------------------------------------------------------
 %% @doc Main function for translating an RTL function to LLVM Assembly. Takes as
 %% input the RTL code and the variable indexes of possible garbage collection
-%% roots and returns the corresponing LLVM code along with  a dictionary with
+%% roots and returns the corresponing LLVM code along with a dictionary with
 %% all the relocations in the code, the size and alignment of constants and a
 %% list of switches that will be used in hipe_llvm_main in order to produce the
 %% final labelmap.
@@ -56,6 +56,7 @@ translate(RTL, Roots) ->
     hipe_pack_constants:pack_constants([{Fun, [], Data}],
                                       ?ARCH_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
+  io:format("LLVM Slim ConstMap: ~w~n", [SC]),
   %% Allocate stack slots for each virtual register and declare gc roots
   AllocaStackCode = alloca_stack(Code, Params, Roots),
   {Code2, FailLabels} = fix_code(Code),
