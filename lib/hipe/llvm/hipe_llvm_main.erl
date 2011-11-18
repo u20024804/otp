@@ -16,35 +16,22 @@
 %% on the object file. It returns a record with the binary code and all the
 %% necessary information for the hipe_unified_loader.
 rtl_to_native(MFA, RTL, Roots, Options) ->
-  %% Get LLVM Instruction List
+  %% Compile to LLVM and get Instruction List (along with infos)
   {LLVMCode, RelocsDict, ConstMap, ConstAlign, ConstSize, SwitchList} =
     hipe_rtl2llvm:translate(RTL, Roots),
-  %% Fix Fun_Name if closure:
+  %% Fix Fun_Name to an acceptable LLVM identifier (needed for closures)
   {Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
-  %% Save temp files in a unique folder
-  DirName = "llvm_" ++ unique_id() ++ "/",
-  Dir =
-    case proplists:get_bool(llvm_save_temps, Options) of
-      true ->  %% Store folder in current directory
-	  DirName;
-      false -> %% Temporarily store folder in "/tmp" (rm afterwards)
-	"/tmp/" ++ DirName
-    end,
-  create_folder(Dir),
-  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [write]),
-  %% Print LLVM assembly to file
-  hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
-  %% Invoke LLVM compiler tool to produce an object file
-  ObjectFile = compile_with_llvm(Dir, Filename, Options),
+  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options),
+  %%
   %% Extract information from object file
+  %%
   ObjBin = elf64_format:open_object_file(ObjectFile),
   %% Get relocation info
   Relocs = elf64_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
   SDescs = note_erlgc:get_sdesc_list(ObjBin),
-  %% Get Labels info
+  %% Get labels info
   Labels = elf64_format:get_label_list(ObjBin),
   SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
   SwitchInfos = extract_switch_infos(SwitchAddends, Labels),
@@ -59,17 +46,11 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   FinalRelocs = [{4, SDescs2}|Relocs1],
   %% Get binary code and write to file
   BinCode = elf64_format:extract_text(ObjBin),
-  %% Remove .o file
-  %% ok = file:write_file(Filename ++ "_code.o", BinCode, [binary]),
+  %% Remove temp files (if needed)
+	remove_temp_folder(Dir, Options),
+  %%
   %% Create All Information needed by the hipe_unified_loader
-  case proplists:get_bool(llvm_save_temps, Options) of
-    true -> ok;
-    false -> spawn(?MODULE, remove_folder, [Dir])
-  end,
-  ExportMap = MFA,
-  CodeSize = byte_size(BinCode),
-  CodeBinary = BinCode,
-  Refs = FinalRelocs,
+  %%
   Bin = hipe_llvm_bin:mk_llvm_bin(
     ?VERSION_STRING(),
     ?HIPE_SYSTEM_CRC,
@@ -77,38 +58,52 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
     FinalConstSize,
     FinalConstMap,
     FinalLabelMap,
-    ExportMap,
-    CodeSize,
-    CodeBinary,
-    Refs),
+    MFA,               % ExportMap
+    byte_size(BinCode),% CodeSize
+    BinCode,           % CodeBinary
+    FinalRelocs),      % Refs
   Bin.
-
-%% Misc. functions
-create_folder(FolderName) ->
-  os:cmd("mkdir " ++ FolderName).
-
-remove_folder(FolderName) ->
-  os:cmd("rm -r " ++ FolderName).
-
-unique_id() ->
-  integer_to_list(erlang:phash2({node(),now()})).
 
 %%------------------------------------------------------------------------------
 %% LLVM tool chain
 %%------------------------------------------------------------------------------
 
-%% @doc Compile file with LLVM tools
-compile_with_llvm(Dir, Fun_Name, Options) ->
+%% @doc Compile function Fun_Name/Arity to LLVM. Return Dir (in order to remove
+%% it if we do not want to store temporary files) and ObjectFile name that is
+%% created by the LLVM tools.
+compile_with_llvm(Fun_Name, Arity, LLVMCode, Options) ->
+  Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
+  %% Save temp files in a unique folder
+  DirName = "llvm_" ++ unique_id() ++ "/",
+  Dir =
+    case proplists:get_bool(llvm_save_temps, Options) of
+      true ->  %% Store folder in current directory
+	  DirName;
+      false -> %% Temporarily store folder in "/tmp" (rm afterwards)
+	"/tmp/" ++ DirName
+    end,
+	%% Create temp directory
+  os:cmd("mkdir " ++ Dir),
+  %% Print LLVM assembly to file
+  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [write]),
+  hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
+  %% Invoke LLVM compiler tools to produce an object file
+  ObjectFile = invoke_llvm_tools(Dir, Filename, Options),
+  {ok, Dir, ObjectFile}.
+
+%% @doc Invoke LLVM tools to compile function Fun_Name/Arity and create an
+%% Object File.
+invoke_llvm_tools(Dir, Fun_Name, Options) ->
   llvm_as(Dir, Fun_Name),
-  llvm_opt(Dir,Fun_Name, Options),
+  llvm_opt(Dir, Fun_Name, Options),
   llvm_llc(Dir, Fun_Name, Options),
   compile(Dir, Fun_Name, "gcc").
 
 %% @doc Invoke llvm-as tool to convert LLVM Asesmbly to bitcode.
 llvm_as(Dir, Fun_Name) ->
-  Source = Dir ++ Fun_Name ++ ".ll",
-  Dest = Dir ++ Fun_Name ++ ".bc",
-  Command= "llvm-as " ++ Source ++ " -o " ++ Dest,
+  Source  = Dir ++ Fun_Name ++ ".ll",
+  Dest    = Dir ++ Fun_Name ++ ".bc",
+  Command = "llvm-as " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
     Error -> exit({?MODULE, opt, Error})
@@ -116,11 +111,11 @@ llvm_as(Dir, Fun_Name) ->
 
 %% @doc Invoke opt tool to optimize the bitcode.
 llvm_opt(Dir, Fun_Name, Options) ->
-  Source = Dir ++ Fun_Name ++ ".bc",
-  Dest = Source,
+  Source   = Dir ++ Fun_Name ++ ".bc",
+  Dest     = Source,
   OptLevel = trans_optlev_flag(opt, Options),
   OptFlags = [OptLevel, "-mem2reg", "-strip-debug"],
-  Command= "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
+  Command  = "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
   %% io:format("OPT: ~s~n", [Command]),
   case os:cmd(Command) of
     [] -> ok;
@@ -129,12 +124,12 @@ llvm_opt(Dir, Fun_Name, Options) ->
 
 %% @doc Invoke llc tool to compile the bitcode to native assembly.
 llvm_llc(Dir, Fun_Name, Options) ->
-  Source = Dir ++ Fun_Name ++ ".bc",
+  Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
-  Align = integer_to_list(?WORD_WIDTH div 8),
+  Align    = integer_to_list(?WORD_WIDTH div 8),
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
 	      "-stack-alignment=" ++ Align, "-tailcallopt"],
-  Command= "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
+  Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   %% io:format("LLC: ~s~n", [Command]),
   case os:cmd(Command) of
     [] -> ok;
@@ -144,8 +139,8 @@ llvm_llc(Dir, Fun_Name, Options) ->
 %% @doc Invoke the compiler tool ("gcc", "llvmc", etc.) to generate an object
 %%      file from native assembly.
 compile(Dir, Fun_Name, Compiler) ->
-  Source = Dir ++ Fun_Name ++ ".s",
-  Dest = Dir ++ Fun_Name ++ ".o",
+  Source  = Dir ++ Fun_Name ++ ".s",
+  Dest    = Dir ++ Fun_Name ++ ".o",
   Command = Compiler ++ " -c " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
     [] -> ok;
@@ -458,3 +453,19 @@ fix_sdescs3({Offset, Arity},
 		   RestOffsets},
       [NewSDesc,  RestSDesc]
   end.
+
+%%------------------------------------------------------------------------------
+%% Miscellaneous functions
+%%------------------------------------------------------------------------------
+
+remove_temp_folder(Dir, Options) ->
+  case proplists:get_bool(llvm_save_temps, Options) of
+    true -> ok;
+    false -> spawn(?MODULE, remove_folder, [Dir])
+  end.
+
+remove_folder(FolderName) ->
+  os:cmd("rm -r " ++ FolderName).
+
+unique_id() ->
+  integer_to_list(erlang:phash2({node(),now()})).

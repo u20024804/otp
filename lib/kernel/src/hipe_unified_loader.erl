@@ -49,7 +49,7 @@
 	 load/2]).
 
 %%-define(DEBUG,true).
-%%-define(LLVM_DEBUG,true).
+-define(LLVM_DEBUG,true).
 -define(DO_ASSERT,true).
 -define(HIPE_LOGGING,true).
 
@@ -200,9 +200,8 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
 ConstMap: ~w~nLabelMap: ~w~nExportMap ~w~nRefs ~w~n",
     [Version, CheckSum, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
       Refs]),
-
-  %file:write_file("erl.o", CodeBinary, [binary]),
-
+  %% Write HiPE binary code to a file in order to disassemble (DEBUG)
+  %%file:write_file("erl.o", CodeBinary, [binary]),
   %% Check that we are loading up-to-date code.
   version_check(Version, Mod),
   case hipe_bifs:check_crc(CheckSum) of
