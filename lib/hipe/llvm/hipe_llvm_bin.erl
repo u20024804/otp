@@ -258,11 +258,16 @@ merge_refs([N|_]=List, _) when is_integer(N) ->
 
 %% Update ExportMap with information about whether a function is a closure
 %% and whether it is exported.
-fix_exportmap([{Addr,M,F,A}|Rest], Closures, Exports) ->
+fix_exportmap(ExportMap, Closures, Exports) ->
+  fix_exportmap(ExportMap, Closures, Exports, []).
+
+fix_exportmap([],_,_, Acc) -> Acc; % We need them in descending order!
+                                   % (hipe_unified_loader l. 229)
+fix_exportmap([{Addr,M,F,A}|Rest], Closures, Exports, Acc) ->
   IsClosure = lists:member({M,F,A}, Closures),
   IsExported = is_exported(F, A, Exports),
-  [Addr,M,F,A,IsClosure,IsExported | fix_exportmap(Rest, Closures, Exports)];
-fix_exportmap([],_,_) -> [].
+  fix_exportmap(Rest, Closures, Exports,
+                [Addr,M,F,A,IsClosure,IsExported | Acc]).
 
 is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
 
