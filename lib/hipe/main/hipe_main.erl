@@ -117,19 +117,19 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
   ?opt_stop_timer("Icode"),
   {LinearRTL, Roots} = ?option_time(icode_to_rtl(MFA, FinalIcode, Options,
                                                  Servers), "RTL", Options),
-  case proplists:get_bool(to_llvm, Options) of
-    false -> % "to_llvm" shadows "to_rtl"!
-      case proplists:get_bool(to_rtl, Options) of
+  case proplists:get_bool(to_rtl, Options) of
+    false ->
+      case proplists:get_bool(to_llvm, Options) of
         false ->
           rtl_to_native(MFA, LinearRTL, Options, DebugState);
         true ->
-          put(hipe_debug, DebugState),
-          {rtl, LinearRTL}
-      end;
+          %% The LLVM back end returns binary code, unlike the rest HiPE back ends
+          %% which return native assembly
+          rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState)
+			end;
     true ->
-      %% The LLVM back end returns binary code, unlike the rest HiPE back ends
-      %% which return native assembly
-      rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState)
+      put(hipe_debug, DebugState),
+      {rtl, LinearRTL}
   end.
 
 %%----------------------------------------------------------------
