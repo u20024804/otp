@@ -51,8 +51,8 @@ pack_constants(Data, Align) ->
 
 pack_constants([{MFA,_,ConstTab}|Rest], Size, Align, ConstNo, Acc, Refs) ->
   Labels = hipe_consttab:labels(ConstTab),
-  io:format("ConstTab: ~w~n", [ConstTab]),
-  io:format("Labels: ~w~n", [Labels]),
+  %% io:format("ConstTab: ~w~n", [ConstTab]),
+  %% io:format("Labels: ~w~n", [Labels]),
   %% RefToLabels = hipe_consttab:referred_labels(ConstTab),
   {NewSize, NewAlign, Map, NewConstNo, RefToLabels} =
     pack_labels(Labels, MFA, ConstTab, Size, Align, ConstNo, Acc, []),
