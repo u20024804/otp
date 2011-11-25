@@ -42,7 +42,7 @@
 	 load/2]).
 
 %%-define(DEBUG,true).
--define(LLVM_DEBUG,true).
+%%-define(LLVM_DEBUG,true).
 -define(DO_ASSERT,true).
 -define(HIPE_LOGGING,true).
 
@@ -189,10 +189,9 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
    CodeSize,  CodeBinary,  Refs,
    0,[] % ColdSize, CRrefs
   ] = binary_to_term(Bin),
-  ?llvm_debug_msg("~nVersion: ~s~nCheckSum: ~w~nConstAlign: ~w~nConstSize: ~w~n
-ConstMap: ~w~nLabelMap: ~w~nExportMap ~w~nRefs ~w~n",
-    [Version, CheckSum, ConstAlign, ConstSize, ConstMap, LabelMap, ExportMap,
-      Refs]),
+  ?llvm_debug_msg("~nVersion: ~s~nCheckSum: ~w~nConstAlign: ~w~nConstSize: ~w~nConstMap: ~w~nLabelMap: ~w~nExportMap ~w~nRefs ~w~n",
+                  [Version, CheckSum, ConstAlign, ConstSize, ConstMap, LabelMap,
+                   ExportMap, Refs]),
   %% Write HiPE binary code to a file in order to disassemble (DEBUG)
   %%file:write_file("erl.o", CodeBinary, [binary]),
   %% Check that we are loading up-to-date code.
@@ -525,9 +524,7 @@ patch_sdesc(?STACK_DESC(SymExnRA, FSize, Arity, Live),
       [] -> 0; % No catch
       LabelOffset -> CodeAddress + LabelOffset
     end,
-    %% LLVM: Temporary remove assert. We must remove the stack descriptor
-    %% for tail calls.
-    % ?ASSERT(assert_local_patch(Address)),
+  ?ASSERT(assert_local_patch(Address)),
   hipe_bifs:enter_sdesc({Address, ExnRA, FSize, Arity, Live}).
 
 %%----------------------------------------------------------------
