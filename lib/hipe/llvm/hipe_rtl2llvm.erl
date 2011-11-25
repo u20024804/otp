@@ -2,14 +2,12 @@
 -module(hipe_rtl2llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 
--export([translate/2]).
--export([fix_mfa_name/1]).
+-export([translate/2,
+         fix_mfa_name/1]).
 
 -include("../rtl/hipe_rtl.hrl").
 -include("../rtl/hipe_literals.hrl").
-
 -include("hipe_llvm.hrl").
-
 -include("hipe_llvm_arch.hrl").
 
 -define(WORD_TYPE, #llvm_int{width=?WORD_WIDTH}).
@@ -56,7 +54,7 @@ translate(RTL, Roots) ->
     hipe_pack_constants:pack_constants([{Fun, [], Data}],
                                       ?ARCH_REGISTERS:alignment()),
   SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
-  io:format("LLVM Slim ConstMap: ~w~n", [SC]),
+  %% io:format("LLVM Slim ConstMap: ~w~n", [SC]),
   %% Allocate stack slots for each virtual register and declare gc roots
   AllocaStackCode = alloca_stack(Code, Params, Roots),
   {Code2, FailLabels} = fix_code(Code),
