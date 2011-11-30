@@ -694,39 +694,8 @@ compiler_return(Res, Client) ->
   Client ! {self(), Res}.
 
 compile_finish({Mod, Exports, Icode}, WholeModule, Options) ->
-  %% LLVM:
-  case proplists:get_bool(to_llvm, Options) of
-    true -> Res =  llvm_finalize(Icode, Mod, Exports, WholeModule, Options);
-    false -> Res = finalize(Icode, Mod, Exports, WholeModule, Options)
-  end,
+  Res = finalize(Icode, Mod, Exports, WholeModule, Options),
   post(Res, Icode, Options).
-
-%%% LLVM:
-%%%
-%%% Finalize Compilation Using LLVM
-%%%
-llvm_finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
-  List = icode_multret(OrigList, Mod, Opts, Exports),
-  Closures =
-  [MFA || {MFA, Icode} <- List,
-    hipe_icode:icode_is_closure(Icode)],
-  Bin =
-  case proplists:get_value(use_callgraph, Opts) of
-    true ->
-      %% Compiling the functions bottom-up by using a call graph
-      CallGraph = hipe_icode_callgraph:construct(List),
-      OrdList = hipe_icode_callgraph:to_list(CallGraph),
-      finalize_fun(OrdList, Exports, Opts);
-    _ ->
-      %% Compiling the functions bottom-up by reversing the list
-      OrdList = lists:reverse(List),
-      finalize_fun(OrdList, Exports, Opts)
-  end,
-  {_, Bin1} = lists:unzip(Bin),
-  FinalBin = hipe_llvm_bin:join_binaries(Bin1, Closures, Exports),
-  {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
-  TargetArch = get(hipe_target_arch),
-  {ok, {TargetArch, FinalBin}}.
 
 
 %% -------------------------------------------------------------------------
@@ -762,19 +731,32 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
 	hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
-      try assemble(CompiledCode, Closures, Exports, Opts) of
-	Bin ->
-	  {T2,_} = erlang:statistics(runtime),
-	  ?when_option(verbose, Opts,
-	    ?debug_untagged_msg(" in ~.2f s\n",
-	      [(T2-T1)/1000])),
-	  {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
-	  TargetArch = get(hipe_target_arch),
-	  {ok, {TargetArch,Bin}}
-	catch
-	  error:Error ->
-	    {error,Error,erlang:get_stacktrace()}
-	end
+  Res =
+    case proplists:get_bool(to_llvm, Opts) of
+      false ->
+        try assemble(CompiledCode, Closures, Exports, Opts) of
+	 Bin ->
+	   {T2,_} = erlang:statistics(runtime),
+	   ?when_option(verbose, Opts,
+	     ?debug_untagged_msg(" in ~.2f s\n",
+	       [(T2-T1)/1000])),
+          Bin
+	 catch
+	   error:Error ->
+	     {error,Error,erlang:get_stacktrace()}
+	 end;
+      true -> %% Use LLVM:
+        {_, CompiledCode1} = lists:unzip(CompiledCode),
+        hipe_llvm_bin:join_binaries(CompiledCode1, Closures, Exports)
+    end,
+  case Res of
+    {error, Err, Trace} ->
+      {error, Err, Trace};
+    FinalBin ->
+      {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
+      TargetArch = get(hipe_target_arch),
+      {ok, {TargetArch,FinalBin}}
+  end
     end.
 
 finalize_fun(MfaIcodeList, Exports, Opts) ->
