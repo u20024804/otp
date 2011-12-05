@@ -348,13 +348,13 @@ get_rela_entry_field(Relocation, {FieldOffset, FieldSize}) ->
   get_field(Relocation, {integer, {FieldOffset, FieldSize}}).
 
 
-%% @spec get_text_symbol_list( binary() ) -> [ {string(), [integer()]} ]
-%% @doc Create a list of the form [ {`SymbolName', [`Offset']} ] with all
+%% @spec get_text_symbol_list( binary() ) -> [ {string(), integer()} ]
+%% @doc Create a list of the form [ {`SymbolName', `Offset'} ] with all
 %%      symbol names and offsets of the code in the binary. Very useful in
 %%      many cases that you might want to extract that kind of information from
 %%      an object file.
 
--spec get_text_symbol_list( binary() ) -> [ {string(), [integer()]} ].
+-spec get_text_symbol_list( binary() ) -> [ {string(), integer()} ].
 get_text_symbol_list(Elf) ->
   %% Extract Symbol, String and Relocation Tables
   Rela   = extract_rela(Elf, ?TEXT), % All calls are Relocatable data indexing
@@ -369,8 +369,7 @@ get_text_symbol_list(Elf) ->
   %% Do the magic!
   {LOff, _} =
     get_text_symbol_info(SymTab, StrTab, SHdrTab, ShStrTab, Rela, [], []),
-  %% Merge identical function calls to one tuple and a list of offsets
-  flatten_list(LOff).
+  LOff.
 
 
 %% @spec get_text_rodata_list( binary() ) -> {string(), [integer()]}
