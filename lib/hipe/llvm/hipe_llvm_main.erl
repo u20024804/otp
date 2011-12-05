@@ -191,13 +191,19 @@ create_labelmap(MFA, [{Name, Offsets} | Rest], RelocsDict, LabelMap) ->
       KVDict = lists:ukeysort(1, lists:zip(LabelList, Offsets)),
       NewLabelMap = insert_to_labelmap(KVDict, LabelMap),
       create_labelmap(MFA, Rest, RelocsDict, NewLabelMap);
-    _ -> exit({?MODULE, create_labelmap, "Not a jump table!~n"})
+    _ ->
+      exit({?MODULE, create_labelmap, "Not a jump table!~n"})
   end.
 
 %% Insert a list of [{Key,Value}] to a LabelMap (gb_tree)
 insert_to_labelmap([], LabelMap) -> LabelMap;
 insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
-  insert_to_labelmap(Rest, gb_trees:insert(Key, Value, LabelMap)).
+  case gb_trees:lookup(Key, LabelMap) of
+    none ->
+      insert_to_labelmap(Rest, gb_trees:insert(Key, Value, LabelMap));
+    {value, Value} -> %% Exists with the *exact* same Value.
+      insert_to_labelmap(Rest, LabelMap)
+  end.
 
 %% @doc Correlate object file relocation symbols with info from translation to
 %% llvm code.
