@@ -49,26 +49,20 @@ translate(RTL, Roots) ->
   %% {ok, File_rtl} = file:open(atom_to_list(Fun_Name) ++ ".rtl", [write]),
   %% hipe_rtl:pp(File_rtl, RTL),
   %% file:close(File_rtl),
-  %% Create constant map
-  {ConstAlign, ConstSize, ConstMap, _RefsFromConsts} =
-    hipe_pack_constants:pack_constants([{Fun, [], Data}],
-                                      ?ARCH_REGISTERS:alignment()),
-  SC = hipe_pack_constants:llvm_slim_constmap(ConstMap),
-  %% io:format("LLVM Slim ConstMap: ~w~n", [SC]),
   %% Allocate stack slots for each virtual register and declare gc roots
   AllocaStackCode = alloca_stack(Code, Params, Roots),
   {Code2, FailLabels} = fix_code(Code),
   %% Translate Code
-  {LLVM_Code1, Relocs1} = translate_instr_list(Code2, [], Relocs0),
-  {FinalRelocs, ExternalDecl, LocalVars, SwitchList} =
-    handle_relocations(Relocs1, SC, Fun),
+  {LLVM_Code1, Relocs1, NewData} = translate_instr_list(Code2, [], Relocs0, Data),
+  {FinalRelocs, ExternalDecl, LocalVars} =
+    handle_relocations(Relocs1, Data, Fun),
   LLVM_Code2 = add_landingpads(LLVM_Code1, FailLabels),
   %% Create LLVM Code for the compiled function
   LLVM_Code3 = create_function_definition(Fun, Params, LLVM_Code2,
                                           AllocaStackCode++LocalVars),
   %% Final Code = CompiledFunction + External Declarations
   FinalLLVMCode = [LLVM_Code3 | ExternalDecl],
-  {FinalLLVMCode, FinalRelocs, SC, ConstAlign, ConstSize, SwitchList}.
+  {FinalLLVMCode, FinalRelocs, NewData}.
 
 find_code_entry_label([]) ->
   exit({?MODULE, find_code_entry_label, "Empty Code"});
@@ -139,42 +133,85 @@ alloca_dsts([D|Ds], Roots, Acc) ->
 %% dictionary is updated when needed.
 %% @end
 %%------------------------------------------------------------------------------
-translate_instr_list([], Acc, Relocs) ->
-  {lists:reverse(lists:flatten(Acc)), Relocs};
-translate_instr_list([I|Is], Acc, Relocs) ->
-  {Acc1, NewRelocs} = translate_instr(I, Relocs),
-  translate_instr_list(Is, [Acc1|Acc], NewRelocs).
+translate_instr_list([], Acc, Relocs, Data) ->
+  {lists:reverse(lists:flatten(Acc)), Relocs, Data};
+translate_instr_list([I|Is], Acc, Relocs, Data) ->
+  {Acc1, NewRelocs, NewData} = translate_instr(I, Relocs, Data),
+  translate_instr_list(Is, [Acc1|Acc], NewRelocs, NewData).
 
-translate_instr(I, Relocs) ->
+translate_instr(I, Relocs, Data) ->
   case I of
-    #alu{} -> trans_alu(I, Relocs);
-    #alub{} -> trans_alub(I, Relocs);
-    #branch{} -> trans_branch(I, Relocs);
-    #call{} -> case hipe_rtl:call_fun(I) of
-        %% In AMD64 this instruction does nothing!
-        %% TODO: chech use of fwait in other architectures!
-        fwait ->
-          {[], Relocs};
-        _ ->
-          trans_call(I, Relocs)
-      end;
-    #comment{} -> trans_comment(I, Relocs);
-    #enter{} -> trans_enter(I, Relocs);
-    #fconv{} -> trans_fconv(I, Relocs);
-    #fload{} -> trans_fload(I, Relocs);
-    #fmove{} -> trans_fmove(I, Relocs);
-    #fp{} -> trans_fp(I, Relocs);
-    #fp_unop{} -> trans_fp_unop(I, Relocs);
-    #fstore{} -> trans_fstore(I, Relocs);
-    #goto{} -> trans_goto(I, Relocs);
-    #label{} -> trans_label(I, Relocs);
-    #load{} -> trans_load(I, Relocs);
-    #load_address{} -> trans_load_address(I, Relocs);
-    #load_atom{} -> trans_load_atom(I, Relocs);
-    #move{} -> trans_move(I, Relocs);
-    #return{} -> trans_return(I, Relocs);
-    #store{} -> trans_store(I, Relocs);
-    #switch{} -> trans_switch(I, Relocs);
+    #alu{} ->
+      {I2, Relocs2} = trans_alu(I, Relocs),
+      {I2, Relocs2, Data};
+    #alub{} ->
+      {I2, Relocs2} = trans_alub(I, Relocs),
+      {I2, Relocs2, Data};
+    #branch{} ->
+      {I2, Relocs2} = trans_branch(I, Relocs),
+      {I2, Relocs2, Data};
+    #call{} ->
+      {I2, Relocs2} =
+        case hipe_rtl:call_fun(I) of
+          %% In AMD64 this instruction does nothing!
+          %% TODO: chech use of fwait in other architectures!
+          fwait ->
+            {[], Relocs};
+          _ ->
+            trans_call(I, Relocs)
+        end,
+      {I2, Relocs2, Data};
+    #comment{} ->
+      {I2, Relocs2} = trans_comment(I, Relocs),
+      {I2, Relocs2, Data};
+    #enter{} ->
+      {I2, Relocs2} = trans_enter(I, Relocs),
+      {I2, Relocs2, Data};
+    #fconv{} ->
+      {I2, Relocs2} = trans_fconv(I, Relocs),
+      {I2, Relocs2, Data};
+    #fload{} ->
+      {I2, Relocs2} = trans_fload(I, Relocs),
+      {I2, Relocs2, Data};
+    #fmove{} ->
+      {I2, Relocs2} = trans_fmove(I, Relocs),
+      {I2, Relocs2, Data};
+    #fp{} ->
+      {I2, Relocs2} = trans_fp(I, Relocs),
+      {I2, Relocs2, Data};
+    #fp_unop{} ->
+      {I2, Relocs2} = trans_fp_unop(I, Relocs),
+      {I2, Relocs2, Data};
+    #fstore{} ->
+      {I2, Relocs2} = trans_fstore(I, Relocs),
+      {I2, Relocs2, Data};
+    #goto{} ->
+      {I2, Relocs2} = trans_goto(I, Relocs),
+      {I2, Relocs2, Data};
+    #label{} ->
+      {I2, Relocs2} = trans_label(I, Relocs),
+      {I2, Relocs2, Data};
+    #load{} ->
+      {I2, Relocs2} = trans_load(I, Relocs),
+      {I2, Relocs2, Data};
+    #load_address{} ->
+      {I2, Relocs2} = trans_load_address(I, Relocs),
+      {I2, Relocs2, Data};
+    #load_atom{} ->
+      {I2, Relocs2} = trans_load_atom(I, Relocs),
+      {I2, Relocs2, Data};
+    #move{} ->
+      {I2, Relocs2} = trans_move(I, Relocs),
+      {I2, Relocs2, Data};
+    #return{} ->
+      {I2, Relocs2} = trans_return(I, Relocs),
+      {I2, Relocs2, Data};
+    #store{} ->
+      {I2, Relocs2} = trans_store(I, Relocs),
+      {I2, Relocs2, Data};
+    #switch{} -> %% Only switch instruction updates Data
+      {I2, Relocs2, NewData} = trans_switch(I, Relocs, Data),
+      {I2, Relocs2, NewData};
     Other ->
       exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
@@ -691,15 +728,16 @@ trans_store(I, Relocs) ->
 %%
 %% switch
 %%
-trans_switch(I, Relocs) ->
+trans_switch(I, Relocs, Data) ->
   _Src = hipe_rtl:switch_src(I),
   {Src, I1} = trans_src(_Src),
-  LabelList = lists:map(fun mk_jump_label/1, hipe_rtl:switch_labels(I)),
+  Labels = hipe_rtl:switch_labels(I),
+  JumpLabels = lists:map(fun mk_jump_label/1, Labels),
   SortOrder = hipe_rtl:switch_sort_order(I),
-  NrLabels = length(LabelList),
+  NrLabels = length(Labels),
   TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
   TableTypeP = hipe_llvm:mk_pointer(TableType),
-  TypedLabelList = lists:map(fun(X) -> {#llvm_label_type{}, X} end, LabelList),
+  TypedJumpLabels = lists:map(fun(X) -> {#llvm_label_type{}, X} end, JumpLabels),
   T1 = mk_temp(),
   {Src2, []} = trans_dst(_Src),
   TableName = "table_"++tl(Src2),
@@ -708,10 +746,19 @@ trans_switch(I, Relocs) ->
   T2 = mk_temp(),
   BYTE_TYPE_PP = hipe_llvm:mk_pointer(?BYTE_TYPE_P),
   I3 = hipe_llvm:mk_load(T2, BYTE_TYPE_PP, T1, [], [], false),
-  I4 = hipe_llvm:mk_indirectbr(?BYTE_TYPE_P, T2, TypedLabelList),
-  Relocs2 = relocs_store(TableName, {switch, {TableType, LabelList, NrLabels,
-                                    SortOrder}}, Relocs),
-  {[I4, I3, I2, I1], Relocs2}.
+  I4 = hipe_llvm:mk_indirectbr(?BYTE_TYPE_P, T2, TypedJumpLabels),
+  LMap = [{label,L} || L <- Labels],
+  %% Update data with the info for the jump table
+  {NewData, JTabLab} =
+    case hipe_rtl:switch_sort_order(I) of
+      [] ->
+        hipe_consttab:insert_block(Data, word, LMap);
+      SortOrder ->
+        hipe_consttab:insert_sorted_block(Data, word, LMap, SortOrder)
+    end,
+  Relocs2 = relocs_store(TableName, {switch, {TableType, Labels, NrLabels,
+                                    SortOrder}, JTabLab}, Relocs),
+  {[I4, I3, I2, I1], Relocs2, NewData}.
 
 %%------------------------------------------------------------------------------
 %% @doc Pass on RTL code in order to fix invoke and closure calls.
@@ -1277,7 +1324,7 @@ relocs_to_list(Relocs) ->
 %% 2) Creates LLVM code to declare relocations as external functions/constants
 %% 3) Creates LLVM code in order to create local variables for the external
 %%    constants/labels
-handle_relocations(Relocs, SlimedConstMap, Fun) ->
+handle_relocations(Relocs, Data, Fun) ->
   RelocsList = relocs_to_list(Relocs),
   %% Seperate Relocations according to their type
   {CallList, AtomList, ClosureList, SwitchList} = seperate_relocs(RelocsList),
@@ -1295,7 +1342,7 @@ handle_relocations(Relocs, SlimedConstMap, Fun) ->
   %% Create code to declare external function
   FunDecl = fixed_fun_decl()++lists:map(fun call_to_decl/1, ExternalCallList),
   %% Extract constant labels from Constant Map (remove duplicates)
-  ConstLabels = lists:usort(find_constants(SlimedConstMap)),
+  ConstLabels = hipe_consttab:labels(Data),
   %% Create code to declare constants
   ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
   %% Create code to create local name for constants
@@ -1313,7 +1360,7 @@ handle_relocations(Relocs, SlimedConstMap, Fun) ->
   ExternalDeclarations =
     AtomDecl++ClosureDecl++ConstDecl++FunDecl++SwitchDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
-  {Relocs3, ExternalDeclarations, LocalVariables, SwitchList}.
+  {Relocs3, ExternalDeclarations, LocalVariables}.
 
 %% @doc Seperate Relocations according to their type
 seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], [], []).
@@ -1328,7 +1375,7 @@ seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc, JmpTableAcc) ->
       seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc, JmpTableAcc);
     {_,{closure,_}} ->
       seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc], JmpTableAcc);
-    {_,{switch,_}} ->
+    {_,{switch,_, _}} ->
       seperate_relocs(Rs, CallAcc, AtomAcc, ClosureAcc, [R|JmpTableAcc])
   end.
 
@@ -1358,7 +1405,8 @@ declare_switches(JumpTableList, Fun) ->
   Fun1 = fun(X) -> declare_switch_table(X, FunName) end,
   lists:map(Fun1, JumpTableList).
 
-declare_switch_table({Name, {switch, {TableType, LabelList, _, _}}}, FunName) ->
+declare_switch_table({Name, {switch, {TableType, Labels, _, _}, _}}, FunName) ->
+  LabelList = lists:map(fun mk_jump_label/1, Labels),
   Fun1 =
     fun(X) ->
         "i8* blockaddress(@"++FunName++", "++X++")"
@@ -1405,13 +1453,6 @@ fixed_fun_decl() ->
   GcMetadata = hipe_llvm:mk_const_decl("@gc_metadata", "external constant",
     ?BYTE_TYPE, ""),
   [LandPad, GCROOTDecl, FixPinnedRegs, GcMetadata].
-
-
-%% @doc Extract Type of Constants from ConstMap
-find_constants(ConstMap) -> find_constants(ConstMap, []).
-find_constants([], LabelAcc) -> LabelAcc;
-find_constants([Label, _, _, _| Rest], LabelAcc) ->
-  find_constants(Rest, [Label| LabelAcc]).
 
 %% @doc Declare an External Consant. We declare all constants as i8
 %% in order to be able to calcucate pointers of the form DL+6, with
