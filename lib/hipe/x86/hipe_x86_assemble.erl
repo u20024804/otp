@@ -21,7 +21,6 @@
 %%%
 %%% TODO:
 %%% - Simplify combine_label_maps and mk_data_relocs.
-%%% - Move find_const to hipe_pack_constants?
 
 -ifdef(HIPE_AMD64).
 -define(HIPE_X86_ASSEMBLE,  hipe_amd64_assemble).
@@ -80,7 +79,6 @@ assemble(CompiledCode, Closures, Exports, Options) ->
   %%	       ?debug_msg("Constants are ~w bytes\n",[ConstSize])),
   %%
   SC = hipe_pack_constants:slim_constmap(ConstMap),
-  io:format("X86 Slim ConstMap: ~w~n", [SC]),
   DataRelocs = mk_data_relocs(RefsFromConsts, LabelMap),
   SSE = slim_sorted_exportmap(ExportMap,Closures,Exports),
   SlimRefs = hipe_pack_constants:slim_refs(AccRefs),
@@ -443,7 +441,7 @@ translate_imm(#x86_imm{value=Imm}, Context, MayTrunc8) ->
 	case Imm of
 	  {Label,constant} ->
 	    {MFA,ConstMap} = Context,
-	    ConstNo = find_const({MFA,Label}, ConstMap),
+	    ConstNo = hipe_pack_constants:find_const({MFA,Label}, ConstMap),
 	    {constant,ConstNo};
 	  {Label,closure} ->
 	    {closure,Label};
@@ -713,7 +711,8 @@ resolve_jmp_switch_arg(I, _Context) ->
   {rm64,hipe_amd64_encode:rm_mem(EA)}.
 -else.
 resolve_jmp_switch_arg(I, {MFA,ConstMap}) ->
-  ConstNo = find_const({MFA,hipe_x86:jmp_switch_jtab(I)}, ConstMap),
+  ConstNo = hipe_pack_constants:find_const({MFA,hipe_x86:jmp_switch_jtab(I)},
+                                           ConstMap),
   Disp32 = {?LOAD_ADDRESS,{constant,ConstNo}},
   SINDEX = ?HIPE_X86_ENCODE:sindex(2, hipe_x86:temp_reg(hipe_x86:jmp_switch_temp(I))),
   EA = ?HIPE_X86_ENCODE:ea_disp32_sindex(Disp32, SINDEX), % this creates a SIB implicitly
@@ -1002,14 +1001,3 @@ fill_spaces(N) when N > 0 ->
   fill_spaces(N-1);
 fill_spaces(0) ->
   [].
-
-%%%
-%%% Lookup a constant in a ConstMap.
-%%%
-
-find_const({MFA,Label},[{pcm_entry,MFA,Label,ConstNo,_,_,_}|_]) ->
-  ConstNo;
-find_const(N,[_|R]) ->
-  find_const(N,R);
-find_const(C,[]) ->
-  ?EXIT({constant_not_found,C}).
