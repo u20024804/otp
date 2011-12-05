@@ -60,6 +60,7 @@
 %%XXX: uncomment line below to fallback to old GC layout
 %-include("note_erlgc.hrl").
 -include("new_note_erlgc.hrl").
+-include("../../kernel/src/hipe_ext_format.hrl").
 
 
 %%-------------------------------------------------------------------------------
@@ -183,17 +184,13 @@ get_safepoint_addresses(RelaGC, NumOfEntries, Acc) ->
   get_safepoint_addresses(More, NumOfEntries-1, [RelaOff|Acc]).
 
 
-%% @spec get_sdesc_list( binary() ) -> 
-%%     [ { {integer() | [], integer(), integer(), {integer()}}, [integer()] } ]
 %% @doc The epitome of this module! This function takes an ELF-64 Object File
 %%      binary and returns a proper sdesc list for Erlang/OTP System's loader.
 %%      The return value should be of the form:
 %%        { 
+%%          4, Safepoint Address,  
 %%          {ExnLabel OR [], FrameSize, StackArity, {Liveroot stack frame indexes}}, 
-%%          [Safepoint Addresses] 
 %%        }
--spec get_sdesc_list( binary() ) -> 
-      [ { {integer() | [], integer(), integer(), {integer()}}, [integer()] } ].
 get_sdesc_list(Elf) ->
   %% Extract the needed segments of the object file
   RelaGC = elf64_format:extract_rela(Elf, ?NOTE(?NOTE_ERLGC_NAME)),
@@ -216,14 +213,9 @@ get_sdesc_list(Elf) ->
       SizeOfPlaceholders = SPCount * ?SP_ADDR_SIZE,
       <<_:SizeOfPlaceholders/binary, SPEntry/binary>> = SPEntries,
       %XXX: change "SPEntry" to "SPEntries" to fallback to older GC layout
-      L = create_sdesc_list(SPEntry, ExnAndSPOffs, SPCount, []),
-      %% Merge same entries in the list
-      elf64_format:flatten_list(L)
+      create_sdesc_list(SPEntry, ExnAndSPOffs, SPCount, [])
   end.
 
--spec create_sdesc_list( binary(), [{integer(), integer()}], integer(),
-      [ { {integer() | [], integer(), integer(), {integer()}}, integer() } ] ) ->
-      [ { {integer() | [], integer(), integer(), {integer()}}, integer() } ].
 create_sdesc_list(_SPEntries, _ExnAndSPOffs, 0, Acc) ->
   Acc;
 create_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
@@ -245,9 +237,9 @@ create_sdesc_list(SPEntries, ExnAndSPOffs, NumOfEntries, Acc) ->
   [{ExnLbl, SPOff} | MoreExnAndSPOffs] = ExnAndSPOffs,
   %% Build current entry for sdesc list and continue with more safepoint 
   %% entries
-  SdescEntry = {{ExnLbl, StkFrameSize, StkArity, LiveRoots}, SPOff}, 
+  SdescEntry = {?SDESC, SPOff, {ExnLbl, StkFrameSize, StkArity, LiveRoots}},
   create_sdesc_list(SPEntries, MoreExnAndSPOffs, NumOfEntries-1,
-		 [SdescEntry | Acc]).
+		    [SdescEntry | Acc]).
 
 
 %%------------------------------------------------------------------------------

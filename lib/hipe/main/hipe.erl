@@ -731,31 +731,18 @@ finalize(OrigList, Mod, Exports, WholeModule, Opts) ->
 	hipe_icode:icode_is_closure(Icode)],
       {T1,_} = erlang:statistics(runtime),
       ?when_option(verbose, Opts, ?debug_msg("Assembling ~w",[Mod])),
-  Res =
-    case proplists:get_bool(to_llvm, Opts) of
-      false ->
         try assemble(CompiledCode, Closures, Exports, Opts) of
 	 Bin ->
 	   {T2,_} = erlang:statistics(runtime),
 	   ?when_option(verbose, Opts,
 	     ?debug_untagged_msg(" in ~.2f s\n",
 	       [(T2-T1)/1000])),
-          Bin
+      {module,Mod} = maybe_load(Mod, Bin, WholeModule, Opts),
+      TargetArch = get(hipe_target_arch),
+      {ok, {TargetArch,Bin}}
 	 catch
 	   error:Error ->
 	     {error,Error,erlang:get_stacktrace()}
-	 end;
-      true -> %% Use LLVM:
-        {_, CompiledCode1} = lists:unzip(CompiledCode),
-        hipe_llvm_bin:join_binaries(CompiledCode1, Closures, Exports)
-    end,
-  case Res of
-    {error, Err, Trace} ->
-      {error, Err, Trace};
-    FinalBin ->
-      {module,Mod} = maybe_load(Mod, FinalBin, WholeModule, Opts),
-      TargetArch = get(hipe_target_arch),
-      {ok, {TargetArch,FinalBin}}
   end
     end.
 
@@ -832,11 +819,10 @@ finalize_fun_sequential({MFA, Icode}, Opts, Servers) ->
       ?when_option(verbose, Opts,
 		   ?debug_msg("Compiled ~w in ~.2f s\n", [MFA,(T2-T1)/1000])),
       {MFA, Code};
-    %% LLVM:
-    {llvm_binary, Binary} ->
-      {MFA, Binary};
     {rtl, LinearRtl} ->
-      {MFA, LinearRtl}
+      {MFA, LinearRtl};
+    {llvm_binary, Binary} -> % LLVM:
+      {MFA, Binary}
   catch
     error:Error ->
       ?when_option(verbose, Opts, ?debug_untagged_msg("\n", [])),
@@ -905,21 +891,26 @@ do_load(Mod, Bin, BeamBinOrPath) when is_binary(BeamBinOrPath);
   end.
 
 assemble(CompiledCode, Closures, Exports, Options) ->
-  case get(hipe_target_arch) of
-    ultrasparc ->
-      hipe_sparc_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    powerpc ->
-      hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    ppc64 ->
-      hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    arm ->
-      hipe_arm_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    x86 ->
-      hipe_x86_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    amd64 ->
-      hipe_amd64_assemble:assemble(CompiledCode, Closures, Exports, Options);
-    Arch ->
-      ?EXIT({executing_on_an_unsupported_architecture, Arch})
+  case proplists:get_bool(to_llvm, Options) of
+    false ->
+      case get(hipe_target_arch) of
+        ultrasparc ->
+          hipe_sparc_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        powerpc ->
+          hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        ppc64 ->
+          hipe_ppc_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        arm ->
+          hipe_arm_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        x86 ->
+          hipe_x86_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        amd64 ->
+          hipe_amd64_assemble:assemble(CompiledCode, Closures, Exports, Options);
+        Arch ->
+          ?EXIT({executing_on_an_unsupported_architecture, Arch})
+      end;
+    true -> %% LLVM: Merge already compiled code (per MFA) to a single Binary
+      hipe_llvm_merge:finalize(CompiledCode, Closures, Exports)
   end.
 
 %% --------------------------------------------------------------------
