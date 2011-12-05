@@ -288,7 +288,7 @@ do_pseudo_li(I, MFA, ConstMap) ->
 %%%	  end,
 %%%	{load_address, {Tag,untag_mfa_or_prim(MFAorPrim)}};
       {Label,constant} ->
-	ConstNo = find_const({MFA,Label}, ConstMap),
+	ConstNo = hipe_pack_constants:find_const({MFA,Label}, ConstMap),
 	{load_address, {constant,ConstNo}};
       {Label,closure} ->
 	{load_address, {closure,Label}};
@@ -642,14 +642,3 @@ fill_spaces(N) when N > 0 ->
   fill_spaces(N-1);
 fill_spaces(0) ->
   [].
-
-%%%
-%%% Lookup a constant in a ConstMap.
-%%%
-
-find_const({MFA,Label}, [{pcm_entry,MFA,Label,ConstNo,_,_,_}|_]) ->
-  ConstNo;
-find_const(N, [_|R]) ->
-  find_const(N, R);
-find_const(C, []) ->
-  ?EXIT({constant_not_found,C}).

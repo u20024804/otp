@@ -20,11 +20,13 @@
 %%
 
 -module(hipe_pack_constants).
--export([pack_constants/2, slim_refs/1, slim_constmap/1, 
-        llvm_slim_constmap/1]).
+-export([pack_constants/2, slim_refs/1, slim_constmap/1,
+         find_const/2,
+         mk_data_relocs/2, slim_sorted_exportmap/3, combine_label_maps/3]).
 
 -include("hipe_consttab.hrl").
 -include("../../kernel/src/hipe_ext_format.hrl").
+-include("../main/hipe.hrl").
 
 %%-----------------------------------------------------------------------------
 
@@ -213,19 +215,60 @@ slim_constmap([#pcm_entry{const_num=ConstNo, start=Offset,
   end;
 slim_constmap([], _Inserted, Acc) -> Acc.
 
-%%----------------------------------------------------------------------------
-%% LLVM:
-%% llvm_slim_constmap/1 takes a packed ConstMap, as produced by pack_labels
-%% called from hipe_pack_constants:pack_constants/2, and converts it
-%% to the slimmed and flattened format ConstMap which is to be returned
-%% to the hipe_unified_loader
-%%
--spec llvm_slim_constmap([#pcm_entry{}]) -> [raw_data()].
-llvm_slim_constmap(Map) ->
-  llvm_slim_constmap(Map, []).
+%%%
+%%% Lookup a constant in a ConstMap.
+%%%
 
--spec llvm_slim_constmap([#pcm_entry{}], [raw_data()]) -> [raw_data()].
-llvm_slim_constmap([], Acc) -> Acc;
-llvm_slim_constmap([#pcm_entry{label=Label, start=Offset,
-                               type=Type, raw_data = Term}|Rest], Acc) ->
-  llvm_slim_constmap(Rest, [Label, Offset, Type, Term | Acc]).
+find_const({MFA,Label},[{pcm_entry,MFA,Label,ConstNo,_,_,_}|_]) ->
+  ConstNo;
+find_const(N,[_|R]) ->
+  find_const(N,R);
+find_const(C,[]) ->
+  ?EXIT({constant_not_found,C}).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%
+%% Function helpers to build Refs, ExportMap and LabelMap
+%% (used by all backends: (hipe_{arm,sparc,ppc,x86}_assemble.erl)
+%%
+
+mk_data_relocs(RefsFromConsts, LabelMap) ->
+  lists:flatten(mk_data_relocs(RefsFromConsts, LabelMap, [])).
+
+mk_data_relocs([{MFA,Labels} | Rest], LabelMap, Acc) ->
+  Map = [case Label of
+	   {L,Pos} ->
+	     Offset = find({MFA,L}, LabelMap),
+	     {Pos,Offset};
+	   {sorted,Base,OrderedLabels} ->
+	     {sorted, Base, [begin
+			       Offset = find({MFA,L}, LabelMap),
+			       {Order, Offset}
+			     end
+			     || {L,Order} <- OrderedLabels]}
+	 end
+	 || Label <- Labels],
+  mk_data_relocs(Rest, LabelMap, [Map,Acc]);
+mk_data_relocs([],_,Acc) -> Acc.
+
+find({MFA,L},LabelMap) ->
+  gb_trees:get({MFA,L}, LabelMap).
+
+slim_sorted_exportmap([{Addr,M,F,A}|Rest], Closures, Exports) ->
+  IsClosure = lists:member({M,F,A}, Closures),
+  IsExported = is_exported(F, A, Exports),
+  [Addr,M,F,A,IsClosure,IsExported | slim_sorted_exportmap(Rest, Closures, Exports)];
+slim_sorted_exportmap([],_,_) -> [].
+
+is_exported(F, A, Exports) -> lists:member({F,A}, Exports).
+
+combine_label_maps([{MFA,_Insns,CodeSize,LabelMap}|Code], Address, CLM) ->
+  NewCLM = merge_label_map(gb_trees:to_list(LabelMap), MFA, Address, CLM),
+  combine_label_maps(Code, Address+CodeSize, NewCLM); %XXX: Need align?
+combine_label_maps([], _Address, CLM) -> CLM.
+
+merge_label_map([{Label,Offset}|Rest], MFA, Address, CLM) ->
+  NewCLM = gb_trees:insert({MFA,Label}, Address+Offset, CLM),
+  merge_label_map(Rest, MFA, Address, NewCLM);
+merge_label_map([], _MFA, _Address, CLM) -> CLM.
