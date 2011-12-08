@@ -22,7 +22,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Fix Fun_Name to an acceptable LLVM identifier (needed for closures)
   {_Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options),
+  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, false),
   %%
   %% Extract information from object file
   %%
@@ -64,7 +64,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
 %% @doc Compile function Fun_Name/Arity to LLVM. Return Dir (in order to remove
 %% it if we do not want to store temporary files) and ObjectFile name that is
 %% created by the LLVM tools.
-compile_with_llvm(Fun_Name, Arity, LLVMCode, Options) ->
+compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, Buffer) ->
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
   DirName = "llvm_" ++ unique_id() ++ "/",
@@ -78,7 +78,12 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options) ->
 	%% Create temp directory
   os:cmd("mkdir " ++ Dir),
   %% Print LLVM assembly to file
-  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [append,raw,{delayed_write,65536,2000}]), % 64KBytes, 2sec (defaults)
+  OpenOpts = [append, raw] ++
+    case Buffer of
+      true -> [delayed_write]; % Use delayed_write!
+      false -> []
+    end,
+  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", OpenOpts),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
   %% delayed write can cause file:close not to do a close
   file:close(File_llvm),
