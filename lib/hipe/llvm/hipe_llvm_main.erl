@@ -78,9 +78,11 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options) ->
 	%% Create temp directory
   os:cmd("mkdir " ++ Dir),
   %% Print LLVM assembly to file
-  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [write,{delayed_write, 64000, 2000}]), % 64KBytes, 2sec (defaults)
+  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", [append,raw,{delayed_write,65536,2000}]), % 64KBytes, 2sec (defaults)
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
-  file:close(File_llvm), % flush and close file
+  %% delayed write can cause file:close not to do a close
+  file:close(File_llvm),
+  file:close(File_llvm),
   %% Invoke LLVM compiler tools to produce an object file
   ObjectFile = invoke_llvm_tools(Dir, Filename, Options),
   {ok, Dir, ObjectFile}.
