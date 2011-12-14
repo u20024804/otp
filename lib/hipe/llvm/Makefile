@@ -40,20 +40,20 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 # ----------------------------------------------------
 ifdef HIPE_ENABLED
 HIPE_MODULES = hipe_rtl2llvm \
-							 hipe_llvm \
-							 elf64_format \
-							 note_erlgc \
-							 hipe_llvm_main \
-							 hipe_llvm_merge	\
-							 hipe_llvm_liveness
+	hipe_llvm \
+	elf_format \
+	note_erlgc \
+	hipe_llvm_main \
+	hipe_llvm_merge	\
+	hipe_llvm_liveness
 else
 HIPE_MODULES =
 endif
 
 MODULES = $(HIPE_MODULES)
 
-HRL_FILES= elf64_format.hrl note_erlgc.hrl new_note_erlgc.hrl \
-					 hipe_llvm.hrl hipe_llvm_arch.hrl
+HRL_FILES= elf_format.hrl elf64_format.hrl note_erlgc.hrl \
+	new_note_erlgc.hrl hipe_llvm.hrl hipe_llvm_arch.hrl
 ERL_FILES= $(MODULES:%=%.erl)
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 
@@ -82,7 +82,6 @@ debug opt: $(TARGET_FILES)
 docs:
 
 clean:
-	#rm -f hipe_literals.hrl
 	rm -f $(TARGET_FILES)
 	rm -f core erl_crash.dump
 
