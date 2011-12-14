@@ -325,19 +325,15 @@ trans_branch(I, Relocs) ->
 %% call
 %%
 trans_call(I, Relocs) ->
+  RtlCallArgList= hipe_rtl:call_arglist(I),
   RtlCallName = hipe_rtl:call_fun(I),
+  {I0, Relocs1} = expose_closure(RtlCallName, RtlCallArgList, Relocs),
   TmpDst = mk_temp(),
-  {CallArgs, I1} = trans_call_args(hipe_rtl:call_arglist(I)),
+  {CallArgs, I1} = trans_call_args(RtlCallArgList),
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I2} = load_fixed_regs(FixedRegs),
-  FinalArgs =
-    case RtlCallName of
-      {hipe_bifs, llvm_expose_closure, _} ->
-        [];
-      _ ->
-        fix_reg_args(LoadedFixedRegs) ++ CallArgs
-    end,
-  {Name, I3, NewRelocs} = trans_call_name(RtlCallName, Relocs, CallArgs,
+  FinalArgs = fix_reg_args(LoadedFixedRegs) ++ CallArgs,
+  {Name, I3, Relocs2} = trans_call_name(RtlCallName, Relocs1, CallArgs,
                                         FinalArgs),
   T1 = mk_temp(),
   I4 =
@@ -369,10 +365,34 @@ trans_call(I, Relocs) ->
     case hipe_rtl:call_continuation(I) of
       [] -> []; %% No continuation
       CC ->
-        {II5, _} = trans_goto(hipe_rtl:mk_goto(CC), Relocs),
+        {II5, _} = trans_goto(hipe_rtl:mk_goto(CC), Relocs2),
         II5
     end,
-  {[I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
+  {[I7, I6, I5, I4, I3, I2, I1, I0], Relocs2}.
+
+%% In case of call to a register (closure call) with more than ?NR_ARG_REGS
+%% arguments we must track the offset this call in the code, in order to
+%% to correct the stack descriptor. So, we insert a new Label and add this label
+%% to the "table_closures"
+%% --------------------------------|--------------------------------------------
+%%        Old Code                 |           New Code
+%% --------------------------------|--------------------------------------------
+%%                                 |           br %ClosureLabel
+%%        call %reg(Args)          |           ClosureLabel:
+%%                                 |           call %reg(Args)
+expose_closure(CallName, CallArgs, Relocs) ->
+  case hipe_rtl:is_reg(CallName) andalso length(CallArgs) > ?NR_ARG_REGS of
+    true ->
+      LabelNum = hipe_gensym:new_label(llvm),
+      ClosureLabel = hipe_llvm:mk_label(mk_label(LabelNum)),
+      JumpIns = hipe_llvm:mk_br(mk_jump_label(LabelNum)),
+      Relocs1 = relocs_store({CallName, LabelNum}, {closure_label, LabelNum,
+                             length(CallArgs) - ?NR_ARG_REGS},
+                             Relocs),
+      {[ClosureLabel, JumpIns], Relocs1};
+    false ->
+      {[], Relocs}
+  end.
 
 %%
 trans_call_name(RtlCallName, Relocs, CallArgs, FinalArgs) ->
@@ -780,21 +800,15 @@ fix_calls([I|Is], Acc, FailLabels) ->
   case I of
     #call{} ->
       {NewCall, NewFailLabels} =
-      case hipe_rtl:call_fail(I) of
-        [] ->
-          {I, FailLabels};
-        FailLabel ->
-          fix_invoke_call(I, FailLabel, FailLabels)
-      end,
-      Fun = hipe_rtl:call_fun(NewCall),
-      case hipe_rtl:is_reg(Fun) of
-        false ->
-          fix_calls(Is, [NewCall|Acc], NewFailLabels);
-        true ->
-          NewCall2 = fix_closure_call(NewCall),
-          fix_calls(Is, NewCall2++Acc, NewFailLabels)
-      end;
-    _ -> fix_calls(Is, [I|Acc], FailLabels)
+        case hipe_rtl:call_fail(I) of
+          [] ->
+            {I, FailLabels};
+          FailLabel ->
+            fix_invoke_call(I, FailLabel, FailLabels)
+        end,
+      fix_calls(Is, [NewCall|Acc], NewFailLabels);
+    _ ->
+      fix_calls(Is, [I|Acc], FailLabels)
   end.
 
 %% @doc When a call has a fail continuation label it must be extended with a
@@ -836,22 +850,6 @@ find_sp_adj(ArgList) ->
       (NrArgs-RegArgs)*(?WORD_WIDTH div 8);
     false ->
       0
-  end.
-
-%% @doc In case of a call to a closure with more than ?NR_ARG_REGS, the
-%% addresss of the call must be exported in order to fix the corresponding
-%% SDesc. This is achieved by introducing a call to
-%% hipe_bifs:llvm_expose_closure/0 before the closure call.
-fix_closure_call(I) ->
-  CallArgs = hipe_rtl:call_arglist(I),
-  StackArgs = length(CallArgs)-?NR_ARG_REGS,
-  case StackArgs > 0 of
-    true ->
-      NewCall = hipe_rtl:mk_call([], {hipe_bifs, llvm_expose_closure, StackArgs},
-        [], [], [], remote),
-      [I,NewCall];
-    false ->
-      [I]
   end.
 
 %% @doc Add landingpad instruction in Fail Blocks
@@ -1337,7 +1335,8 @@ relocs_to_list(Relocs) ->
 handle_relocations(Relocs, Data, Fun) ->
   RelocsList = relocs_to_list(Relocs),
   %% Seperate Relocations according to their type
-  {CallList, AtomList, ClosureList, SwitchList} = seperate_relocs(RelocsList),
+  {CallList, AtomList, ClosureList, ClosureLabels, SwitchList} =
+    seperate_relocs(RelocsList),
   %% Create code to declare atoms
   AtomDecl = lists:map(fun declare_atom/1, AtomList),
   %% Create code to create local name for atoms
@@ -1359,34 +1358,43 @@ handle_relocations(Relocs, Data, Fun) ->
   ConstLoad = lists:map(fun load_constant/1, ConstLabels),
   %% Create code to create jump tables
   SwitchDecl = declare_switches(SwitchList, Fun),
+  %% Create code to create a table with the labels of all closure calls
+  {ClosureLabelDecl, Relocs1} = declare_closure_labels(ClosureLabels, Relocs, Fun),
   %% Enter constants to relocations
-  Relocs1 = lists:foldl(fun const_to_dict/2, Relocs, ConstLabels),
+  Relocs2 = lists:foldl(fun const_to_dict/2, Relocs1, ConstLabels),
   %% Temporary Store inc_stack and llvm_fix_pinned_regs to Dictionary
   %% TODO: Remove this
-  Relocs2 = dict:store("inc_stack_0",
-                      {call, {bif, inc_stack_0, 0}}, Relocs1),
-  Relocs3 = dict:store("hipe_bifs.llvm_fix_pinned_regs.0",
-                      {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs2),
+  Relocs3 = dict:store("inc_stack_0",
+                      {call, {bif, inc_stack_0, 0}}, Relocs2),
+  Relocs4 = dict:store("hipe_bifs.llvm_fix_pinned_regs.0",
+                      {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs3),
   ExternalDeclarations =
-    AtomDecl++ClosureDecl++ConstDecl++FunDecl++SwitchDecl,
+    AtomDecl++ClosureDecl++ConstDecl++FunDecl++ClosureLabelDecl++SwitchDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
-  {Relocs3, ExternalDeclarations, LocalVariables}.
+  {Relocs4, ExternalDeclarations, LocalVariables}.
 
 %% @doc Seperate Relocations according to their type
-seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], [], []).
+seperate_relocs(Relocs) -> seperate_relocs(Relocs, [], [], [], [], []).
 
-seperate_relocs([], CallAcc, AtomAcc, ClosureAcc, JmpTableAcc) ->
-  {CallAcc, AtomAcc, ClosureAcc, JmpTableAcc};
-seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc, JmpTableAcc) ->
+seperate_relocs([], CallAcc, AtomAcc, ClosureAcc, LabelAcc, JmpTableAcc) ->
+  {CallAcc, AtomAcc, ClosureAcc, LabelAcc, JmpTableAcc};
+seperate_relocs([R|Rs], CallAcc, AtomAcc, ClosureAcc, LabelAcc, JmpTableAcc) ->
   case R of
     {_,{call,_}} ->
-      seperate_relocs(Rs, [R|CallAcc], AtomAcc, ClosureAcc, JmpTableAcc);
+      seperate_relocs(Rs, [R|CallAcc], AtomAcc, ClosureAcc, LabelAcc,
+                      JmpTableAcc);
     {_,{atom,_}} ->
-      seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc, JmpTableAcc);
+      seperate_relocs(Rs, CallAcc, [R|AtomAcc], ClosureAcc, LabelAcc,
+                      JmpTableAcc);
     {_,{closure,_}} ->
-      seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc], JmpTableAcc);
+      seperate_relocs(Rs, CallAcc, AtomAcc, [R|ClosureAcc], LabelAcc,
+                      JmpTableAcc);
     {_,{switch,_, _}} ->
-      seperate_relocs(Rs, CallAcc, AtomAcc, ClosureAcc, [R|JmpTableAcc])
+      seperate_relocs(Rs, CallAcc, AtomAcc, ClosureAcc, LabelAcc,
+                      [R|JmpTableAcc]);
+    {_,{closure_label,_, _}} ->
+      seperate_relocs(Rs, CallAcc, AtomAcc, ClosureAcc, [R|LabelAcc],
+                      JmpTableAcc)
   end.
 
 %% @doc External declaration of an atom
@@ -1426,25 +1434,42 @@ declare_switch_table({Name, {switch, {TableType, Labels, _, _}, _}}, FunName) ->
   List4 = "[\n" ++ List3 ++ "\n]\n",
   hipe_llvm:mk_const_decl("@"++Name, "constant", TableType, List4).
 
+%% @doc Declaration of a variable for a table with the labels of all closure
+%% calls in the code
+declare_closure_labels([], Relocs, _Fun) ->
+  {[], Relocs};
+declare_closure_labels(ClosureLabels, Relocs, Fun) ->
+  FunName = trans_mfa_name(Fun),
+  {LabelList, ArityList} = lists:unzip(
+                             [{mk_jump_label(Label), A} ||
+                               {_, {closure_label, Label, A}} <- ClosureLabels]
+                           ),
+  Relocs1 = relocs_store("table_closures", {table_closures, ArityList}, Relocs),
+  Fun1 =
+    fun(X) ->
+        "i8* blockaddress(@"++FunName++", "++X++")"
+    end,
+  List2 = lists:map(Fun1, LabelList),
+  List3 = string:join(List2, ",\n"),
+  List4 = "[\n" ++ List3 ++ "\n]\n",
+  NrLabels = length(LabelList),
+  TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
+  {[hipe_llvm:mk_const_decl("@"++"table_closures", "constant", TableType,
+      List4)], Relocs1}.
+
 %% @doc A call is treated as non external only in a case of a recursive function
 is_external_call({_, {call, Fun}}, Fun) -> false;
 is_external_call(_, _) -> true.
 
 %% @doc External declaration of a function
 call_to_decl({Name, {call, MFA}}) ->
-  {M, F, A} = MFA,
+  {M, _F, A} = MFA,
   Cconv = "cc 11",
   {Type, Args} =
     case M of
       llvm ->
         {hipe_llvm:mk_struct([?WORD_TYPE, hipe_llvm:mk_int(1)]),
           lists:seq(1,2)};
-      hipe_bifs ->
-        case F of
-          llvm_expose_closure -> {?FUN_RETURN_TYPE, []};
-          %% +precoloured regs
-          _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
-        end;
       %% +precoloured regs
       _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
     end,
@@ -1483,3 +1508,4 @@ load_constant(Label) ->
 const_to_dict(Elem, Dict) ->
   Name = "DL"++integer_to_list(Elem),
   dict:store(Name, {'constant', Elem}, Dict).
+
