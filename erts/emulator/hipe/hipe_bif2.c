@@ -189,12 +189,3 @@ BIF_RETTYPE hipe_bifs_llvm_fix_pinned_regs_0(BIF_ALIST_0)
 {
     BIF_RET(am_ok);
 }
-
-/* Stub-BIF for LLVM:
- * Expose closure call in order to fix its stack descriptor 
- * (needed in case of a closure call with more than 4 arguments) */
-
-BIF_RETTYPE hipe_bifs_llvm_expose_closure_0(BIF_ALIST_0)
-{
-    BIF_RET(am_ok);
-}
