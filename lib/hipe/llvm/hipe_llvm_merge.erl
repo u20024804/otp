@@ -16,8 +16,8 @@ finalize(CompiledCode, Closures, Exports) ->
   {CodeSize, CodeBinary, ExportMap} = merge_code(CompiledCode1),
   AccRefs = merge_refs(CompiledCode1, ConstMap),
   %% Bring CompiledCode to a combine_label_maps-acceptable form.
-  CompiledCode2 = [ {MFA, Code, CodeSize, LabelMap} ||
-                    {MFA, Code, CodeSize, _, _, LabelMap} <- CompiledCode1 ],
+  CompiledCode2 = [ {MFA, Ccode, CcodeSize, LabelMap} ||
+                    {MFA, Ccode, CcodeSize, _, _, LabelMap} <- CompiledCode1 ],
   LabelMap = hipe_pack_constants:combine_label_maps(CompiledCode2, 0,
                                                     gb_trees:empty()),
   SC = hipe_pack_constants:slim_constmap(ConstMap),
