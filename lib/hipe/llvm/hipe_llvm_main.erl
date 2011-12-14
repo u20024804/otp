@@ -22,7 +22,8 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Fix Fun_Name to an acceptable LLVM identifier (needed for closures)
   {_Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, false),
+  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options,
+                                            false),
   %%
   %% Extract information from object file
   %%
@@ -34,17 +35,20 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Get labels info
   Labels = elf_format:get_label_list(ObjBin),
   SwitchAddends = elf_format:get_text_rodata_list(ObjBin),
-  SwitchInfos = extract_switch_infos(SwitchAddends, Labels),
+  ClosureAddends = elf_format:get_symtab_list(ObjBin),
+  %% Associate Labels with Switches and Closures with stack args
+  {SwitchInfos, ExposedClosures} =
+    correlate_labels(SwitchAddends++ClosureAddends, Labels),
   %% Labelmap contains the offsets of the labels in the code that are
   %% used for switch's jump tables
   LabelMap = create_labelmap(MFA, SwitchInfos, RelocsDict),
   %% AccRefs contains the offsets of all references to relocatable symbols in
   %% the code
-  %% Closures containts offsets and arity of calls to hipe_bifs:llvm_expose_closure/A.
-  {AccRefs, ExposedClosures} = fix_relocations(Relocs, RelocsDict, MFA),
+  AccRefs = fix_relocations(Relocs, RelocsDict, MFA),
   %% FixedSDescs are the stack descriptors after correcting calls that have
   %% arguments in the stack
-  FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
+  FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs,
+                                      ExposedClosures),
   Refs = AccRefs++FixedSDescs,
   %% Get binary code from object file
   BinCode = elf_format:extract_text(ObjBin),
@@ -173,18 +177,26 @@ trans_optlev_flag(Tool, Options) ->
 %% Functions to manage relocations
 %%------------------------------------------------------------------------------
 
-%% @doc This function assocciates a jump table with the offset in the code
-%% where it is appeared and mainly with the offets of the Labels which contains.
-extract_switch_infos([], _L) -> [];
-extract_switch_infos(Switches, Labels) ->
-  %% Sort "Switches" based on "ValueOffsets"
-  OffsetSortedSw = lists:ukeysort(2, Switches),
+%% @doc This functions associates symbols who point to some table of labels with
+%% the corresponding offsets of the labels in the code. These tables can either
+%% be jump tables for switches or a table which contains the labels of blocks
+%% that containt closure calls with more than ?NR_ARG_REGS
+correlate_labels([], _L) -> {[], []};
+correlate_labels(Tables, Labels) ->
+  %% Sort "Tables" based on "ValueOffsets"
+  OffsetSortedTb = lists:ukeysort(2, Tables),
   %% Unzip offset-sorted list of "Switches"
-  {Names, _Offsets, SwitchSizeList} = lists:unzip3(OffsetSortedSw),
+  {Names, _Offsets, TablesSizeList} = lists:unzip3(OffsetSortedTb),
   %% Associate switch names with labels
-  L = elf_format:split_list(Labels, SwitchSizeList),
+  L = elf_format:split_list(Labels, TablesSizeList),
   %% Zip back! (to [{SwitchName, Values}])
-  lists:zip(Names, L).
+  NamesValues = lists:zip(Names, L),
+  case lists:keytake("table_closures", 1, NamesValues) of
+    false ->  %% No closures in the code, no closure table
+      {NamesValues, []};
+    {value, ClosureTableNV, SwitchesNV} ->
+      {SwitchesNV, ClosureTableNV}
+  end.
 
 %% @doc Create a gb_tree which contains information about the labels that used
 %% for switch's jump tables. The keys of the gb_tree are of the form {MFA,
@@ -216,45 +228,34 @@ insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
 %% @doc Correlate object file relocation symbols with info from translation to
 %% llvm code.
 fix_relocations(Relocs, RelocsDict, MFA ) ->
-  fix_relocs(Relocs, RelocsDict, MFA, [], []).
+  fix_relocs(Relocs, RelocsDict, MFA, []).
 
-%% ClosureAcc holds the offsets and the arity of calls to
-%% hipe_bifs:llvm_expose_closure/A which is used to expose the closures
-%% addresses.
-fix_relocs([], _, _, RelocAcc, ClosureAcc) -> {RelocAcc, ClosureAcc};
-fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc,
-           ClosureAcc) ->
+fix_relocs([], _, _, RelocAcc) -> RelocAcc;
+fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc) ->
   case dict:fetch(Name, RelocsDict) of
     {atom, AtomName} ->
-      fix_relocs(Rs, RelocsDict, MFA, [{?LOAD_ATOM, Offset, AtomName}|RelocAcc],
-                 ClosureAcc);
+      fix_relocs(Rs, RelocsDict, MFA,
+                 [{?LOAD_ATOM, Offset, AtomName}|RelocAcc]);
     {constant, Label} ->
-      fix_relocs(Rs, RelocsDict, MFA, [{?LOAD_ADDRESS, Offset,
-                 {constant, Label}}|RelocAcc], ClosureAcc);
+      fix_relocs(Rs, RelocsDict, MFA,
+                [{?LOAD_ADDRESS, Offset, {constant, Label}}|RelocAcc]);
     {switch, _, JTabLab} -> %% Treat switch exactly as constant
-      fix_relocs(Rs, RelocsDict, MFA, [{?LOAD_ADDRESS, Offset,
-                 {constant, JTabLab}}|RelocAcc], ClosureAcc);
+      fix_relocs(Rs, RelocsDict, MFA,
+                 [{?LOAD_ADDRESS, Offset, {constant, JTabLab}}|RelocAcc]);
     {closure, _}=Closure ->
       fix_relocs(Rs, RelocsDict, MFA,
-                 [{?LOAD_ADDRESS, Offset, Closure}|RelocAcc], ClosureAcc);
+                 [{?LOAD_ADDRESS, Offset, Closure}|RelocAcc]);
     {call, {bif, BifName, _}} ->
-      fix_relocs(Rs, RelocsDict,
-                 MFA, [{?CALL_LOCAL, Offset, BifName}|RelocAcc], ClosureAcc);
-    {call, {hipe_bifs, llvm_expose_closure, A}} ->
-      %% Map llvm_expose_closure/a to llvm_expose_closure/0, The argument arity
-      %% is used only as a trick in order to extract the stack arity of the
-      %% following closure.
-      CallMFA = {hipe_bifs, llvm_expose_closure, 0},
-      fix_relocs(Rs, RelocsDict, MFA, [{?CALL_LOCAL, Offset, CallMFA}|RelocAcc],
-                 [{Offset, A} | ClosureAcc]);
+      fix_relocs(Rs, RelocsDict, MFA,
+                 [{?CALL_LOCAL, Offset, BifName}|RelocAcc]);
     %% MFA calls to functions in the same module are of type 3, while all
     %% other MFA calls are of type 2.
     {call, {ModName,_F,_A}=CallMFA} ->
-      fix_relocs(Rs, RelocsDict, MFA, [{?CALL_LOCAL, Offset, CallMFA}|RelocAcc],
-                 ClosureAcc);
+      fix_relocs(Rs, RelocsDict, MFA,
+                 [{?CALL_LOCAL, Offset, CallMFA}|RelocAcc]);
     {call, CallMFA} ->
       fix_relocs(Rs, RelocsDict, MFA,
-                 [{?CALL_REMOTE, Offset, CallMFA}|RelocAcc], ClosureAcc);
+                 [{?CALL_REMOTE, Offset, CallMFA}|RelocAcc]);
     Other ->
       exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary",
 		  Other}})
@@ -271,11 +272,24 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc,
 %% the point of call the frame size is reduced proportionally to the number of
 %% arguments that are passed to the stack. Also the offsets of the roots need
 %% to be readjusted.
+fix_stack_descriptors(_, _, [], _) ->
+  [];
 fix_stack_descriptors(RelocsDict, Relocs, SDescs, ExposedClosures) ->
   %% NamedCalls are MFA and BIF calls that need fix
   NamedCalls  = calls_with_stack_args(RelocsDict),
   NamedCallsOffs = calls_offsets_arity(Relocs, NamedCalls),
-  ClosuresOffs = closures_offsets_arity(ExposedClosures, SDescs),
+  ExposedClosures1 =
+    case dict:is_key("table_closures", RelocsDict) of
+      true -> %% A Table with closures exists
+        {table_closures, ArityList} = dict:fetch("table_closures", RelocsDict),
+            case ExposedClosures of
+              {_,  Offsets} -> lists:zip(Offsets,ArityList);
+              _ -> exit({?MODULE, fix_stack_descriptors,
+                        {"Wrong exposed closures", ExposedClosures}})
+            end;
+      false -> []
+    end,
+  ClosuresOffs = closures_offsets_arity(ExposedClosures1, SDescs),
   fix_sdescs(NamedCallsOffs++ClosuresOffs, SDescs).
 
 %% @doc This function takes as argument the relocation dictionary as produced
@@ -329,13 +343,15 @@ closures_offsets_arity([], _) ->
 closures_offsets_arity(ExposedClosures, SDescs) ->
   Offsets = [ Offset || {_, Offset, _} <- SDescs ],
   SortedOffsets = lists:sort(Offsets), %% Offsets must be sorted in order
-                                       %% FindTheClosure fun to work
-  FindTheClosure =
-    fun ({Off, Arity}) ->
-      [I|_] = lists:dropwhile(fun (Y) -> Y<Off+5 end, SortedOffsets),
-      {I, Arity}
-    end,
-  lists:map(FindTheClosure, ExposedClosures).
+                                       %% find_offsets/3 fun to work
+  SortedExposedClosures = lists:keysort(1, ExposedClosures), %% Same for
+                                                             %% closures
+  find_offsets(SortedExposedClosures, SortedOffsets, []).
+
+find_offsets([], _, Acc) -> Acc;
+find_offsets([{Off,Arity}|Rest], Offsets, Acc) ->
+  [I | RestOffsets] = lists:dropwhile(fun (Y) -> Y<Off end, Offsets),
+  find_offsets(Rest, RestOffsets, [{I, Arity}|Acc]).
 
 %%%% The below functions correct the arity of calls, that are identified by
 %%%% offset, in the stack descriptors.

@@ -293,7 +293,7 @@ get_symtab_list(Elf) ->
   %% Do the magic!
   LRodata = get_symtab_list(SymTab, StrTab),
   %% Filter symbols
-  Pred = fun({SymName, _, _}) -> string:str(SymName, "table_call") =:= 1 end,
+  Pred = fun({SymName, _, _}) -> string:str(SymName, "table_closures") =:= 1 end,
   lists:filter(Pred, LRodata).
 
 get_symtab_list(SymTab, StrTab) ->
@@ -311,7 +311,7 @@ get_symtab_list(SymTab, StrTab, SymIndex, Limit, RoAcc) ->
   %% Extract SName (contains  offset of name in StrTab)
   <<_Hdr:SymName/binary, Names/binary>> = StrTab,
   SymbolName = bin_get_string(Names),
-  get_symtab_list(SymTab, StrTab, SymIndex + 1, Limit, 
+  get_symtab_list(SymTab, StrTab, SymIndex + 1, Limit,
       [{SymbolName, SValue, SSize div ?ELF_XWORD_SIZE} | RoAcc]).
 				           % div 8/4 to transform offsets to sizes
 
