@@ -12,7 +12,7 @@
 %% @doc Translation of RTL to a loadable object. This functions takes the RTL
 %% code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to LLVM
 %% code. After this, LLVM asm is printed to a file and the LLVM tool chain is
-%% invoked in order to produce an object file. Then the elf64_format and the
+%% invoked in order to produce an object file. Then the elf_format and the
 %% note_erlc modules are used in order to extract all the necessary informations
 %% on the object file.
 rtl_to_native(MFA, RTL, Roots, Options) ->
@@ -26,14 +26,14 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %%
   %% Extract information from object file
   %%
-  ObjBin = elf64_format:open_object_file(ObjectFile),
+  ObjBin = elf_format:open_object_file(ObjectFile),
   %% Get relocation info
-  Relocs = elf64_format:get_text_symbol_list(ObjBin),
+  Relocs = elf_format:get_text_symbol_list(ObjBin),
   %% Get stack descriptors
   SDescs = note_erlgc:get_sdesc_list(ObjBin),
   %% Get labels info
-  Labels = elf64_format:get_label_list(ObjBin),
-  SwitchAddends = elf64_format:get_text_rodata_list(ObjBin),
+  Labels = elf_format:get_label_list(ObjBin),
+  SwitchAddends = elf_format:get_text_rodata_list(ObjBin),
   SwitchInfos = extract_switch_infos(SwitchAddends, Labels),
   %% Labelmap contains the offsets of the labels in the code that are
   %% used for switch's jump tables
@@ -47,7 +47,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
   Refs = AccRefs++FixedSDescs,
   %% Get binary code from object file
-  BinCode = elf64_format:extract_text(ObjBin),
+  BinCode = elf_format:extract_text(ObjBin),
   %% Remove temp files (if needed)
 	remove_temp_folder(Dir, Options),
   %% Return the code together with information that will be used in the
@@ -182,7 +182,7 @@ extract_switch_infos(Switches, Labels) ->
   %% Unzip offset-sorted list of "Switches"
   {Names, _Offsets, SwitchSizeList} = lists:unzip3(OffsetSortedSw),
   %% Associate switch names with labels
-  L = elf64_format:split_list(Labels, SwitchSizeList),
+  L = elf_format:split_list(Labels, SwitchSizeList),
   %% Zip back! (to [{SwitchName, Values}])
   lists:zip(Names, L).
 
