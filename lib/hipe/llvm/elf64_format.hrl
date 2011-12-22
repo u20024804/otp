@@ -2,15 +2,15 @@
 
 %%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
 %%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
-%%% @version {@version}
 %%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
+%%%    [http://www.softlab.ntua.gr/~gtsiour/]
 
-%%% @doc This header file contains very very useful macros for manipulating
+%%% @doc This header file contains very very useful macros for handling
 %%%      various segments of an ELF-64 formated object file, such as sizes,
 %%%      offsets and predefined constants. For further information about
 %%%      each field take a quick look at
 %%%      "[http://www.linuxjournal.com/article/1060?page=0,0]" that contains
-%%%      the current HP/Intel definition of the ELF-64 object file format.
+%%%      the current HP/Intel definition of the ELF object file format.
 
 %%------------------------------------------------------------------------------
 %% ELF-64 Data Types (in bytes)
@@ -23,7 +23,6 @@
 -define(ELF_XWORD_SIZE,         8).
 -define(ELF_SXWORD_SIZE,        8).
 -define(ELF_UNSIGNED_CHAR_SIZE, 1).
-
 
 %%------------------------------------------------------------------------------
 %% ELF-64 Symbol Table Entries
@@ -43,7 +42,6 @@
 -define(ELF_R_SYM(I),     (I bsr 32) ).
 -define(ELF_R_TYPE(I),    (I band 16#ffffffff) ).
 -define(ELF_R_INFO(S, T), ((S bsl 32) + (T band 16#ffffffff)) ).
-
 
 %%------------------------------------------------------------------------------
 %% ELF-64 Program Header Table
