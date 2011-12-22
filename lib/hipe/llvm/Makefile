@@ -41,8 +41,8 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 ifdef HIPE_ENABLED
 HIPE_MODULES = hipe_rtl2llvm \
 	hipe_llvm \
+	elf_datatypes \
 	elf_format \
-	note_erlgc \
 	hipe_llvm_main \
 	hipe_llvm_merge	\
 	hipe_llvm_liveness
@@ -52,16 +52,16 @@ endif
 
 MODULES = $(HIPE_MODULES)
 
-HRL_FILES= elf_format.hrl elf64_format.hrl note_erlgc.hrl \
-	new_note_erlgc.hrl hipe_llvm.hrl hipe_llvm_arch.hrl
+HRL_FILES= elf_datatypes.hrl elf_format.hrl elf64_format.hrl \
+	hipe_llvm.hrl hipe_llvm_arch.hrl
 ERL_FILES= $(MODULES:%=%.erl)
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 
-# APP_FILE= 
+# APP_FILE=
 # App_SRC= $(APP_FILE).src
 # APP_TARGET= $(EBIN)/$(APP_FILE)
 #
-# APPUP_FILE= 
+# APPUP_FILE=
 # APPUP_SRC= $(APPUP_FILE).src
 # APPUP_TARGET= $(EBIN)/$(APPUP_FILE)
 
@@ -77,7 +77,7 @@ ERL_COMPILE_FLAGS += +inline
 # Targets
 # ----------------------------------------------------
 
-debug opt: $(TARGET_FILES) 
+debug opt: $(TARGET_FILES)
 
 docs:
 
@@ -92,7 +92,7 @@ clean:
 
 # ----------------------------------------------------
 # Release Target
-# ---------------------------------------------------- 
+# ----------------------------------------------------
 include $(ERL_TOP)/make/otp_release_targets.mk
 
 release_spec: opt
