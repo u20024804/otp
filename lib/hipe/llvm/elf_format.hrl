@@ -2,8 +2,8 @@
 
 %%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
 %%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
-%%% @version {@version}
 %%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
+%%%    [http://www.softlab.ntua.gr/~gtsiour/]
 
 %%------------------------------------------------------------------------------
 %%
@@ -12,14 +12,15 @@
 %%------------------------------------------------------------------------------
 
 
+-include("elf64_format.hrl"). % ELF64-specific definitions.
+
 %%------------------------------------------------------------------------------
 %% ELF Data Types (in bytes)
 %%------------------------------------------------------------------------------
 %%XXX: Included in either elf32_format or elf64_format.
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 File Header
+%% ELF File Header
 %%------------------------------------------------------------------------------
 -define(ELF_EHDR_SIZE, (?E_IDENT_SIZE + ?E_TYPE_SIZE + ?E_MACHINE_SIZE
 			 +?E_VERSION_SIZE + ?E_ENTRY_SIZE + ?E_PHOFF_SIZE
@@ -114,9 +115,8 @@
 -define(ET_LOPROC, 16#FF00).
 -define(ET_HIPROC, 16#FFFF).
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 Section Header
+%% ELF Section Header
 %%------------------------------------------------------------------------------
 -define(ELF_SHDRENTRY_SIZE, (?SH_NAME_SIZE + ?SH_TYPE_SIZE + ?SH_FLAGS_SIZE
 			      +?SH_ADDR_SIZE + ?SH_OFFSET_SIZE + ?SH_SIZE_SIZE
@@ -208,7 +208,7 @@
 -define(DYNSTR,     ".dynstr").
 -define(GOT,        ".got").
 -define(HASH,       ".hash").
--define(NOTE(Name), (".note." ++ Name)).
+-define(NOTE(Name), (".note" ++ Name)).
 -define(PLT,        ".plt").
 -define(REL(Name),  (".rel" ++ Name) ).
 -define(RELA(Name), (".rela" ++ Name) ).
@@ -217,9 +217,8 @@
 -define(SYMTAB,     ".symtab").
 -define(GCC_EXN_TAB, ".gcc_except_table").
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 Symbol Table Entries
+%% ELF Symbol Table Entries
 %%------------------------------------------------------------------------------
 -define(ELF_SYM_SIZE, (?ST_NAME_SIZE + ?ST_INFO_SIZE + ?ST_OTHER_SIZE
 			+?ST_SHNDX_SIZE + ?ST_VALUE_SIZE + ?ST_SIZE_SIZE) ).
@@ -267,9 +266,8 @@
 -define(STT_LOPROC,  13).
 -define(STT_HIPROC,  15).
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 Relocation Entries
+%% ELF Relocation Entries
 %%------------------------------------------------------------------------------
 -define(ELF_REL_SIZE,  (?R_OFFSET_SIZE + ?R_INFO_SIZE) ).
 -define(ELF_RELA_SIZE, (?R_OFFSET_SIZE + ?R_INFO_SIZE + ?R_ADDEND_SIZE) ).
@@ -291,14 +289,12 @@
 %% Useful macros to extract information from r_info field
 %%XXX: Included in either elf32_format or elf64_format.
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 Program Header Table
+%% ELF Program Header Table
 %%------------------------------------------------------------------------------
 -define(ELF_PHDR_SIZE, (?P_TYPE_SIZE + ?P_FLAGS_SIZE + ?P_OFFSET_SIZE
 			 +?P_VADDR_SIZE + ?P_PADDR_SIZE + ?P_FILESZ_SIZE
 			 +?P_MEMSZ_SIZE + ?P_ALIGN_SIZE) ).
-
 
 -define(P_TYPE_SIZE,   ?ELF_WORD_SIZE).
 -define(P_FLAGS_SIZE,  ?ELF_WORD_SIZE).
@@ -342,9 +338,8 @@
 -define(PF_MASKOS,   16#00FF0000).
 -define(PF_MASKPROC, 16#FF000000).
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 Dynamic Table
+%% ELF Dynamic Table
 %%------------------------------------------------------------------------------
 -define(ELF_DYN_SIZE, (?D_TAG_SIZE + ?D_VAL_PTR_SIZE) ).
 
@@ -394,9 +389,8 @@
 -define(DT_LOPROC,       16#700000000).
 -define(DT_HIPROC,       16#7FFFFFFFF).
 
-
 %%------------------------------------------------------------------------------
-%% ELF-64 GCC Exception Table
+%% ELF GCC Exception Table
 %%------------------------------------------------------------------------------
 
 %% The DWARF Exception Header Encoding is used to describe the type of data used
@@ -419,14 +413,71 @@
 -define(DW_EH_PE_absptr,  16#00). % Value is used with no modification.
 -define(DW_EH_PE_pcrel,   16#10). % Value is relative to the current PC.
 -define(DW_EH_PE_datarel, 16#30). % Value is relative to the beginning of the
-                                  %   section.
-
+				  %   section.
 
 %%------------------------------------------------------------------------------
-%% ELF-64 Read-only data (constants, literlas etc.)
+%% ELF Read-only data (constants, literlas etc.)
 %%------------------------------------------------------------------------------
-
 -define(RO_ENTRY_SIZE, 8).
+
+%%------------------------------------------------------------------------------
+%% Custom Note section: ".note.gc" for Erlang GC
+%%------------------------------------------------------------------------------
+
+%%      The structure of this section is the following:
+%%
+%%       .long <n>       # number of safe points in code
+%%
+%%       .long .L<label1> # safe point address               |
+%%       .long .L<label2> # safe point address               |-> safe point addrs
+%%          .....                                            |
+%%       .long .L<label3> # safe point address               |
+%%
+%%       .long <n>       # stack frame size (in words)      |-> fixed-size part
+%%       .long <n>       # stack arity                      |
+%%       .long <n>       # number of live roots that follow |
+%%
+%%       .long <n>       # live root's stack index  |
+%%          .....                                   |-> live root indices
+%%       .long <n>       #          >>              |
+
+%% The name of the custom Note Section
+-define(NOTE_ERLGC_NAME, ".gc").
+
+%% The first word of a Note Section for Erlang GC (".note.gc") is always the
+%% number of safepoints in code.
+-define(SP_COUNT, {?SP_COUNT_OFFSET, ?SP_COUNT_SIZE}).
+-define(SP_COUNT_SIZE,   ?ELF_WORD_SIZE).
+-define(SP_COUNT_OFFSET, 0).                %(always the first entry in sdesc)
+
+%% The fixed-size part of a safe point (SP) entry consists of 4 words: the SP
+%% address (offset in code), the stack frame size of the function (where the SP
+%% is located), the stack arity of the function (the registered values are *not*
+%% counted), the number of live roots in the specific SP.
+-define(SP_FIXED, {?SP_FIXED_OFF, ?SP_FIXED_SIZE}).
+-define(SP_FIXED_OFF, 0).
+%%XXX: Exclude SP_ADDR_SIZE from SP_FIXED_SIZE in lew of new GC layout
+-define(SP_FIXED_SIZE, (?SP_STKFRAME_SIZE + ?SP_STKARITY_SIZE
+			 + ?SP_LIVEROOTCNT_SIZE)).
+
+-define(SP_ADDR_SIZE,        ?ELF_WORD_SIZE).
+-define(SP_STKFRAME_SIZE,    ?ELF_WORD_SIZE).
+-define(SP_STKARITY_SIZE,    ?ELF_WORD_SIZE).
+-define(SP_LIVEROOTCNT_SIZE, ?ELF_WORD_SIZE).
+
+%%XXX: SP_STKFRAME is the first piece of information in the new GC layout
+-define(SP_STKFRAME_OFFSET,    0).
+-define(SP_STKARITY_OFFSET,    (?SP_STKFRAME_OFFSET + ?SP_STKFRAME_SIZE) ).
+-define(SP_LIVEROOTCNT_OFFSET, (?SP_STKARITY_OFFSET + ?SP_STKARITY_SIZE) ).
+
+%% Name aliases for safepoint fields.
+-define(SP_STKFRAME,    {?SP_STKFRAME_OFFSET, ?SP_STKFRAME_SIZE}).
+-define(SP_STKARITY,    {?SP_STKARITY_OFFSET, ?SP_STKARITY_SIZE}).
+-define(SP_LIVEROOTCNT, {?SP_LIVEROOTCNT_OFFSET, ?SP_LIVEROOTCNT_SIZE}).
+
+%% After the fixed-size part a variable-size part exists. This part holds the
+%% stack frame index of every live root in the specific SP.
+-define(LR_STKINDEX_SIZE, ?ELF_WORD_SIZE).
 
 %%------------------------------------------------------------------------------
 %% Misc.
