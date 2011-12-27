@@ -26,8 +26,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   ObjBin = open_object_file(ObjectFile),
   %% Get labels info (for switches and jump tables)
   Labels   = get_rodata_relocs(ObjBin),
-  Switches = get_switches(ObjBin),
-  Closures = get_closures(ObjBin),
+  {Switches, Closures} = get_tables(ObjBin),
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
     correlate_labels(Switches++Closures, Labels),
@@ -180,14 +179,13 @@ get_rodata_relocs(Elf) ->
   [elf_format:get_rela_entry_field(RelaE, r_addend)
    || RelaE <- elf_format:extract_rela(Elf, ?RODATA)].
 
-%% @doc Get switch table info.
-get_switches(Elf) ->
+%% @doc Get switch table and closure table.
+get_tables(Elf) ->
   %% Search Symbol Table for an entry with name starting with: "table_":
-  Symtab = elf_format:extract_symtab(Elf),
   SymtabTemp = [{elf_format:get_symtab_entry_field(SymtabE, st_name),
 		 elf_format:get_symtab_entry_field(SymtabE, st_value),
 		 elf_format:get_symtab_entry_field(SymtabE, st_size) div ?ELF_XWORD_SIZE}
-		|| SymtabE <- Symtab],
+		|| SymtabE <- elf_format:extract_symtab(Elf)],
   SymtabTemp2 = lists:filter(fun ({Name, _, _}) -> Name =/= 0 end, SymtabTemp),
   {NameIndices, Values, Sizes} = lists:unzip3(SymtabTemp2),
   %% %% Find the names of the symbols:
@@ -199,30 +197,13 @@ get_switches(Elf) ->
 			    end, NameIndices),
   %% Zip back to {Name, Value, Size}:
   Temp = lists:zip3(RelevantNames, Values, Sizes),
-  Pred = fun({SymName, _, _}) -> string:str(SymName, "table_") =:= 1 end,
-  lists:filter(Pred, Temp).
-
-%% @doc Get closure table info.
-get_closures(Elf) ->
-  %% Search Symbol Table for an entry with name: "table_closures":
-  Symtab = elf_format:extract_symtab(Elf),
-  SymtabTemp = [{elf_format:get_symtab_entry_field(SymtabE, st_name),
-		 elf_format:get_symtab_entry_field(SymtabE, st_value),
-		 elf_format:get_symtab_entry_field(SymtabE, st_size) div ?ELF_XWORD_SIZE}
-		|| SymtabE <- Symtab],
-  SymtabTemp2 = lists:filter(fun ({Name, _, _}) -> Name =/= 0 end, SymtabTemp),
-  {NameIndices, Values, Sizes} = lists:unzip3(SymtabTemp2),
-  %% %% Find the names of the symbols:
-  %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
-  %% relevant entries:
-  Strtab = elf_format:extract_strtab(Elf),
-  RelevantNames = lists:map(fun (Off) ->
-				elf_format:get_strtab_entry(Strtab, Off)
-			    end, NameIndices),
-  %% Zip back to {Name, Value, Size}:
-  Temp = lists:zip3(RelevantNames, Values, Sizes),
-  Pred = fun({SymName, _, _}) -> string:str(SymName, "table_closures") =:= 1 end,
-  lists:filter(Pred, Temp).
+  PredTables   = fun({SymName, _, _}) ->
+		     string:str(SymName, "table_") =:= 1
+		 end,
+  PredClosures = fun({SymName, _, _}) ->
+		     string:str(SymName, "table_closures") =:= 1
+		 end,
+  {lists:filter(PredTables, Temp), lists:filter(PredClosures, Temp)}.
 
 %% @doc This functions associates symbols who point to some table of labels with
 %%      the corresponding offsets of the labels in the code. These tables can
@@ -276,11 +257,10 @@ insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
 %%      symbols and their offsets in the code from the ".text" section.
 -spec get_text_relocs( binary() ) -> [ {string(), integer()} ].
 get_text_relocs(Elf) ->
-  Rela = elf_format:extract_rela(Elf, ?TEXT),
   %% Only care about the symbol table index and the offset:
   NameOffsetTemp = [{?ELF_R_SYM(elf_format:get_rela_entry_field(RelaE, r_info)),
 		     elf_format:get_rela_entry_field(RelaE, r_offset)}
-		    || RelaE <- Rela],
+		    || RelaE <- elf_format:extract_rela(Elf, ?TEXT)],
   {NameIndices, ActualOffsets} = lists:unzip(NameOffsetTemp),
   %% Find the names of the symbols:
   %%
