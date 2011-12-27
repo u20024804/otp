@@ -16,17 +16,14 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Compile to LLVM and get Instruction List (along with infos)
   {LLVMCode, RelocsDict, ConstTab} =
     hipe_rtl2llvm:translate(RTL, Roots),
-  %% Fix Fun_Name to an acceptable LLVM identifier (needed for closures)
-  {_Mod_Name, Fun_Name, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
+  %% Fix function name to an acceptable LLVM identifier (needed for closures)
+  {_Module, Fun, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  {ok, Dir, ObjectFile} = compile_with_llvm(Fun_Name, Arity, LLVMCode, Options,
-					    false),
+  {ok, Dir, ObjectFile} = compile_with_llvm(Fun, Arity, LLVMCode, Options, false),
   %%
   %% Extract information from object file
   %%
   ObjBin = open_object_file(ObjectFile),
-  %% Get relocation info
-  TextRelocs = get_text_relocs(ObjBin),
   %% Get labels info (for switches and jump tables)
   Labels   = get_rodata_relocs(ObjBin),
   Switches = get_switches(ObjBin),
@@ -34,9 +31,14 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
     correlate_labels(Switches++Closures, Labels),
+    %% SwitchInfos:     [{"table_50", [Labels]}]
+    %% ExposedClosures: [{"table_closures", [Labels]}]
+
   %% Labelmap contains the offsets of the labels in the code that are
   %% used for switch's jump tables
   LabelMap = create_labelmap(MFA, SwitchInfos, RelocsDict),
+  %% Get relocation info
+  TextRelocs = get_text_relocs(ObjBin),
   %% AccRefs contains the offsets of all references to relocatable symbols in
   %% the code:
   AccRefs  = fix_relocations(TextRelocs, RelocsDict, MFA),
@@ -44,8 +46,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   SDescs   = get_sdescs(ObjBin),
   %% FixedSDescs are the stack descriptors after correcting calls that have
   %% arguments in the stack
-  FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs,
-				      ExposedClosures),
+  FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
   Refs = AccRefs++FixedSDescs,
   %% Get binary code from object file
   BinCode = elf_format:extract_text(ObjBin),
@@ -175,15 +176,9 @@ trans_optlev_flag(Tool, Options) ->
 %%      with all .rela.rodata labels (i.e. constants and literals in code)
 %%      or an empty list if no ".rela.rodata" section exists in code.
 get_rodata_relocs(Elf) ->
-  %% Extract relocation entries for .rela.rodata section:
-  Rela = elf_format:extract_rela(Elf, ?RODATA),
-  %% Only care about the symbol table index and the addend (== the offset):
-  NameOffsetTemp = [{?ELF_R_SYM(elf_format:get_rela_entry_field(RelaE, r_info)),
-		     elf_format:get_rela_entry_field(RelaE, r_addend)}
-		    || RelaE <- Rela],
-  {_NameIndices, ActualOffsets} = lists:unzip(NameOffsetTemp),
-  %% Only return addends:
-  ActualOffsets.
+  %% Only care about the addends (== offsets):
+  [elf_format:get_rela_entry_field(RelaE, r_addend)
+   || RelaE <- elf_format:extract_rela(Elf, ?RODATA)].
 
 %% @doc Get switch table info.
 get_switches(Elf) ->
@@ -441,14 +436,14 @@ fix_stack_descriptors(_, _, [], _) ->
   [];
 fix_stack_descriptors(RelocsDict, Relocs, SDescs, ExposedClosures) ->
   %% NamedCalls are MFA and BIF calls that need fix
-  NamedCalls  = calls_with_stack_args(RelocsDict),
-  NamedCallsOffs = calls_offsets_arity(Relocs, NamedCalls),
+  NamedCalls       = calls_with_stack_args(RelocsDict),
+  NamedCallsOffs   = calls_offsets_arity(Relocs, NamedCalls),
   ExposedClosures1 =
     case dict:is_key("table_closures", RelocsDict) of
       true -> %% A Table with closures exists
 	{table_closures, ArityList} = dict:fetch("table_closures", RelocsDict),
 	    case ExposedClosures of
-	      {_,  Offsets} -> lists:zip(Offsets,ArityList);
+	      {_,  Offsets} -> lists:zip(Offsets, ArityList);
 	      _ -> exit({?MODULE, fix_stack_descriptors,
 			{"Wrong exposed closures", ExposedClosures}})
 	    end;
