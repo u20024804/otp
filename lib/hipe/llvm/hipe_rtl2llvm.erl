@@ -240,30 +240,21 @@ trans_alu(I, Relocs) ->
 %%
 trans_alub(I, Relocs) ->
   case hipe_rtl:alub_cond(I) of
-    overflow ->
-      trans_alub_overflow(I, Relocs);
-    not_overflow ->
-      trans_alub_overflow(I, Relocs);
+    Op  when Op=:= overflow orelse Op =:= not_overflow ->
+      trans_alub_overflow(I, signed, Relocs);
+    ltu -> %% ltu means unsigned overflow
+      trans_alub_overflow(I, unsigned, Relocs);
     _ ->
       trans_alub_no_overflow(I, Relocs)
   end.
 
 %%
-trans_alub_overflow(I, Relocs) ->
-  {Src1, I1} = trans_src(hipe_rtl:alub_src1(I)),
-  {Src2, I2} = trans_src(hipe_rtl:alub_src2(I)),
+trans_alub_overflow(I, Sign, Relocs) ->
+  {Src1, I1} =  trans_src(hipe_rtl:alub_src1(I)),
+  {Src2, I2} =  trans_src(hipe_rtl:alub_src2(I)),
   RtlDst = hipe_rtl:alub_dst(I),
   TmpDst = mk_temp(),
-  Name =
-    case hipe_rtl:alub_op(I) of
-      %% TODO: Fix call according the architecture
-      add -> "llvm.sadd.with.overflow.i64";
-      mul -> "llvm.smul.with.overflow.i64";
-      sub -> "llvm.ssub.with.overflow.i64";
-      Other ->
-        exit({?MODULE, trans_alub_overflow, {"Unknown operator in
-              alu with overflow", Other}})
-    end,
+  Name = trans_alub_op(I, Sign),
   NewRelocs = relocs_store(Name, {call, {llvm, Name, 2}}, Relocs),
   ReturnType = hipe_llvm:mk_struct([?WORD_TYPE, hipe_llvm:mk_int(1)]),
   T1 = mk_temp(),
@@ -276,7 +267,7 @@ trans_alub_overflow(I, Relocs) ->
   %% T1{1}: Boolean variable indicating overflow
   I6 = hipe_llvm:mk_extractvalue(T2, ReturnType, T1, "1", []),
   case hipe_rtl:alub_cond(I) of
-    overflow ->
+    Op when Op =:= overflow orelse Op =:= ltu ->
       True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
       False_label = mk_jump_label(hipe_rtl:alub_false_label(I));
     not_overflow ->
@@ -285,6 +276,35 @@ trans_alub_overflow(I, Relocs) ->
   end,
   I7 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
   {[I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
+
+trans_alub_op(I, Sign) ->
+  Name =
+    case Sign of
+      signed ->
+        case hipe_rtl:alub_op(I) of
+          add -> "llvm.sadd.with.overflow.";
+          mul -> "llvm.smul.with.overflow.";
+          sub -> "llvm.ssub.with.overflow.";
+          Op ->
+            exit({?MODULE, trans_alub_op, {"Unknown alub operator",Op}})
+        end;
+      unsigned ->
+        case hipe_rtl:alub_op(I) of
+          add -> "llvm.uadd.with.overflow.";
+          mul -> "llvm.umul.with.overflow.";
+          sub -> "llvm.usub.with.overflow.";
+          Op ->
+            exit({?MODULE, trans_alub_op, {"Unknown alub operator",Op}})
+        end
+    end,
+  Type =
+    case ?WORD_TYPE of
+      #llvm_int{width=32} -> "i32";
+      #llvm_int{width=64} -> "i64";
+      Other ->
+          exit({?MODULE, trans_alub_op, {"Unknown type", Other}})
+    end,
+    Name++Type.
 
 %%
 trans_alub_no_overflow(I, Relocs) ->
