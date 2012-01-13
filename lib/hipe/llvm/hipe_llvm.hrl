@@ -52,7 +52,7 @@
 -record(llvm_const_decl, {dst, decl_type, type, value}).
 
 -record(llvm_asm, {instruction}).
--record(llvm_adj_stack, {offset}).
+-record(llvm_adj_stack, {offset, 'register', type}).
 
 
 %% Types
