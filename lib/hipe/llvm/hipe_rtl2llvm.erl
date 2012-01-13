@@ -885,8 +885,11 @@ create_fail_blocks(Label, FailLabels, Acc) ->
       I1 = hipe_llvm:mk_label(FailLabel),
       LP = #llvm_landingpad{},
       I2 =
-        case SpAdj > 0 of
-          true -> hipe_llvm:mk_adj_stack(integer_to_list(SpAdj));
+        case SpAdj>0 of
+          true ->
+            StackPointer = ?ARCH_REGISTERS:reg_name(?ARCH_REGISTERS:sp()),
+            hipe_llvm:mk_adj_stack(integer_to_list(SpAdj), StackPointer,
+                                   ?WORD_TYPE);
           false -> []
         end,
       T1 = mk_temp(),

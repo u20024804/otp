@@ -188,8 +188,10 @@
     mk_asm/1,
     asm_instruction/1,
 
-    mk_adj_stack/1,
-    adj_stack_offset/1
+    mk_adj_stack/3,
+    adj_stack_offset/1,
+    adj_stack_register/1,
+    adj_stack_type/1
   ]).
 
 
@@ -551,8 +553,11 @@ mk_asm(Instruction) -> #llvm_asm{instruction=Instruction}.
 asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
 
 
-mk_adj_stack(Offset) -> #llvm_adj_stack{offset=Offset}.
+mk_adj_stack(Offset, Register, Type) ->
+  #llvm_adj_stack{offset=Offset, 'register'=Register, type=Type}.
 adj_stack_offset(#llvm_adj_stack{offset=Offset}) -> Offset.
+adj_stack_register(#llvm_adj_stack{'register'=Register}) -> Register.
+adj_stack_type(#llvm_adj_stack{type=Type}) -> Type.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
@@ -811,8 +816,10 @@ pp_ins(Dev, I) ->
     #llvm_asm{} ->
       write(Dev, [asm_instruction(I), "\n"]);
     #llvm_adj_stack{} ->
-      write(Dev, ["call void asm sideeffect \"subq $0, %rsp\", \"r\"(i64 ",
-		  adj_stack_offset(I),")\n"]);
+      write(Dev, ["call void asm sideeffect \"sub $0, ",
+          adj_stack_register(I), "\", \"r\"("]),
+      pp_type(Dev, adj_stack_type(I)),
+      write(Dev, [" ", adj_stack_offset(I),")\n"]);
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
