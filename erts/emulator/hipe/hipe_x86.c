@@ -35,6 +35,7 @@
 
 void hipe_patch_load_fe(Uint32 *address, Uint32 value)
 {
+    value += *(Uint32*)address;
     /* address points to a disp32 or imm32 operand */
     *address = value;
 }
@@ -44,9 +45,11 @@ int hipe_patch_insn(void *address, Uint32 value, Eterm type)
     switch (type) {
       case am_closure:
       case am_constant:
+        value += *(Uint32*)address;
+        break;
       case am_atom:
       case am_c_const:
-	break;
+       break;
       case am_x86_abs_pcrel:
 	value += (Uint)address;
 	break;
