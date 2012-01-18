@@ -594,13 +594,11 @@ trans_fstore_reg(I, Relocs) ->
   {Base, I0}  = trans_reg(hipe_rtl:fstore_base(I), dst),
   T1 = mk_temp(),
   I1 = hipe_llvm:mk_load(T1, ?WORD_TYPE_P, Base, [],  [], false),
+  {Offset, I2} = trans_src(hipe_rtl:fstore_offset(I)),
   T2 = mk_temp(),
-  I2 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, ?FLOAT_TYPE_P),
-  {Offset, I3} = trans_src(hipe_rtl:fstore_offset(I)),
-  Offset1 = integer_to_list(list_to_integer(Offset) div (?WORD_WIDTH div 8)),
+  I3 = hipe_llvm:mk_operation(T2, add, ?WORD_TYPE, T1, Offset, []),
   T3 = mk_temp(),
-  I4 = hipe_llvm:mk_getelementptr(T3, ?FLOAT_TYPE_P, T2,
-                                 [{?WORD_TYPE, Offset1}], false),
+  I4 = hipe_llvm:mk_conversion(T3, inttoptr, ?WORD_TYPE, T2, ?FLOAT_TYPE_P),
   {Value, I5} = trans_src(hipe_rtl:fstore_src(I)),
   I6 = hipe_llvm:mk_store(?FLOAT_TYPE, Value, ?FLOAT_TYPE_P, T3, [], [],
                           false),
@@ -1037,9 +1035,9 @@ trans_float_src(Src) ->
     true ->
       Name = "@DL"++integer_to_list(hipe_rtl:const_label_label(Src)),
       T1 = mk_temp(),
-      %% XXX: Is offset 6 always valid?
-      I1 = hipe_llvm:mk_getelementptr(T1, ?BYTE_TYPE_P, Name,
-                                      [{?BYTE_TYPE, "6"}], false),
+      %% XXX: Hard-Coded offset
+      I1 = hipe_llvm:mk_getelementptr(T1, ?BYTE_TYPE_P, Name, [{?BYTE_TYPE,
+                                      integer_to_list(?FLOAT_OFFSET)}], false),
       T2 = mk_temp(),
       I2 = hipe_llvm:mk_conversion(T2, bitcast, ?BYTE_TYPE_P, T1,
                                    ?FLOAT_TYPE_P),
@@ -1138,10 +1136,10 @@ map_precoloured_reg(Index) ->
   case hipe_rtl_arch:reg_name(Index) of
     "%r15" -> "%hp_reg_var";
     "%rbp" -> "%p_reg_var";
-    "%fcalls" -> {"%p_reg_var",
-                  ?ARCH_REGISTERS:proc_offset(?ARCH_REGISTERS:fcalls())};
-    "%hplim" -> {"%p_reg_var",
-                 ?ARCH_REGISTERS:proc_offset(?ARCH_REGISTERS:heap_limit())};
+    "%esi" -> "%hp_reg_var";
+    "%ebp" -> "%p_reg_var";
+    "%fcalls" -> {"%p_reg_var", ?ARCH_REGISTERS:proc_offset(?ARCH_REGISTERS:fcalls())};
+    "%hplim" -> {"%p_reg_var", ?ARCH_REGISTERS:proc_offset(?ARCH_REGISTERS:heap_limit())};
     _ ->
       exit({?MODULE, map_precoloured_reg, {"Register not mapped yet",
             Index}})
@@ -1177,7 +1175,7 @@ pointer_from_reg(RegName, Type, Offset) ->
   T3 = mk_temp(),
   %% TODO: FIX offsets!!!
   I3 = hipe_llvm:mk_getelementptr(T3, PointerType, T2, [{Type,
-        erlang:integer_to_list(Offset div 8)}], false),
+        erlang:integer_to_list(Offset div (?WORD_WIDTH div 8))}], false),
   {T3, [I3, I2, I1]}.
 
 isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
