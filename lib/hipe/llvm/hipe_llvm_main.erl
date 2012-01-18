@@ -126,7 +126,7 @@ llvm_opt(Dir, Fun_Name, Options) ->
 llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
-  Align    = integer_to_list(?WORD_WIDTH div 8),
+  Align = find_stack_alignment(),
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
 	      "-stack-alignment=" ++ Align, "-tailcallopt"],
   Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
@@ -147,6 +147,16 @@ compile(Dir, Fun_Name, Compiler) ->
     Error -> exit({?MODULE, llvmc, Error})
   end,
   Dest.
+
+find_stack_alignment() ->
+  case get(hipe_target_arch) of
+    x86 -> "8";
+    amd64 -> "8";
+    Other ->
+      exit({?MODULE, find_stack_alignment, "Unimplemented
+          Architecture"})
+  end.
+
 
 %% Join options
 fix_opts(Opts) ->
