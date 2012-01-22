@@ -2,7 +2,6 @@
 -module(hipe_llvm_main).
 
 -export([rtl_to_native/4]).
--compile(export_all).
 
 -include("../../kernel/src/hipe_ext_format.hrl").
 -include("hipe_llvm_arch.hrl").
@@ -25,7 +24,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %%
   ObjBin = open_object_file(ObjectFile),
   %% Get labels info (for switches and jump tables)
-  Labels   = get_rodata_relocs(ObjBin),
+  Labels = get_rodata_relocs(ObjBin),
   {Switches, Closures} = get_tables(ObjBin),
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
@@ -152,9 +151,9 @@ find_stack_alignment() ->
   case get(hipe_target_arch) of
     x86 -> "8";
     amd64 -> "8";
-    Other ->
+    _ ->
       exit({?MODULE, find_stack_alignment, "Unimplemented
-          Architecture"})
+	  Architecture"})
   end.
 
 
@@ -185,9 +184,15 @@ trans_optlev_flag(Tool, Options) ->
 %%      with all .rela.rodata labels (i.e. constants and literals in code)
 %%      or an empty list if no ".rela.rodata" section exists in code.
 get_rodata_relocs(Elf) ->
-  %% Only care about the addends (== offsets):
-  [elf_format:get_rela_entry_field(RelaE, r_addend)
-   || RelaE <- elf_format:extract_rela(Elf, ?RODATA)].
+  case elf_format:is64bit() of
+    true ->
+      %% Only care about the addends (== offsets):
+      [elf_format:get_rela_entry_field(RelaE, r_addend)
+       || RelaE <- elf_format:extract_rela(Elf, ?RODATA)];
+    false ->
+      %% Find offsets hardcoded in ".rodata" entry:
+      elf_format:extract_rodata(Elf)
+  end.
 
 %% @doc Get switch table and closure table.
 get_tables(Elf) ->
@@ -349,7 +354,7 @@ get_sdescs(Elf) ->
       T = SPCount * ?SP_ADDR_SIZE,
       %% Pattern-match fields of ".note.gc":
       <<_SPCount:(?bits(?SP_COUNT_SIZE))/integer-little, % Skip count
-	_SPAddrs:T/binary, % Skip addresses
+	SPAddrs:T/binary, %NOTE: In 64bit they 're relocs!
 	StkFrameSize:(?bits(?SP_STKFRAME_SIZE))/integer-little,
 	StkArity:(?bits(?SP_STKARITY_SIZE))/integer-little,
 	_LiveRootCount:(?bits(?SP_LIVEROOTCNT_SIZE))/integer-little,
@@ -357,8 +362,14 @@ get_sdescs(Elf) ->
 	Roots/binary>> = NoteGC_bin,
       LiveRoots = get_liveroots(Roots, []),
       %% Extract information about the safe point addresses:
-      SPOffs    = [elf_format:get_rela_entry_field(RelaE, r_addend)
-		   || RelaE <- RelaNoteGC],
+      SPOffs =
+	case elf_format:is64bit() of
+	  true -> %% Find offsets in ".rela.note.gc":
+	    [elf_format:get_rela_entry_field(RelaE, r_addend)
+	     || RelaE <- RelaNoteGC];
+	  false -> %% Find offsets in SPAddrs (in ".note.gc"):
+	    get_spoffs(SPAddrs, [])
+	end,
       %% Extract Exception Handler labels:
       ExnHandlers =
 	case elf_format:extract_gccexntab(Elf) of
@@ -384,6 +395,15 @@ get_liveroots(<<>>, Acc) ->
 get_liveroots(<<Root:?bits(?LR_STKINDEX_SIZE)/integer-little,
 		MoreRoots/binary>>, Acc) ->
   get_liveroots(MoreRoots, [Root | Acc]).
+
+%% @doc Extracts a bunch of integers (safepoint offsets) from a binary. Returns
+%%      a tuple as need for stack descriptors.
+get_spoffs(<<>>, Acc) ->
+  lists:reverse(Acc);
+get_spoffs(SPOffs, Acc) ->
+  <<SPOff:?bits(?ELF_ADDR_SIZE)/integer-little,
+    More/binary>> = SPOffs,
+  get_spoffs(More, [SPOff | Acc]).
 
 create_sdesc_list([], _, _, _, Acc) ->
   lists:reverse(Acc);
@@ -542,6 +562,7 @@ open_object_file(ObjFile) ->
       {error, Reason} ->
 	exit({?MODULE, open_file, Reason})
     end,
+  _ = elf_format:extract_header(Bin), % Read and set the ELF class (ignore hdr).
   Bin.
 
 remove_temp_folder(Dir, Options) ->

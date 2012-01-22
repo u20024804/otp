@@ -39,7 +39,11 @@
 	 extract_text/1,
 	 %% GCC Exception Table
 	 extract_gccexntab/1,
-	 get_gccexntab_field/2
+	 get_gccexntab_field/2,
+	 %% Read-only data
+	 extract_rodata/1,
+	 %% Misc.
+	 is64bit/0
 	]).
 
 -include("elf_format.hrl").
@@ -49,7 +53,9 @@
 %% Functions to manipulate ELF File Header
 %%------------------------------------------------------------------------------
 
-%% @doc Extracts the File Header from an ELF formated Object file.
+%% @doc Extracts the File Header from an ELF formated Object file. Also sets the
+%%      ELF class variable in the process dictionary (used by many functions in
+%%      this and hipe_llvm_main modules).
 extract_header(Elf) ->
   Ehdr_bin = get_binary_segment(Elf, {0, ?ELF_EHDR_SIZE}),
   << %% Structural patern-matching on fields.
@@ -71,6 +77,8 @@ extract_header(Elf) ->
   <<16#7f, $E, $L, $F, EI_Class, EI_Data, EI_Version, EI_Osabi, EI_Abiversion,
     EI_Pad:6/binary, EI_Nident
   >> = Ident_bin,
+  %% Export ELF Class to distinguish between ELF32 and ELF64:
+  put(elf_class, EI_Class),
   Ident = elf_datatypes:mk_ehdr_ident(EI_Class, EI_Data, EI_Version, EI_Osabi,
 			      EI_Abiversion, EI_Pad, EI_Nident),
   elf_datatypes:mk_ehdr(Ident, Type, Machine, Version, Entry, Phoff, Shoff,
@@ -165,15 +173,29 @@ extract_symtab(Elf) ->
 get_symtab_entries(<<>>, Acc) ->
   lists:reverse(Acc);
 get_symtab_entries(Symtab_bin, Acc) ->
-  << %% Structural patern-matching on fields.
-     Name:?bits(?ST_NAME_SIZE)/integer-little,
-     Info:?bits(?ST_INFO_SIZE)/integer-little,
-     Other:?bits(?ST_OTHER_SIZE)/integer-little,
-     Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
-     Value:?bits(?ST_VALUE_SIZE)/integer-little,
-     Size:?bits(?ST_SIZE_SIZE)/integer-little,
+  << SymE_bin:?ELF_SYM_SIZE/binary,
      MoreSymE/binary
   >> = Symtab_bin,
+  case is64bit() of
+    true ->
+      << %% Structural patern-matching on fields.
+	 Name:?bits(?ST_NAME_SIZE)/integer-little,
+	 Info:?bits(?ST_INFO_SIZE)/integer-little,
+	 Other:?bits(?ST_OTHER_SIZE)/integer-little,
+	 Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
+	 Value:?bits(?ST_VALUE_SIZE)/integer-little,
+	 Size:?bits(?ST_SIZE_SIZE)/integer-little
+      >> = SymE_bin;
+    false ->
+      << %% Same fields in different order:
+	Name:?bits(?ST_NAME_SIZE)/integer-little,
+	Value:?bits(?ST_VALUE_SIZE)/integer-little,
+	Size:?bits(?ST_SIZE_SIZE)/integer-little,
+	Info:?bits(?ST_INFO_SIZE)/integer-little,
+	Other:?bits(?ST_OTHER_SIZE)/integer-little,
+	Shndx:?bits(?ST_SHNDX_SIZE)/integer-little
+      >> = SymE_bin
+  end,
   SymE = elf_datatypes:mk_sym(Name, Info, Other, Shndx, Value, Size),
   get_symtab_entries(MoreSymE, [SymE | Acc]).
 
@@ -218,19 +240,34 @@ get_strtab_entry(Strtab, Offset) ->
 %% @doc Extract the Relocations segment for section `Name' (that is passed as
 %%      second argument) from an ELF formated Object file binary.
 extract_rela(Elf, Name) ->
-  Rela_bin = extract_segment_by_name(Elf, ?RELA(Name)),
+  SegName =
+    case is64bit() of
+      true -> ?RELA(Name); % ELF-64 uses ".rela"
+      false -> ?REL(Name)  % ...while ELF-32 uses ".rel"
+    end,
+  Rela_bin = extract_segment_by_name(Elf, SegName),
   get_rela_entries(Rela_bin, []).
 
 get_rela_entries(<<>>, Acc) ->
   lists:reverse(Acc);
 get_rela_entries(Rela_bin, Acc) ->
-  <<%% Structural patern-matching on fields.
-     Offset:?bits(?R_OFFSET_SIZE)/integer-little,
-     Info:?bits(?R_INFO_SIZE)/integer-little,
-     Addend:?bits(?R_ADDEND_SIZE)/integer-little,
-     MoreRelaE/binary
-  >> = Rela_bin,
-  RelaE = elf_datatypes:mk_rela(Offset, Info, Addend),
+  RelaE = case is64bit() of
+	    true ->
+	      <<%% Structural patern-matching on fields of a Rela Entry.
+		Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+		Info:?bits(?R_INFO_SIZE)/integer-little,
+		Addend:?bits(?R_ADDEND_SIZE)/integer-little,
+		MoreRelaE/binary
+	      >> = Rela_bin,
+	      elf_datatypes:mk_rela(Offset, Info, Addend);
+	    false ->
+	      <<%% Structural patern-matching on fields of a Rel Entry.
+		Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+		Info:?bits(?R_INFO_SIZE)/integer-little,
+		MoreRelaE/binary
+	      >> = Rela_bin,
+	      elf_datatypes:mk_rel(Offset, Info)
+	  end,
   get_rela_entries(MoreRelaE, [RelaE | Acc]).
 
 %% @doc Extract the `EntryNum' (serial number) Reloacation Entry.
@@ -239,7 +276,12 @@ get_rela_entry(Rela, EntryNum) ->
 
 %% @ doc Extract a specific field (name is `atom') of a `Relocation' entry.
 get_rela_entry_field(RelaE, Field) ->
-  elf_datatypes:rela_field(RelaE, Field).
+  case is64bit() of %% Use appropriate accessor:
+    true ->
+      elf_datatypes:rela_field(RelaE, Field);
+    false ->
+      elf_datatypes:rel_field(RelaE, Field)
+  end.
 
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Executable Code segment
@@ -330,6 +372,19 @@ get_gccexntab_field(Ge, Field) ->
   elf_datatypes:gccexntab_field(Ge, Field).
 
 %%------------------------------------------------------------------------------
+%% Functions to manipulate read-only data (.rodata)
+%%------------------------------------------------------------------------------
+extract_rodata(Elf) ->
+  Rodata_bin = extract_segment_by_name(Elf, ?RODATA),
+  get_rodata_entries(Rodata_bin, []).
+
+get_rodata_entries(<<>>, Acc) ->
+  lists:reverse(Acc);
+get_rodata_entries(Rodata_bin, Acc) ->
+  <<Num:?bits(?ELF_ADDR_SIZE)/integer-little, More/binary>> = Rodata_bin,
+  get_rodata_entries(More, [Num | Acc]).
+
+%%------------------------------------------------------------------------------
 %% Helper functions
 %%------------------------------------------------------------------------------
 
@@ -381,22 +436,36 @@ get_names(Bin, Acc) ->
   get_names(MoreNames, [{Name, length(Name)} | Acc]).
 
 %% @doc Fix names:
-%%      e.g. If ".rela.text" exists, ".text" does not.
-%%           In that way, the Section Header String Table is more compact. Add
-%            ".text" just *before* the corresponding rela-field, etc.
-%%      Currently works only for ".rela" spanned entries.
+%%      e.g. If ".rela.text" exists, ".text" does not. Same goes for
+%%           ".rel.text". In that way, the Section Header String Table is more
+%%           compact. Add ".text" just *before* the corresponding rela-field,
+%%           etc.
 fix_names([], Acc) ->
   lists:reverse(Acc);
 fix_names([{Name, Size}=T | Names], Acc) ->
-  case string:str(Name, ".rela") =:= 1 of
-    true -> %% Name starts with ".rela":
-      Section = string:substr(Name, 6),
-      fix_names(Names, [{Section, Size - 5}
-			| [T | Acc]]); % XXX: Is order ok? (".text"
+  case is64bit() of
+    true ->
+      case string:str(Name, ".rela") =:= 1 of
+	true -> %% Name starts with ".rela":
+	  Section = string:substr(Name, 6),
+	  fix_names(Names, [{Section, Size - 5}
+			    | [T | Acc]]); % XXX: Is order ok? (".text"
 						% always before ".rela.text")
-    false -> %% Name does not start with ".rela":
-      fix_names(Names, [T | Acc])
+	false -> %% Name does not start with ".rela":
+	  fix_names(Names, [T | Acc])
+      end;
+    false ->
+      case string:str(Name, ".rel") =:= 1 of
+	true -> %% Name starts with ".rel":
+	  Section = string:substr(Name, 5),
+	  fix_names(Names, [{Section, Size - 4}
+			    | [T | Acc]]); % XXX: Is order ok? (".text"
+						% always before ".rela.text")
+	false -> %% Name does not start with ".rel":
+	  fix_names(Names, [T | Acc])
+      end
   end.
+
 
 %% @doc A function that byte-reverses a binary. This might be needed because of
 %%      little (fucking!) endianess.
@@ -459,7 +528,9 @@ leb128_decode(LebNum, NoOfBits, Acc) ->
       {Num, MoreLebNums}
   end.
 
-%% %% @doc In 64-bit the Address has size: 8 bytes (else 4).
-%% %%      TODO: read from object file!
-%% is64Bit() ->
-%%   ?ELF_ADDR_SIZE =:= 8.
+%% @doc Read from object file header if the file class is ELF32 or ELF64.
+is64bit() ->
+  case get(elf_class) of
+    ?ELFCLASS64 -> true;
+    ?ELFCLASS32 -> false
+  end.
