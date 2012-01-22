@@ -11,8 +11,11 @@
 %%
 %%------------------------------------------------------------------------------
 
-
+-ifdef(BIT32).
+-include("elf32_format.hrl"). % ELF32-specific definitions.
+-else.
 -include("elf64_format.hrl"). % ELF64-specific definitions.
+-endif.
 
 %%------------------------------------------------------------------------------
 %% ELF Data Types (in bytes)
