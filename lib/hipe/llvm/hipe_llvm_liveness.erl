@@ -105,13 +105,8 @@ do_mark_dead_bb([I|Is], LiveOut ,Roots, NewBlockCode) ->
   do_mark_dead_bb(Is, LiveOut, Roots, [NewI|NewBlockCode]).
 
 %% Update the liveness of a var,in order to mark that this is the last use.
-kill_var(Var) ->
-  hipe_rtl:var_liveness_update(Var, dead).
+kill_var(Var) -> hipe_rtl:var_liveness_update(Var, dead).
 
 %% We are only interested for rtl_vars, since only rtl_vars are possible gc
 %% roots.
-strip([]) -> [];
-strip([{rtl_var, Y, _}|Xs]) ->
-  [Y | strip(Xs)];
-strip([_|Xs]) ->
-   strip(Xs).
+strip(L) -> [Y || {rtl_var, Y, _} <- L].
