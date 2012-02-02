@@ -1529,4 +1529,3 @@ load_constant(Label) ->
 const_to_dict(Elem, Dict) ->
   Name = "DL"++integer_to_list(Elem),
   dict:store(Name, {'constant', Elem}, Dict).
-
