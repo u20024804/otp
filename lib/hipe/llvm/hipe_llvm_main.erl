@@ -69,11 +69,11 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, Buffer) ->
   Dir =
     case proplists:get_bool(llvm_save_temps, Options) of
       true ->  %% Store folder in current directory
-	  DirName;
-      false -> %% Temporarily store folder in "/tmp" (rm afterwards)
-	"/tmp/" ++ DirName
+	DirName;
+      false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
+	"/dev/shm/" ++ DirName,
     end,
-	%% Create temp directory
+  %% Create temp directory
   os:cmd("mkdir " ++ Dir),
   %% Print LLVM assembly to file
   OpenOpts = [append, raw] ++
@@ -562,14 +562,14 @@ open_object_file(ObjFile) ->
       {error, Reason} ->
 	exit({?MODULE, open_file, Reason})
     end,
-  _ = elf_format:extract_header(Bin), % Read and set the ELF class (ignore hdr).
+  elf_format:extract_header(Bin), % Read and set the ELF class (ignore hdr).
   Bin.
 
 remove_temp_folder(Dir, Options) ->
   case proplists:get_bool(llvm_save_temps, Options) of
     true -> ok;
     false -> spawn(fun () ->
-		       os:cmd("rm -r " ++ Dir)
+		       os:cmd("rm -rf " ++ Dir)
 		   end)
   end.
 
