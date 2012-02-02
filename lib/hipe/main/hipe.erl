@@ -1376,10 +1376,10 @@ opt_keys() ->
      timeregalloc,
      timers,
      to_rtl,
-     to_llvm, % STUB: new flag for llvm!
-     llvm_save_temps, % STUB: new flag for llvm
-     llvm_llc, % STUB: LLC optimization-level flag (o1, o2, o3, undefined)
-     llvm_opt, % STUB: OPT optimization-level flag (o1, o2, o3, undefined)
+     to_llvm, % Use the LLVM backend
+     llvm_save_temps, % Save LLVM intermediate files in current dir
+     llvm_llc, % LLC optimization-level flag (o1, o2, o3, undefined)
+     llvm_opt, % OPT optimization-level flag (o1, o2, o3, undefined)
      use_indexing,
      use_inline_atom_search,
      use_callgraph,
