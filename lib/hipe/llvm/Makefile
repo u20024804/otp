@@ -45,7 +45,8 @@ HIPE_MODULES = hipe_rtl2llvm \
 	elf_format \
 	hipe_llvm_main \
 	hipe_llvm_merge	\
-	hipe_llvm_liveness
+	hipe_llvm_liveness \
+	llevm
 else
 HIPE_MODULES =
 endif
@@ -53,7 +54,7 @@ endif
 MODULES = $(HIPE_MODULES)
 
 HRL_FILES= elf_datatypes.hrl elf_format.hrl elf64_format.hrl \
-	elf32_format.hrl hipe_llvm.hrl hipe_llvm_arch.hrl
+	elf32_format.hrl hipe_llvm.hrl hipe_llvm_arch.hrl llevm.hrl
 ERL_FILES= $(MODULES:%=%.erl)
 TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 

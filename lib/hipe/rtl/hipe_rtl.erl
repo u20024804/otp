@@ -232,6 +232,7 @@
 	 call_dstlist/1,
 	 call_dstlist_update/2,
 	 call_arglist/1,
+   call_arglist_update/2,
 	 call_continuation/1,
 	 call_fail/1,
 	 call_type/1,
@@ -242,12 +243,16 @@
 	 is_call/1,
 
 	 mk_enter/3,
+   enter_dstlist/1,
+   enter_dstlist_update/2,
 	 enter_fun/1,
 	 enter_arglist/1,
+   enter_arglist_update/2,
 	 enter_type/1,
 
 	 mk_return/1,
 	 return_varlist/1,
+   return_varlist_update/2,
 
 	 mk_gctest/1,
 	 gctest_words/1,
@@ -357,6 +362,7 @@
 	 %% move_dst_update/2,
 	 fixnumop_dst_update/2,
 	 pp_instr/2,
+   pp_instrs/2,
 	 %% Uber hack!
 	 pp_var/2,
 	 pp_reg/2,
@@ -726,6 +732,9 @@ mk_enter(Fun, ArgList, Type) ->
     not_remote -> ok % {local,primop,closure,pointer}
   end,
   #enter{'fun'=Fun, arglist=ArgList, type=Type}.
+
+enter_dstlist(#enter{dstlist=DstList}) -> DstList.
+enter_dstlist_update(E, NewDstList) -> E#enter{dstlist=NewDstList}.
 enter_fun(#enter{'fun'=Fun}) -> Fun.
 enter_fun_update(I, F) -> I#enter{'fun' = F}.
 enter_arglist(#enter{arglist=ArgList}) -> ArgList.

@@ -31,7 +31,7 @@
 -record(call, {dstlist, 'fun', arglist, type, continuation,
     failcontinuation, normalcontinuation = []}).
 -record(comment, {text}).
--record(enter, {'fun', arglist, type}).
+-record(enter, {dstlist=[],'fun', arglist, type}).
 -record(fconv, {dst, src}).
 -record(fixnumop, {dst, src, type}).
 -record(fload, {dst, src, offset}).
