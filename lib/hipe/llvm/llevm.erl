@@ -2,8 +2,7 @@
 
 -include("llevm.hrl").
 
-%-on_load(load_my_nifs/0).
--export([load_my_nifs/0]).
+-on_load(load_my_nifs/0).
 
 %% @@EXPORTS@@
 %% -- Start generating from Disassembler_8h.xml on {{2012,2,7},{15,54,42}}--

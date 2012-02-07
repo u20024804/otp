@@ -41,7 +41,6 @@ createTypeFunRet() ->
 %% relocations in the code and a hipe_constab() with informaton about data
 %%------------------------------------------------------------------------------
 translate(RTL, Roots) ->
-  ok = llevm:load_my_nifs(),
   Fun = hipe_rtl:rtl_fun(RTL),
   Params = hipe_rtl:rtl_params(RTL),
   Data0 = hipe_rtl:rtl_data(RTL),
