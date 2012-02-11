@@ -71,7 +71,7 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, Buffer) ->
       true ->  %% Store folder in current directory
 	DirName;
       false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
-	"/dev/shm/" ++ DirName,
+	"/dev/shm/" ++ DirName
     end,
   %% Create temp directory
   os:cmd("mkdir " ++ Dir),
