@@ -72,7 +72,7 @@ TARGET_FILES= $(MODULES:%=$(EBIN)/%.$(EMULATOR))
 
 include ../native.mk
 
-ERL_COMPILE_FLAGS += +inline
+#ERL_COMPILE_FLAGS += +inline
 
 # if in 32 bit back end define BIT32 symbol
 ARCH = $(shell echo $(TARGET) | sed 's/^\(x86_64\)-.*/64bit/')
@@ -112,15 +112,6 @@ release_docs_spec:
 
 
 HIPE_MKLITERALS=$(ERL_TOP)/bin/$(TARGET)/hipe_mkliterals
-
-#hipe_literals.hrl: $(HIPE_MKLITERALS)
-#	$(HIPE_MKLITERALS) -e > hipe_literals.hrl
-
-# Need to generate hipe.hrl from one and only one target in one and only
-# one makefile; otherwise, clearmake will force rebuilds of hipe over and
-# over again.
-#../main/hipe.hrl: ../vsn.mk ../main/hipe.hrl.src
-#	(cd ../main && $(MAKE) hipe.hrl)
 
 #$(EBIN)/hipe_rtl.beam: hipe_rtl.hrl ../main/hipe.hrl
 #$(EBIN)/hipe_rtl_arch.beam: hipe_rtl.hrl hipe_literals.hrl

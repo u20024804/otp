@@ -560,7 +560,6 @@
 -opaque 'LLVMVerifierFailureAction'() :: {'LLVMVerifierFailureAction',integer()}.
 %% --- Stop generating from Analysis_8h.xml
 
-
 load_my_nifs() ->
   erlang:load_nif(code:root_dir() ++ "/lib/hipe/llvm/llevm", 0).
 

@@ -46,7 +46,6 @@ translate(RTL, Roots) ->
   Data0 = hipe_rtl:rtl_data(RTL),
   Code = hipe_rtl:rtl_code(RTL),
   {Code1, Params1} = fix_code(Code, Params),
-  hipe_rtl:pp_instrs(standard_io, Code1),
   {ModName, _FunName, _Arity} = fix_mfa_name(Fun),
   %% Print RTL to file
   %% {ok, File_rtl} = file:open(atom_to_list(_FunName) ++ ".rtl", [write]),
@@ -84,8 +83,6 @@ translate(RTL, Roots) ->
   {BuildRef1, _Data1, SymTab5, Relocs1} =
     translate_instr_list(Code1, BuildRef0, Data0, SymTab4, Relocs0),
   _SymTab6 = declare_roots(Roots, BuildRef1, SymTab5),
-  io:format("Relocations are ~w:~n", [Relocs1]),
-  io:format("RTL2LLVM Finished~n"),
   llevm:'LLVMWriteBitcodeToFile'(ModRef, "foo.bc"),
   llevm:'LLVMDumpModule'(ModRef),
   ok.
@@ -220,7 +217,6 @@ trans_alu(I, Builder, SymTab) ->
   RtlDst = hipe_rtl:alu_dst(I),
   {SrcRef1, SymTab1} = load_opnd(hipe_rtl:alu_src1(I), Builder, SymTab),
   {SrcRef2, SymTab2} = load_opnd(hipe_rtl:alu_src1(I), Builder, SymTab1),
-  io:format("lOADED OPERANS~n"),
   ValueRef =
     case hipe_rtl:alu_op(I) of
       'add' -> llevm:'LLVMBuildAdd'(Builder, SrcRef1, SrcRef2, "t");
@@ -1222,13 +1218,11 @@ store_precoloured_register(ValueRef, Ptr, Builder, SymTab) ->
 
 %%% XXX: Make it smaller
 load_opnd(Ptr, Builder, SymTab) ->
-  io:format("Try to load ~w~n",[Ptr]),
   case hipe_rtl:is_imm(Ptr) of
     true ->
       %% Just create the constant
       Value = hipe_rtl:imm_value(Ptr),
       ValueRef = llevm:'LLVMConstInt'(?WORD_TYPE, Value, true),
-      io:format("!!!!!ValueRef is ~w~n",[ValueRef]),
       {ValueRef, SymTab};
     false ->
       case hipe_rtl:is_const_label(Ptr) of
@@ -1303,7 +1297,6 @@ load_register(Ptr, Builder, SymTab) ->
     end.
 
 load_precoloured_register(Ptr, Builder, SymTab) ->
-  io:format("Loading Precoloured ~w~n", [Ptr]),
   Reg = hipe_rtl:reg_index(Ptr),
   case ?ARCH_REGISTERS:proc_offset(Reg) of
     false ->
@@ -1312,13 +1305,10 @@ load_precoloured_register(Ptr, Builder, SymTab) ->
       BaseReg = hipe_rtl:mk_reg((?ARCH_REGISTERS:proc_pointer())),
       RegName = ?ARCH_REGISTERS:reg_name(Reg),
       {PtrRef, SymTab1} = load_register(BaseReg, Builder, SymTab),
-      io:format("loaded base reg~n"),
       PtrRef1 = llevm:'LLVMConstIntToPtr'(PtrRef, ?WORD_TYPE_P),
-                         io:format("auto1"),
                          %%%XXX: ERROR
       %PtrRef2 = llevm:'LLVMBuildGEP'(Builder, PtrRef1, {Offset div (?WORD_WIDTH div 8)},
       %                     "fcalls"),
-                         io:format("auto"),
       ValueRef = llevm:'LLVMBuildLoad'(Builder, PtrRef1, RegName),
       {ValueRef, SymTab1}
   end.
