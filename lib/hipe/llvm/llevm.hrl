@@ -1,9 +1,9 @@
 %% @@CONST@@
-%% -- Start generating from Disassembler_8h.xml on {{2012,2,7},{15,54,42}}--
+%% -- Start generating from Disassembler_8h.xml on {{2012,2,12},{0,1,8}}--
 
 %% --- Stop generating from Disassembler_8h.xml
 
-%% -- Start generating from Core_8h.xml on {{2012,2,7},{15,54,42}}--
+%% -- Start generating from Core_8h.xml on {{2012,2,12},{0,1,7}}--
 
 %% enum LLVMAttribute
 -define(LLVMZExtAttribute,{'LLVMAttribute',1}).
@@ -179,23 +179,23 @@
 %% enum LLVMIntPredicate
 -define(LLVMIntEQ,{'LLVMIntPredicate',32}).
 %% equal 
--define(LLVMIntNE,{'LLVMIntPredicate',0}).
+-define(LLVMIntNE,{'LLVMIntPredicate',33}).
 %% not equal 
--define(LLVMIntUGT,{'LLVMIntPredicate',1}).
+-define(LLVMIntUGT,{'LLVMIntPredicate',34}).
 %% unsigned greater than 
--define(LLVMIntUGE,{'LLVMIntPredicate',2}).
+-define(LLVMIntUGE,{'LLVMIntPredicate',35}).
 %% unsigned greater or equal 
--define(LLVMIntULT,{'LLVMIntPredicate',3}).
+-define(LLVMIntULT,{'LLVMIntPredicate',36}).
 %% unsigned less than 
--define(LLVMIntULE,{'LLVMIntPredicate',4}).
+-define(LLVMIntULE,{'LLVMIntPredicate',37}).
 %% unsigned less or equal 
--define(LLVMIntSGT,{'LLVMIntPredicate',5}).
+-define(LLVMIntSGT,{'LLVMIntPredicate',38}).
 %% signed greater than 
--define(LLVMIntSGE,{'LLVMIntPredicate',6}).
+-define(LLVMIntSGE,{'LLVMIntPredicate',39}).
 %% signed greater or equal 
--define(LLVMIntSLT,{'LLVMIntPredicate',7}).
+-define(LLVMIntSLT,{'LLVMIntPredicate',40}).
 %% signed less than 
--define(LLVMIntSLE,{'LLVMIntPredicate',8}).
+-define(LLVMIntSLE,{'LLVMIntPredicate',41}).
 %% signed less or equal 
 
 %% enum LLVMRealPredicate
@@ -240,15 +240,15 @@
 
 %% --- Stop generating from Core_8h.xml
 
-%% -- Start generating from BitWriter_8h.xml on {{2012,2,7},{15,54,41}}--
+%% -- Start generating from BitWriter_8h.xml on {{2012,2,12},{0,1,7}}--
 
 %% --- Stop generating from BitWriter_8h.xml
 
-%% -- Start generating from BitReader_8h.xml on {{2012,2,7},{15,54,41}}--
+%% -- Start generating from BitReader_8h.xml on {{2012,2,12},{0,1,7}}--
 
 %% --- Stop generating from BitReader_8h.xml
 
-%% -- Start generating from Analysis_8h.xml on {{2012,2,7},{15,54,41}}--
+%% -- Start generating from Analysis_8h.xml on {{2012,2,12},{0,1,7}}--
 
 %% enum LLVMVerifierFailureAction
 -define(LLVMAbortProcessAction,{'LLVMVerifierFailureAction',0}).
