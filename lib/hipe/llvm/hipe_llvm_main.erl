@@ -13,12 +13,12 @@
 %% invoked in order to produce an object file.
 rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Compile to LLVM and get Instruction List (along with infos)
-  {LLVMCode, RelocsDict, ConstTab} =
+  {ModRef, RelocsDict, ConstTab} =
     hipe_rtl2llvm:translate(RTL, Roots),
   %% Fix function name to an acceptable LLVM identifier (needed for closures)
   {_Module, Fun, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  {ok, Dir, ObjectFile} = compile_with_llvm(Fun, Arity, LLVMCode, Options, false),
+  {ok, Dir, ObjectFile} = compile_with_llvm(Fun, Arity, ModRef, Options, false),
   %%
   %% Extract information from object file
   %%
@@ -62,30 +62,20 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
 %% @doc Compile function Fun_Name/Arity to LLVM. Return Dir (in order to remove
 %%      it if we do not want to store temporary files) and ObjectFile name that
 %%      is created by the LLVM tools.
-compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, Buffer) ->
+compile_with_llvm(Fun_Name, Arity, ModRef, Options, Buffer) ->
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
   DirName = "llvm_" ++ unique_id() ++ "/",
   Dir =
     case proplists:get_bool(llvm_save_temps, Options) of
       true ->  %% Store folder in current directory
-	DirName;
+	      DirName;
       false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
-	"/dev/shm/" ++ DirName
+	      "/dev/shm/" ++ DirName
     end,
   %% Create temp directory
   os:cmd("mkdir " ++ Dir),
-  %% Print LLVM assembly to file
-  OpenOpts = [append, raw] ++
-    case Buffer of
-      true -> [delayed_write]; % Use delayed_write!
-      false -> []
-    end,
-  {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", OpenOpts),
-  hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
-  %% delayed write can cause file:close not to do a close
-  file:close(File_llvm),
-  file:close(File_llvm),
+  llevm:'LLVMWriteBitcodeToFile'(ModRef, Dir++Filename++".bc"),
   %% Invoke LLVM compiler tools to produce an object file
   ObjectFile = invoke_llvm_tools(Dir, Filename, Options),
   {ok, Dir, ObjectFile}.
@@ -93,7 +83,7 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, Buffer) ->
 %% @doc Invoke LLVM tools to compile function Fun_Name/Arity and create an
 %%      Object File.
 invoke_llvm_tools(Dir, Fun_Name, Options) ->
-  llvm_as(Dir, Fun_Name),
+  %llvm_as(Dir, Fun_Name),
   llvm_opt(Dir, Fun_Name, Options),
   llvm_llc(Dir, Fun_Name, Options),
   compile(Dir, Fun_Name, "gcc").

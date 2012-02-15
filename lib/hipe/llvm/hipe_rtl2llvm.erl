@@ -1,13 +1,12 @@
 %% -*- erlang-indent-level: 2 -*-
 
 %%TODO:
-%% -- Function Definition
 %% -- Inline ASM stack adjustment
-%% -- GEP Instruction
-%% -- Constants
-%% -- Relocs
+%% -- GEP Instruction?
+%% -- Const Labels
 %% -- Switches
 %% -- Floating Point
+
 -module(hipe_rtl2llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 
@@ -20,6 +19,13 @@
 -include("hipe_llvm_arch.hrl").
 -include("llevm.hrl").
 
+-define(DEBUG, true).
+-ifdef(DEBUG).
+-define(debug_msg(Msg,Data), io:format(Msg,Data)).
+-else.
+-define(debug_msg(Msg,Data), no__debug).
+-endif.
+
 -define(WORD_TYPE, llevm:'LLVMInt64Type'()).
 -define(WORD_TYPE_P, llevm:'LLVMPointerType'(?WORD_TYPE, 0)).
 -define(FLOAT_TYPE, llevm:'LLVMDoubleType'()).
@@ -28,11 +34,6 @@
 -define(BYTE_TYPE_P, llevm:'LLVMPointerType'(?BYTE_TYPE, 0)).
 -define(FUN_RETURN_TYPE, createTypeFunRet()).
 
-createTypeFunRet() ->
-  NR = ?NR_PINNED_REGS+1,
-  RetType_ = lists:duplicate(NR, ?WORD_TYPE),
-  RetType = list_to_tuple(RetType_),
-  llevm:'LLVMStructType'(RetType, NR, false).
 
 %%------------------------------------------------------------------------------
 %% @doc Main function for translating an RTL function to LLVM Assembly. Takes as
@@ -57,85 +58,115 @@ translate(RTL, Roots) ->
   hipe_gensym:init(llvm),
   {_, MaxLabel} = hipe_rtl:rtl_label_range(RTL),
   put({llvm,label_count}, MaxLabel+1),
-  SymTab0 = symtab_init(),
-  Relocs0 = relocs_init(),
   %% Put first label of RTL code in process dictionary
-  find_code_entry_label(Code),
-  %% Initialize relocations symbol dictionary
+  Relocs0 = relocs_init(),
+  SymTab0 = symtab_init(),
+ 
   Ctx = llevm:'LLVMGetGlobalContext'(),
-  erlang:display(Ctx),
+  %% Create Module
   ModRef = llevm:'LLVMModuleCreateWithName'(ModName),
+  SymTab1 = symtab_insert(modRef, ModRef, SymTab0),
+  %% Create Function Definition
   FunTypeRef = llevm:'LLVMFunctionType'(?FUN_RETURN_TYPE,
-    create_type_fun_params(ParamsNr), ParamsNr, false),
+                                        fun_args_type(ParamsNr),
+                                        ParamsNr, false),
   FunRef = llevm:'LLVMAddFunction'(ModRef, mkMFAName(Fun), FunTypeRef),
-  SymTab1 = symtab_insert(funRef, FunRef, SymTab0),
-  SymTab2 = symtab_insert(modRef, ModRef, SymTab1),
   llevm:'LLVMSetFunctionCallConv'(FunRef, 11),
   llevm:'LLVMSetGC'(FunRef, "erlang_gc"),
-  %%Mp = llevm:'LLVMAddFunctionAttr'(FunRef, ?LLVMNoRedZoneAttribute),
-  %%erlang:display(Mp),
+  llevm:'LLVMAddFunctionAttr'(FunRef, ?LLVMNoRedZoneAttribute),
   llevm:'LLVMAddFunctionAttr'(FunRef, ?LLVMNoUnwindAttribute),
-  BuildRef0 = llevm:'LLVMCreateBuilderInContext'(Ctx),
+  SymTab2 = symtab_insert(funRef, FunRef, SymTab1),
+  %% Create Builder 
+  BuilderRef = llevm:'LLVMCreateBuilderInContext'(Ctx),
+  %% Create Entry Block
   EntryBB = llevm:'LLVMAppendBasicBlock'(FunRef, "Entry"),
-  llevm:'LLVMPositionBuilderAtEnd'(BuildRef0, EntryBB),
+  llevm:'LLVMPositionBuilderAtEnd'(BuilderRef, EntryBB),
   SymTab3 = symtab_insert(bbRef, EntryBB, SymTab2),
-  SymTab4 = store_params(Params1, FunRef, BuildRef0, SymTab3),
-  {BuildRef1, _Data1, SymTab5, Relocs1} =
-    translate_instr_list(Code1, BuildRef0, Data0, SymTab4, Relocs0),
-  _SymTab6 = declare_roots(Roots, BuildRef1, SymTab5),
+  %% Store function arguments to correspongin stack slots
+  SymTab4 = store_args(Params1, FunRef, BuilderRef, SymTab3),
+  SymTab5 = declare_roots(Roots, BuilderRef, SymTab4),
+  %% Jump from Entry block to the first block of the RTL code
+  FirstLabel = find_first_label(Code1),
+  {FirstBB, SymTab6} = load_label(FirstLabel, SymTab5),
+  %% Translate RTL code
+  {Data1, _SymTab7, Relocs1} =
+    translate_instr_list(Code1, BuilderRef, Data0, SymTab6, Relocs0),
+  llevm:'LLVMPositionBuilderAtEnd'(BuilderRef, EntryBB),
+  llevm:'LLVMBuildBr'(BuilderRef, FirstBB),
+  %% Hard-coded store of inc_stack function (which is added to prologue by LLVM)
+  Relocs2 = relocs_store("inc_stack_0", {call, {bif, inc_stack_0, 0}}, Relocs1),
+  Relocs3 = relocs_store("hipe_bifs.llvm_fix_pinned_regs.0",{call,
+      {hipe_bifs,llvm_fix_pinned_regs,0}}, Relocs2),
+  
   llevm:'LLVMWriteBitcodeToFile'(ModRef, "foo.bc"),
-  llevm:'LLVMDumpModule'(ModRef),
-  ok.
+  %% Dump only for debug
+  %% llevm:'LLVMDumpModule'(ModRef),
+  {ModRef, Relocs3, Data1}.
 
+%% Create the return type of the function
+createTypeFunRet() ->
+  RetNr = ?NR_PINNED_REGS+1,
+  RetList = lists:duplicate(RetNr, ?WORD_TYPE),
+  RetType = list_to_tuple(RetList),
+  llevm:'LLVMStructType'(RetType, RetNr, false).
 
-%% Create the type of the function parameters
-create_type_fun_params(ParamsNr) ->
-  ParamsType = lists:duplicate(ParamsNr, ?WORD_TYPE),
-  list_to_tuple(ParamsType).
+%% Create the type of the function arguments
+fun_args_type(ArgsNr) ->
+  ArgsType = lists:duplicate(ArgsNr, ?WORD_TYPE),
+  list_to_tuple(ArgsType).
 
 %% Store function parameters to corresponding variables
-store_params(Params, FunRef,  Builder, SymTab) ->
+store_args(Params, FunRef,  Builder, SymTab) ->
+  %% Revese stack arguments in order to match with HiPE CC
   Params1 = reverse_stack_args(Params),
-  store_params(Params1, FunRef, Builder, SymTab, 0).
+  store_args(Params1, FunRef, Builder, SymTab, 0).
 
-store_params([], _FunRef, _Builder, SymTab, _N) -> SymTab;
-store_params([P|Ps], FunRef, Builder, SymTab, N) ->
+store_args([], _FunRef, _Builder, SymTab, _N) -> SymTab;
+store_args([P|Ps], FunRef, Builder, SymTab, N) ->
   ParamRef = llevm:'LLVMGetParam'(FunRef, N),
   SymTab1 = store_opnd(ParamRef, P, Builder, SymTab),
-  store_params(Ps, FunRef, Builder, SymTab1, N+1).
+  store_args(Ps, FunRef, Builder, SymTab1, N+1).
 
-declare_roots([], _Builder, SymTab) -> SymTab;
+%% Declare GC Roots, by calling llvm.gcroot function
+declare_roots([], _Builder, SymTab) ->
+  SymTab;
 declare_roots(Roots, Builder, SymTab) ->
   ModRef = symtab_fetch_mod(SymTab),
   %% Create Metadata reference
-  MetadataRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE_P, "gc_metadata"),
+  MetadataRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, "gc_metadata"),
   llevm:'LLVMSetGlobalConstant'(MetadataRef, true),
   %% Create llvm.gcroot function reference
   RetType = llevm:'LLVMVoidType'(),
-  Name = "llvm.gcroot",
-  ArgsType = {
-    llevm:'LLVMPointerType'(?BYTE_TYPE_P),
-    ?BYTE_TYPE_P},
+  ArgsType = {llevm:'LLVMPointerType'(?BYTE_TYPE_P, 0), ?BYTE_TYPE_P},
   FunTypeRef = llevm:'LLVMFunctionType'(RetType, ArgsType, 2, false),
-  GCRootFunRef = llevm:'LLVMAddFunction'(ModRef, Name, FunTypeRef),
-  %% Place builder to the end of entry block
-  declare_roots(Roots, Builder, SymTab, GCRootFunRef, MetadataRef).
+  GCRootFunRef = llevm:'LLVMAddFunction'(ModRef, "llvm.gcrot", FunTypeRef),
+  do_declare_roots(Roots, Builder, SymTab, GCRootFunRef, MetadataRef).
 
-declare_roots([R|Rs], Builder, SymTab, GCRootFunRef, MetadataRef) ->
-  Ptr = hipe_rtl:mk_var(R),
-  {ValueRef, SymTab1} = load_opnd(Ptr, Builder, SymTab),
-  llevm:'LLVMBuildCall'(Builder, GCRootFunRef, {ValueRef, MetadataRef}, 2,
-                                  "GCRoot"),
-  declare_roots(Rs, Builder, SymTab1, GCRootFunRef, MetadataRef).
+do_declare_roots([], _, SymTab, _, _) -> SymTab;
+do_declare_roots([R|Rs], Builder, SymTab, GCRootFunRef, MetadataRef) ->
+  SymTab1 = case symtab_fetch({var, R}, SymTab) of
+    undefined ->
+      VarName = mkVarName(R),
+      ValueRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, VarName),
+      symtab_insert({var, R}, ValueRef, SymTab);
+    ValueRef ->
+      ByteTypePP = llevm:'LLVMPointerType'(?BYTE_TYPE_P, 0),
+      ValueRef2 = llevm:'LLVMBuildBitCast'(Builder, ValueRef, ByteTypePP, ""),
+      llevm:'LLVMBuildCall'(Builder, GCRootFunRef, {ValueRef2, MetadataRef}, 2, 
+                            ""),
+      SymTab
+  end,
+  do_declare_roots(Rs, Builder, SymTab1, GCRootFunRef, MetadataRef).
 
 %%
-translate_instr_list([], Builder, Data, SymTab, Relocs) -> {Builder, Data, SymTab, Relocs};
+translate_instr_list([], _Builder, Data, SymTab, Relocs) ->
+  {Data, SymTab, Relocs};
 translate_instr_list([I|Is], Builder, Data, SymTab, Relocs) ->
   {Data1, SymTab1, Relocs1} = translate_instr(I, Builder, Data, SymTab, Relocs),
   translate_instr_list(Is, Builder, Data1, SymTab1, Relocs1).
 
 translate_instr(I, Builder, Data, SymTab, Relocs) ->
-  erlang:display(I),
+  ?debug_msg("Translating ~w~n", [I]),
   case I of
     #alu{} ->
       SymTab1 = trans_alu(I, Builder, SymTab),
@@ -155,17 +186,11 @@ translate_instr(I, Builder, Data, SymTab, Relocs) ->
         _ ->
           trans_call(I, Builder, SymTab, Relocs)
       end,
-     {Data, SymTab1, Relocs1};
+      {Data, SymTab1, Relocs1};
     %%   #comment{} ->
     #enter{} ->
       {SymTab1, Relocs1} = trans_enter(I, Builder, SymTab, Relocs),
       {Data, SymTab1, Relocs1};
-    %%   #fconv{} ->
-    %%   #fload{} ->
-    %%   #fmove{} ->
-    %%   #fp{} ->
-    %%   #fp_unop{} ->
-    %%   #fstore{} ->
     #goto{} ->
       SymTab1 = trans_goto(I, Builder, SymTab),
       {Data, SymTab1, Relocs};
@@ -190,24 +215,16 @@ translate_instr(I, Builder, Data, SymTab, Relocs) ->
     #store{} ->
       SymTab1 = trans_store(I, Builder, SymTab),
       {Data, SymTab1, Relocs};
-      %%   #switch{} -> %% Only switch instruction updates Data
-      _ -> {Data, SymTab, Relocs}
-        %% Other ->
-        %%   exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
-    end.
-
-
-
-
-find_code_entry_label([]) ->
-  exit({?MODULE, find_code_entry_label, "Empty Code"});
-find_code_entry_label(Code) ->
-  case I=hd(Code) of
-    #label{} ->
-      put(first_label, hipe_rtl:label_name(I));
-    _ ->
-      exit({?MODULE, find_code_entry_label, "First instruction is not a
-          label"})
+    %%   #fconv{} ->
+    %%   #fload{} ->
+    %%   #fmove{} ->
+    %%   #fp{} ->
+    %%   #fp_unop{} ->
+    %%   #fstore{} ->
+    %%   #switch{} -> %% Only switch instruction updates Data
+    _ -> {Data, SymTab, Relocs}
+    %% Other ->
+    %%   exit({?MODULE, translate_instr, {"unknown RTL instruction", Other}})
   end.
 
 %%
@@ -216,23 +233,23 @@ find_code_entry_label(Code) ->
 trans_alu(I, Builder, SymTab) ->
   RtlDst = hipe_rtl:alu_dst(I),
   {SrcRef1, SymTab1} = load_opnd(hipe_rtl:alu_src1(I), Builder, SymTab),
-  {SrcRef2, SymTab2} = load_opnd(hipe_rtl:alu_src1(I), Builder, SymTab1),
+  {SrcRef2, SymTab2} = load_opnd(hipe_rtl:alu_src2(I), Builder, SymTab1),
   ValueRef =
     case hipe_rtl:alu_op(I) of
-      'add' -> llevm:'LLVMBuildAdd'(Builder, SrcRef1, SrcRef2, "t");
-      'sub' -> llevm:'LLVMBuildSub'(Builder, SrcRef1, SrcRef2, "t");
-      'or'  -> llevm:'LLVMBuildOr'(Builder, SrcRef1, SrcRef2, "t");
-      'and' -> llevm:'LLVMBuildAnd'(Builder, SrcRef1, SrcRef2, "t");
-      'xor' -> llevm:'LLVMBuildXor'(Builder, SrcRef1, SrcRef2, "t");
-      'sll' -> llevm:'LLVMBuildShl'(Builder, SrcRef1, SrcRef2, "t");
-      'srl' -> llevm:'LLVMBuildLshr'(Builder, SrcRef1, SrcRef2, "t");
-      'sra' -> llevm:'LLVMBuildAshr'(Builder, SrcRef1, SrcRef2, "t");
-      'mul' -> llevm:'LLVMBuildMul'(Builder, SrcRef1, SrcRef2, "t");
-      'fdiv' -> llevm:'LLVMBuildFdiv'(Builder, SrcRef1, SrcRef2, "t");
-      'sdiv' -> llevm:'LLVMBuildSdiv'(Builder, SrcRef1, SrcRef2, "t");
-      'srem' -> llevm:'LLVMBuildSrem'(Builder, SrcRef1, SrcRef2, "t");
-    Other -> exit({?MODULE, trans_op, {"Unknown RTL Operator",Other}})
-  end,
+      'add' -> llevm:'LLVMBuildAdd'(Builder, SrcRef1, SrcRef2, "");
+      'sub' -> llevm:'LLVMBuildSub'(Builder, SrcRef1, SrcRef2, "");
+      'or'  -> llevm:'LLVMBuildOr'(Builder, SrcRef1, SrcRef2, "");
+      'and' -> llevm:'LLVMBuildAnd'(Builder, SrcRef1, SrcRef2, "");
+      'xor' -> llevm:'LLVMBuildXor'(Builder, SrcRef1, SrcRef2, "");
+      'sll' -> llevm:'LLVMBuildShl'(Builder, SrcRef1, SrcRef2, "");
+      'srl' -> llevm:'LLVMBuildLshr'(Builder, SrcRef1, SrcRef2, "");
+      'sra' -> llevm:'LLVMBuildAshr'(Builder, SrcRef1, SrcRef2, "");
+      'mul' -> llevm:'LLVMBuildMul'(Builder, SrcRef1, SrcRef2, "");
+      'fdiv' -> llevm:'LLVMBuildFdiv'(Builder, SrcRef1, SrcRef2, "");
+      'sdiv' -> llevm:'LLVMBuildSdiv'(Builder, SrcRef1, SrcRef2, "");
+      'srem' -> llevm:'LLVMBuildSrem'(Builder, SrcRef1, SrcRef2, "");
+       Other -> exit({?MODULE, trans_alu, {"Unknown RTL Operator", Other}})
+     end,
   store_opnd(ValueRef, RtlDst, Builder, SymTab2).
 
 %%
@@ -248,101 +265,50 @@ trans_alub(I, Builder, SymTab) ->
       trans_alub_no_overflow(I, Builder, SymTab)
   end.
 
+
 trans_alub_overflow(I, Builder, SymTab, Sign) ->
   {SrcRef1, SymTab1} = load_opnd(hipe_rtl:alub_src1(I), Builder, SymTab),
   {SrcRef2, SymTab2} = load_opnd(hipe_rtl:alub_src2(I), Builder, SymTab1),
   RtlDst = hipe_rtl:alub_dst(I),
+  %% Create operation with overflow check
   Name = trans_alub_op(I, Sign),
-  {FunRef2, SymTab4} =
-  case symtab_fetch({call, Name}, SymTab2) of
-    undefined ->
-      ModRef = symtab_fetch_mod(SymTab2),
-      RetType = llevm:'LLVMStructType'(
-        {?WORD_TYPE, llevm:'LLVMInt1Type'()}, 2, false),
-      FunTypeRef = llevm:'LLVMFunctionType'(RetType,
-        {?WORD_TYPE, ?WORD_TYPE}, 2, false),
-      FunRef = llevm:'LLVMAddFunction'(ModRef, Name, FunTypeRef),
-      SymTab3 = symtab_insert({call, Name}, FunRef, SymTab2),
-      {FunRef, SymTab3};
-    FunRef ->
-      {FunRef, SymTab2}
-  end,
-  TempRef = llevm:'LLVMBuildCall'(Builder, FunRef2, {SrcRef1, SrcRef2}, 2,
-    "OverflowTMP"),
-  ResRef = llevm:'LLVMBuildExtractValue'(Builder, TempRef, 0, "result"),
-  SymTab5 = store_opnd(ResRef, RtlDst, Builder, SymTab4),
-  OverflowRef = llevm:'LLVMBuildExtractValue'(Builder, TempRef, 0, "overflow"),
+  RetType = llevm:'LLVMStructType'({?WORD_TYPE, llevm:'LLVMInt1Type'()}, 2, false),
+  ArgsType = {?WORD_TYPE, ?WORD_TYPE},
+  {FunRef, SymTab3} = load_call(Name, RetType, ArgsType, 2, [], SymTab2),
+  TempRef = llevm:'LLVMBuildCall'(Builder, FunRef, {SrcRef1, SrcRef2}, 2, ""),
+  %% Extract the result and store it
+  ResRef = llevm:'LLVMBuildExtractValue'(Builder, TempRef, 0, ""),
+  SymTab4 = store_opnd(ResRef, RtlDst, Builder, SymTab3),
+  %% Check if an overflow happened and jump to corresponding block
+  OverflowRef = llevm:'LLVMBuildExtractValue'(Builder, TempRef, 0, ""),
   case hipe_rtl:alub_cond(I) of
     Op when Op =:= overflow orelse Op =:= ltu ->
-      {TrueRef, SymTab6} = bbRef_from_label(hipe_rtl:alub_true_label(I),SymTab5),
-      {FalseRef, SymTab7} = bbRef_from_label(hipe_rtl:alub_false_label(I), SymTab6);
+      {TrueBB, SymTab5} = load_label(hipe_rtl:alub_true_label(I),SymTab4),
+      {FalseBB, SymTab6} = load_label(hipe_rtl:alub_false_label(I), SymTab5);
     not_overflow ->
-      {TrueRef, SymTab6} = bbRef_from_label(hipe_rtl:alub_false_label(I), SymTab5),
-      {FalseRef, SymTab7} = bbRef_from_label(hipe_rtl:alub_true_label(I), SymTab6)
+      {TrueBB, SymTab5} = load_label(hipe_rtl:alub_false_label(I), SymTab4),
+      {FalseBB, SymTab6} = load_label(hipe_rtl:alub_true_label(I), SymTab5)
   end,
-  llevm:'LLVMBuildCondBr'(Builder, OverflowRef, TrueRef, FalseRef),
-  SymTab7.
-
-trans_alub_op(I, Sign) ->
-  Op =
-    case hipe_rtl:alub_op(I) of
-      add -> "llvm.sadd.with.overflow.";
-      mul -> "llvm.smul.with.overflow.";
-      sub -> "llvm.ssub.with.overflow.";
-      Other ->
-        exit({?MODULE, trans_alub_op, {"Unknown alub operator", Other}})
-    end,
-  S =
-    case Sign of
-      signed -> "s";
-      unsigned -> "u"
-    end,
-  Type = integer_to_list(?WORD_WIDTH),
-  lists:concat(["llvm.", S, Op, ".with.overflow.", Type]).
+  llevm:'LLVMBuildCondBr'(Builder, OverflowRef, TrueBB, FalseBB),
+  SymTab6.
 
 
 trans_alub_no_overflow(I, Builder, SymTab) ->
   %% alu
   AluI = hipe_rtl:mk_alu(hipe_rtl:alub_dst(I), hipe_rtl:alub_src1(I),
                       hipe_rtl:alub_op(I), hipe_rtl:alub_src2(I)),
-  %% A trans_alu instruction cannot change relocations
   SymTab1 = trans_alu(AluI, Builder, SymTab),
   %% icmp
-  %% Translate destination as src, to match with the semantic of instruction
   {DstRef, SymTab2} = load_opnd(hipe_rtl:alub_dst(I), Builder, SymTab1),
   Cond = trans_rel_op(hipe_rtl:alub_cond(I)),
   ZeroConst = llevm:'LLVMConstInt'(?WORD_TYPE, 0, true),
   IfRef = llevm:'LLVMBuildICmp'(Builder, Cond, DstRef, ZeroConst, ""),
   %% br
-  {TrueBB, SymTab3} = bbRef_from_label(hipe_rtl:alub_true_label(I), SymTab2),
-  {FalseBB, SymTab4} = bbRef_from_label(hipe_rtl:alub_false_label(I), SymTab3),
+  {TrueBB, SymTab3} = load_label(hipe_rtl:alub_true_label(I), SymTab2),
+  {FalseBB, SymTab4} = load_label(hipe_rtl:alub_false_label(I), SymTab3),
   llevm:'LLVMBuildCondBr'(Builder, IfRef, TrueBB, FalseBB),
   SymTab4.
 
-bbRef_from_label(Label, SymTab) ->
-  case symtab_fetch({label, Label}, SymTab) of
-    undefined ->
-      FunRef = symtab_fetch_fun(SymTab),
-      BBRef = llevm:'LLVMAppendBasicBlock'(FunRef, mkLabelName(Label)),
-      SymTab1 = symtab_insert({label, Label}, BBRef, SymTab),
-      {BBRef, SymTab1};
-    BBRef ->
-      {BBRef, SymTab}
-  end.
-
-trans_rel_op(Op) ->
-  case Op of
-    eq -> ?LLVMIntEQ;
-    ne -> ?LLVMIntNE;
-    gtu -> ?LLVMIntUGT;
-    geu -> ?LLVMIntUGE;
-    ltu -> ?LLVMIntULT;
-    leu -> ?LLVMIntULE;
-    gt -> ?LLVMIntSGT;
-    ge -> ?LLVMIntSGE;
-    lt -> ?LLVMIntSLT;
-    le -> ?LLVMIntSLE
-  end.
 
 %%
 %% branch
@@ -354,55 +320,61 @@ trans_branch(I, Builder, SymTab) ->
   %% icmp
   IfRef = llevm:'LLVMBuildICmp'(Builder, Cond, SrcRef1, SrcRef2, ""),
   %% br
-  {TrueBB, SymTab3} = bbRef_from_label(hipe_rtl:branch_true_label(I),SymTab2),
-  {FalseBB, SymTab4} = bbRef_from_label(hipe_rtl:branch_false_label(I),
-    SymTab3),
+  {TrueBB, SymTab3} = load_label(hipe_rtl:branch_true_label(I) ,SymTab2),
+  {FalseBB, SymTab4} = load_label(hipe_rtl:branch_false_label(I), SymTab3),
   llevm:'LLVMBuildCondBr'(Builder, IfRef, TrueBB, FalseBB),
   SymTab4.
 
-%%%%
-%%%% call
-%%%%
+%%
+%% call
+%%
 trans_call(I, Builder, SymTab, Relocs) ->
+  %% Reverse stack arguments in order to match HiPE CC
   ArgList= reverse_stack_args(hipe_rtl:call_arglist(I)),
   RetList = hipe_rtl:call_dstlist(I),
   CallName = hipe_rtl:call_fun(I),
-  {SymTab1, Relocs1} =  expose_closure(Builder, SymTab, CallName, ArgList, Relocs),
+  %% Expose the closure, if needed
+  {SymTab1, Relocs1} = expose_closure(Builder, SymTab, CallName, ArgList,
+                                     Relocs),
+  %% XXX: Is this Correct ?
   %% Loading the arguments cannot change the SymTab, so we ignore it
   {ArgListRef, _} = lists:unzip([ load_opnd(X, Builder, SymTab1) || X<-ArgList ]),
-  {FunRef, SymTab2, Relocs2} =  trans_call_name(Builder, SymTab, Relocs1, CallName, ArgList, RetList),
-  SymTab8 = case hipe_rtl:call_fail(I) of
+  {FunRef, SymTab2, Relocs2} =  trans_call_name(Builder, SymTab, Relocs1,
+                                                CallName, ArgList, RetList),
+  FinalSymTab = case hipe_rtl:call_fail(I) of
     [] -> %% Call Without Exception Handler
       RetStruct = llevm:'LLVMBuildCall'(Builder, FunRef, list_to_tuple(ArgListRef),
                                         length(ArgListRef), ""),
-      store_call_retlist(RetStruct, RetList, Builder, SymTab2);
+      llevm:'LLVMSetInstructionCallConv'(RetStruct, 11),
+      SymTab3 = store_call_retlist(RetStruct, RetList, Builder, SymTab2),
+      case  hipe_rtl:call_continuation(I) of
+        [] -> SymTab3;
+        ContLabel -> %% Call with normal continuation
+          {ContBB, SymTab4} = load_label(ContLabel, SymTab3),
+          llevm:'LLVMBuildBr'(Builder, ContBB),
+          SymTab4
+      end;
     FailLabel -> %% Call With Exception Handler
       ContLabel = hipe_rtl:call_continuation(I),
-      {ContRef, SymTab3} = bbRef_from_label(ContLabel, SymTab2),
-      {FailRef, SymTab4} = bbRef_from_label(FailLabel, SymTab3),
-      RetStruct = llevm:'LLVMBuildInvoke'(Builder, FunRef, list_to_tuple(ArgListRef),
-                                        length(ArgListRef), ContRef, FailRef, "callTmp"),
-      BBRef = symtab_fetch_bb(SymTab2),
-      NewFailLabel = hipe_gensym:new_label(llvm),
-      SymTab5 = trans_label(hipe_rtl:mk_label(NewFailLabel), Builder, SymTab4),
-      SymTab6 = create_new_fail_block(NewFailLabel, FailLabel, RetStruct, RetList, Builder, SymTab5),
       NewContLabel = hipe_gensym:new_label(llvm),
-      SymTab7 = create_new_cont_block(NewContLabel, ContLabel, RetStruct,
-                                      RetList, Builder, SymTab6),
-      %%% XXX: UnNessecary /
-      llevm:'LLVMPositionBuilderAtEnd'(Builder, BBRef),
-      SymTab7
+      NewFailLabel = hipe_gensym:new_label(llvm),
+      {ContBB, SymTab3} = load_label(NewContLabel, SymTab2),
+      {FailBB, SymTab4} = load_label(NewFailLabel, SymTab3),
+      RetStruct = llevm:'LLVMBuildInvoke'(Builder, FunRef, list_to_tuple(ArgListRef),
+                                        length(ArgListRef), ContBB, FailBB, ""),
+      %% Store current block
+      BBRef = symtab_fetch_bb(SymTab4),
+      %% Create the code for the new fail block
+      SymTab5 = create_new_fail_block(NewFailLabel, FailLabel, RetStruct, RetList, Builder,
+                                      SymTab4),
+      %% Create the code for the new continuation block
+      SymTab6 = create_new_cont_block(NewContLabel, ContLabel, RetStruct, RetList, Builder,
+                                      SymTab5),
+      %% Restore builder to current block
+%%      llevm:'LLVMPositionBuilderAtEnd'(Builder, BBRef),
+      SymTab6
   end,
-  {SymTab8, Relocs2}.
-
-
-reverse_stack_args(ArgList) ->
-  case erlang:length(ArgList) > ?NR_PINNED_REGS + ?NR_ARG_REGS of
-    false -> ArgList;
-    true ->
-      {RegisterArgs, StackArgs} = lists:split(?NR_PINNED_REGS+?NR_ARG_REGS, ArgList),
-      RegisterArgs ++ StackArgs
-  end.
+  {FinalSymTab, Relocs2}.
 
 store_call_retlist(RetStruct, RetList, Builder, SymTab) ->
   store_call_retlist(RetStruct, RetList, Builder, SymTab, 0).
@@ -414,6 +386,7 @@ store_call_retlist(RetStruct, [R|Rs], Builder, SymTab, Num) ->
   store_call_retlist(RetStruct, Rs, Builder, SymTab1, Num+1).
 
 create_new_fail_block(NewFailLabel, FailLabel, RetStruct, RetList, Builder, SymTab) ->
+  io:format("In create Fail Block~n"),
   SymTab1 = trans_label(hipe_rtl:mk_label(NewFailLabel), Builder, SymTab),
   %% Personality Function And Landing Pad
   {PersFunRef, SymTab2} = create_personality_function(SymTab1),
@@ -423,48 +396,31 @@ create_new_fail_block(NewFailLabel, FailLabel, RetStruct, RetList, Builder, SymT
   %% hipe_bifs:llvm_fix_pinned_regs()
   {BifRetList, _} = lists:split(?NR_PINNED_REGS, RetList),
   {BifFunRef, SymTab3} = create_bif_pinned_regs(SymTab2, BifRetList),
-  RetStruct = llevm:'LLVMBuildCall'(Builder, BifFunRef, {}, 0, ""),
-  SymTab4 = store_call_retlist(RetStruct, BifRetList, Builder, SymTab3),
+  RetStruct2 = llevm:'LLVMBuildCall'(Builder, BifFunRef, {}, 0, ""),
+  llevm:'LLVMSetInstructionCallConv'(RetStruct2, 11),
+  SymTab4 = store_call_retlist(RetStruct2, BifRetList, Builder, SymTab3),
   trans_goto(hipe_rtl:mk_goto(FailLabel), Builder, SymTab4).
 
 create_personality_function(SymTab) ->
   PersFnName = "__gcc_personality_v0",
-  case symtab_fetch({call, PersFnName}, SymTab) of
-    undefined ->
-      ModRef = symtab_fetch_mod(SymTab),
-      RetType = llevm:'LLVMInt32Type'(),
-      ArgsType = {
-        llevm:'LLVMInt32Type'(),
-        llevm:'LLVMInt64Type'(),
-        llevm:'LLVMPointerType'(llevm:'LLVMInt8Type'(), 0),
-        llevm:'LLVMPointerType'(llevm:'LLVMInt8Type'(), 0)},
-      FunTypeRef = llevm:'LLVMFunctionType'(RetType, ArgsType, 4, false),
-      FunRef = llevm:'LLVMAddFunction'(ModRef, PersFnName, FunTypeRef),
-      SymTab1 = symtab_insert({call, PersFnName}, FunRef, SymTab),
-      {FunRef, SymTab1};
-    FunRef ->
-      {FunRef, SymTab}
-  end.
+  RetType = llevm:'LLVMInt32Type'(),
+  ArgsType = {
+    llevm:'LLVMInt32Type'(),
+    llevm:'LLVMInt64Type'(),
+    llevm:'LLVMPointerType'(llevm:'LLVMInt8Type'(), 0),
+    llevm:'LLVMPointerType'(llevm:'LLVMInt8Type'(), 0)},
+  load_call(PersFnName, RetType, ArgsType, 4, [], SymTab).
 
 create_bif_pinned_regs(SymTab, RetList) ->
-  BifName = "hipe_bifs:llvm_fix_pinned_regs.0",
-  case symtab_fetch({call, BifName}, SymTab) of
-    undefined ->
-      ModRef = symtab_fetch_mod(SymTab),
-      RetTypeList = ([?WORD_TYPE || _ <- RetList]),
-      RetType = llevm:'LLVMStructType'(list_to_tuple(RetTypeList),
-                                      length(RetTypeList), false),
-      ArgsType = {},
-      FunTypeRef = llevm:'LLVMFunctionType'(RetType, ArgsType, 0, false),
-      FunRef = llevm:'LLVMAddFunction'(ModRef, BifName, FunTypeRef),
-      SymTab1 = symtab_insert({call, BifName}, FunRef, SymTab),
-      {FunRef, SymTab1};
-    FunRef ->
-      {FunRef, SymTab}
-  end.
-
+  BifName = "hipe_bifs.llvm_fix_pinned_regs.0",
+  RetTypeList = ([?WORD_TYPE || _ <- RetList]),
+  RetType = llevm:'LLVMStructType'(list_to_tuple(RetTypeList),
+                                  length(RetTypeList), false),
+  ArgsType = {},
+  load_call(BifName, RetType, ArgsType, 0, cc11, SymTab).
 
 create_new_cont_block(NewContLabel, ContLabel, RetStruct, RetList, Builder, SymTab) ->
+  io:format("In Create new cont block~n"),
   SymTab2 = trans_label(hipe_rtl:mk_label(NewContLabel), Builder, SymTab),
   SymTab3 = store_call_retlist(RetStruct, RetList, Builder, SymTab2),
   trans_goto(hipe_rtl:mk_goto(ContLabel), Builder, SymTab3).
@@ -480,39 +436,27 @@ create_new_cont_block(NewContLabel, ContLabel, RetStruct, RetList, Builder, SymT
 %%        call %reg(Args)          |           ClosureLabel:
 %%                                 |           call %reg(Args)
 expose_closure(Builder, SymTab, CallName, CallArgs, Relocs) ->
- case hipe_rtl:is_reg(CallName) andalso length(CallArgs) > ?NR_ARG_REGS+?NR_PINNED_REGS of
-   true ->
-     Label = hipe_gensym:new_label(llvm),
-     FunRef = symtab_fetch_fun(SymTab),
-     BBRef = llevm:'LLVMAppendBasicBlock'(FunRef, mkLabelName(Label)),
-     SymTab1 = symtab_insert({label, Label}, BBRef, SymTab),
-     llevm:'LLVMBuildBr'(Builder, BBRef),
-     llevm:'LLVMPositionBuilderAtEnd'(Builder, BBRef),
-     SymTab2 = symtab_insert(bbRef, BBRef, SymTab1),
-     Relocs1 = relocs_store({CallName, Label}, {closure_label, Label,
-                            length(CallArgs) - ?NR_ARG_REGS -?NR_PINNED_REGS},
-                            Relocs),
-    {SymTab2, Relocs1};
-   false ->
-    {SymTab, Relocs}
- end.
+  case hipe_rtl:is_reg(CallName) andalso length(CallArgs) > ?NR_ARG_REGS+?NR_PINNED_REGS of
+    true ->
+      Label = hipe_gensym:new_label(llvm),
+      {BBRef, SymTab1} = load_label(mkLabelName(Label), SymTab),
+      llevm:'LLVMBuildBr'(Builder, BBRef),
+      SymTab2 = trans_label(hipe_rtl:mk_label(Label), Builder, SymTab1),
+      Relocs1 = relocs_store({CallName, Label}, {closure_label, Label,
+                              length(CallArgs) - ?NR_ARG_REGS - ?NR_PINNED_REGS},
+                              Relocs),
+      {SymTab2, Relocs1};
+    false ->
+      {SymTab, Relocs}
+  end.
 
 create_fun_decl(CallName, CallArgs, CallRet, SymTab) ->
-  case symtab_fetch({call, CallName}, SymTab) of
-    undefined ->
-      ModRef = symtab_fetch_mod(SymTab),
-      RetType = [ ?WORD_TYPE || _ <- CallRet ],
-      RetType1 = llevm:'LLVMStructType'(list_to_tuple(RetType), length(RetType),
-                                        false),
-      ArgsType = [ ?WORD_TYPE || _ <- CallArgs ],
-      FunTypeRef = llevm:'LLVMFunctionType'(RetType1, list_to_tuple(ArgsType),
-                                            length(ArgsType), false),
-      FunRef = llevm:'LLVMAddFunction'(ModRef, CallName, FunTypeRef),
-      SymTab1 = symtab_insert({call, CallName}, FunRef, SymTab),
-      {FunRef, SymTab1};
-    FunRef ->
-      {FunRef, SymTab}
-  end.
+  RetType = [ ?WORD_TYPE || _ <- CallRet ],
+  RetType1 = llevm:'LLVMStructType'(list_to_tuple(RetType), length(RetType),
+                                    false),
+  ArgsType = [ ?WORD_TYPE || _ <- CallArgs ],
+  load_call(CallName, RetType1, list_to_tuple(ArgsType), length(ArgsType), cc11,
+            SymTab).
 
 %%
 trans_call_name(Builder, SymTab, Relocs,  CallName, CallArgs, CallRet) ->
@@ -521,21 +465,20 @@ trans_call_name(Builder, SymTab, Relocs,  CallName, CallArgs, CallRet) ->
       LLVMName = trans_prim_op(PrimOp),
       {FunRef, SymTab1} = create_fun_decl(LLVMName, CallArgs, CallRet, SymTab),
       Relocs1 = relocs_store(LLVMName, {call, {bif, PrimOp,
-                            length(CallArgs)-?NR_PINNED_REGS}}, Relocs),
+            length(CallArgs)-?NR_PINNED_REGS}}, Relocs),
       {FunRef, SymTab1, Relocs1};
     {M, F, A} when is_atom(M), is_atom(F), is_integer(A) ->
-      LLVMName = fix_mfa_name({M,F,A}),
+      LLVMName = mkMFAName(fix_mfa_name({M,F,A})),
       {FunRef, SymTab1} = create_fun_decl(LLVMName, CallArgs, CallRet, SymTab),
-       Relocs1 = relocs_store(LLVMName, {call, {M,F,A}}, Relocs),
-       {FunRef, SymTab1, Relocs1};
+      Relocs1 = relocs_store(LLVMName, {call, {M,F,A}}, Relocs),
+      {FunRef, SymTab1, Relocs1};
     Reg ->
       case hipe_rtl:is_reg(Reg) of
         true -> %% In case of a closure call, the register holding the address
           %% of the closure must be converted to function type in
           %% order to make the call
           {RegRef, SymTab1} = load_opnd(Reg, Builder, SymTab),
-          llevm:'LLVMBuildIntToPtr'(Builder, RegRef, ?WORD_TYPE_P,
-                                    ""),
+          llevm:'LLVMBuildIntToPtr'(Builder, RegRef, ?WORD_TYPE_P, ""),
           RetType = [ ?WORD_TYPE || _ <- CallRet ],
           RetType1 = llevm:'LLVMStructType'(list_to_tuple(RetType), length(RetType),
                                             false),
@@ -544,6 +487,7 @@ trans_call_name(Builder, SymTab, Relocs,  CallName, CallArgs, CallRet) ->
                                                 length(ArgsType), false),
           FunTypePointer = llevm:'LLVMPointerType'(FunTypeRef, 0),
           FunRef = llevm:'LLVMBuildBitCast'(Builder, RegRef, FunTypePointer, ""),
+          llevm:'LLVMSetFunctionCallConv'(FunRef, 11),
           {FunRef, SymTab1};
         false ->
           exit({?MODULE, trans_call, {"Unimplemted Call to", CallName}})
@@ -557,21 +501,181 @@ trans_call_name(Builder, SymTab, Relocs,  CallName, CallArgs, CallRet) ->
 %%  I1 = hipe_llvm:mk_comment(hipe_rtl:comment_text(I)),
 %%  {I1, Relocs}.
 %%
+
 %%
 %% enter
 %%
 trans_enter(I, Builder, SymTab, Relocs) ->
+  %% Reverse stack arguments in order to match with hipe CC
   ArgList= reverse_stack_args(hipe_rtl:enter_arglist(I)),
   RetList = hipe_rtl:enter_dstlist(I),
   CallName = hipe_rtl:enter_fun(I),
   %% Loading the arguments cannot change the SymTab, so we ignore it
+  %% XXX: Is This Correct ?
   {ArgListRef, _} = lists:unzip([ load_opnd(X, Builder, SymTab) || X<-ArgList ]),
   {FunRef, SymTab2, Relocs1} =  trans_call_name(Builder, SymTab, Relocs, CallName,
                                                 ArgList, RetList),
   RetStruct = llevm:'LLVMBuildCall'(Builder, FunRef, list_to_tuple(ArgListRef),
-                                        length(ArgListRef), ""),
-  llevm:'LLVMBuildAggregateRet'(Builder, RetStruct, length(RetList)),
+                                    length(ArgListRef), ""),
+  llevm:'LLVMSetInstructionCallConv'(RetStruct, 11),
+  llevm:'LLVMBuildRet'(Builder, RetStruct),
   {SymTab2, Relocs1}.
+
+%%
+%%
+%% goto
+%%
+trans_goto(I, BuilderRef, SymTab) ->
+  Label = hipe_rtl:goto_label(I),
+  {BBRef, SymTab1} = load_label(Label, SymTab),
+  llevm:'LLVMBuildBr'(BuilderRef, BBRef),
+  SymTab1.
+
+%%
+%% label
+%%
+trans_label(I, BuilderRef, SymTab) ->
+  Label  = hipe_rtl:label_name(I),
+  {BBRef, SymTab1} = load_label(Label, SymTab),
+  %% Update the current block
+  llevm:'LLVMPositionBuilderAtEnd'(BuilderRef, BBRef),
+  symtab_insert(bbRef, BBRef, SymTab1).
+
+%%
+%% load
+%%
+trans_load(I, Builder, SymTab) ->
+  RtlDst = hipe_rtl:load_dst(I),
+  {SrcRef, SymTab1} = load_opnd(hipe_rtl:load_src(I), Builder, SymTab),
+  {OffsetRef, SymTab2} = load_opnd(hipe_rtl:load_offset(I), Builder, SymTab1),
+  ValueRef = llevm:'LLVMBuildAdd'(Builder, SrcRef, OffsetRef, ""),
+  LoadedRef =
+  case hipe_rtl:load_size(I) of
+    word ->
+      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, ?WORD_TYPE_P, ""),
+      llevm:'LLVMBuildLoad'(Builder, PtrRef, "");
+    Size ->
+      LoadType = type_from_size(Size),
+      LoadTypeP = llevm:'LLVMPointerType'(LoadType, 0),
+      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, LoadTypeP, ""),
+      LoadedRef_ = llevm:'LLVMBuildLoad'(Builder, PtrRef, ""),
+      case hipe_rtl:load_sign(I) of
+        signed -> llevm:'LLVMBuildSext'(Builder, LoadedRef_, ?WORD_TYPE, "");
+        unsigned -> llevm:'LLVMBuildZext'(Builder, LoadedRef_, ?WORD_TYPE, "")
+      end
+  end,
+  store_opnd(LoadedRef, RtlDst, Builder, SymTab2).
+
+%%
+%% load_address
+%%
+trans_load_address(I, Builder, SymTab, Relocs) ->
+ RtlDst = hipe_rtl:load_address_dst(I),
+ RtlAddr = hipe_rtl:load_address_addr(I),
+ {AddrRef, SymTab2, Relocs2} =
+    case hipe_rtl:load_address_type(I) of
+      constant ->
+        {ValueRef, SymTab1} = load_opnd(hipe_rtl:mk_const_label(RtlAddr), Builder, SymTab),
+        Relocs1 = dict:store(mkConstLabelName(RtlAddr), {'constant', RtlAddr},
+        Relocs),
+        {ValueRef, SymTab1, Relocs1};
+      closure  ->
+        Closure = RtlAddr,
+        case symtab_fetch({closure, Closure}, SymTab) of
+          undefined ->
+            %% Declare a global constant and convert the pointer to integer
+            ModRef = symtab_fetch(modRef, SymTab),
+            ClosureName = mkClosureName(Closure),
+            PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, ClosureName),
+            llevm:'LLVMSetGlobalConstant'(PtrRef, true),
+            ValueRef = llevm:'LLVMBuildPtrToInt'(Builder, PtrRef, ?WORD_TYPE,
+              ""),
+            SymTab1 = symtab_insert({closure, Closure}, ValueRef, SymTab),
+            Relocs1 = relocs_store(ClosureName, {closure, Closure}, Relocs),
+            {ValueRef, SymTab1, Relocs1};
+          ValueRef ->
+            {ValueRef, SymTab, Relocs}
+        end;
+      type ->
+        exit({?MODULE, trans_load_address, {"Type not implemented in
+              load_address", RtlAddr}})
+    end,
+  SymTab3 = store_opnd(AddrRef, RtlDst, Builder, SymTab2),
+  {SymTab3, Relocs2}.
+
+
+%%
+%% load_atom
+%%
+trans_load_atom(I, Builder, SymTab, Relocs) ->
+  Atom = hipe_rtl:load_atom_atom(I),
+  {ValueRef , SymTab1} = trans_atom(Builder, Atom, SymTab),
+  Dst = hipe_rtl:load_atom_dst(I),
+  SymTab2 = store_opnd(ValueRef, Dst, Builder, SymTab1),
+  AtomName = mkAtomName(Atom),
+  Relocs1 = relocs_store(AtomName, {atom, Atom}, Relocs),
+  {SymTab2, Relocs1}.
+
+
+trans_atom(Builder, Atom, SymTab) ->
+  case symtab_fetch({atom, Atom}, SymTab) of
+    undefined ->
+      %% Declare a global constant and convert the pointer to integer
+      ModRef = symtab_fetch(modRef, SymTab),
+      AtomName = mkAtomName(Atom),
+      PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, AtomName),
+      llevm:'LLVMSetGlobalConstant'(PtrRef, true),
+      ValueRef = llevm:'LLVMBuildPtrToInt'(Builder, PtrRef, ?WORD_TYPE, ""),
+      SymTab1 = symtab_insert({atom, Atom}, ValueRef, SymTab),
+      {ValueRef, SymTab1};
+    ValueRef ->
+      {ValueRef, SymTab}
+  end.
+
+%%
+%% move
+%%
+trans_move(I, Builder, SymTab) ->
+  RtlSrc = hipe_rtl:move_src(I),
+  RtlDst = hipe_rtl:move_dst(I),
+  {ValueRef, SymTab1} = load_opnd(RtlSrc, Builder, SymTab),
+  store_opnd(ValueRef, RtlDst, Builder, SymTab1).
+
+
+%%
+%% return
+%%
+trans_return(I, Builder, SymTab) ->
+  RetList = hipe_rtl:return_varlist(I),
+  {RetListRef, _} = lists:unzip([load_opnd(X, Builder, SymTab) || X<-RetList]),
+  RetListRef1 = list_to_tuple(RetListRef),
+  llevm:'LLVMBuildAggregateRet'(Builder, RetListRef1, length(RetList)).
+
+%%
+%% store
+%%
+trans_store(I, Builder, SymTab) ->
+  {BaseRef, SymTab1} = load_opnd(hipe_rtl:store_base(I), Builder, SymTab),
+  {OffsetRef, SymTab2} = load_opnd(hipe_rtl:store_offset(I), Builder, SymTab1),
+  {SrcRef, SymTab2} = load_opnd(hipe_rtl:store_src(I), Builder, SymTab2),
+  ValueRef = llevm:'LLVMBuildAdd'(Builder, BaseRef, OffsetRef, "tempAdd"),
+  case hipe_rtl:store_size(I) of
+    word ->
+      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, ?WORD_TYPE_P, "pointerTmp"),
+      llevm:'LLVMBuildStore'(Builder, SrcRef, PtrRef);
+    Size ->
+      %% XXX: Is always trunc correct ?
+      LoadType = type_from_size(Size),
+      LoadTypePointer = llevm:'LLVMPointerType'(LoadType, 0),
+      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, LoadTypePointer, "pointerTmp"),
+      SrcRef2 = llevm:'LLVMBuildTrunc'(Builder, SrcRef, LoadType, "truncTmp"),
+      llevm:'LLVMBuildStore'(Builder, SrcRef2, PtrRef)
+  end,
+  SymTab2.
+
+
+
+
 %%%%
 %%%% fconv
 %%%%
@@ -687,172 +791,6 @@ trans_enter(I, Builder, SymTab, Relocs) ->
 %%  I6 = hipe_llvm:mk_store(?FLOAT_TYPE, Value, ?FLOAT_TYPE_P, T3, [], [],
 %%                          false),
 %%  {[I6, I5, I4, I3, I2, I1, I0], Relocs}.
-%%
-%%
-%% goto
-%%
-trans_goto(I, BuilderRef, SymTab) ->
-  Label = hipe_rtl:goto_label(I),
-  case symtab_fetch(Label, SymTab) of
-    undefined ->
-      FunRef = symtab_fetch_fun(SymTab),
-      BBRef = llevm:'LLVMAppendBasicBlock'(FunRef, mkLabelName(Label)),
-      SymTab1 = symtab_insert(Label, BBRef, SymTab),
-      llevm:'LLVMBuildBr'(BuilderRef, BBRef),
-      SymTab1;
-    BBRef ->
-      llevm:'LLVMBuildBr'(BuilderRef, BBRef),
-      SymTab
-  end.
-
-%%
-%% label
-%%
-trans_label(I, BuilderRef, SymTab) ->
- Label  = hipe_rtl:label_name(I),
- case symtab_fetch({label, Label}, SymTab) of
-   undefined ->
-    FunRef = symtab_fetch_fun(SymTab),
-    BBRef = llevm:'LLVMAppendBasicBlock'(FunRef, mkLabelName(Label)),
-    SymTab1 = symtab_insert({label, Label}, BBRef, SymTab),
-    llevm:'LLVMPositionBuilderAtEnd'(BuilderRef, BBRef),
-    symtab_insert(bbRef, BBRef, SymTab1);
-  BBRef ->
-    llevm:'LLVMPositionBuilderAtEnd'(BuilderRef, BBRef),
-    SymTab
-  end.
-
-%%
-%% load
-%%
-trans_load(I, Builder, SymTab) ->
-  RtlDst = hipe_rtl:load_dst(I),
-  {SrcRef, SymTab1} = load_opnd(hipe_rtl:load_src(I), Builder, SymTab),
-  {OffsetRef, SymTab2} = load_opnd(hipe_rtl:load_offset(I), Builder, SymTab1),
-  ValueRef = llevm:'LLVMBuildAdd'(Builder, SrcRef, OffsetRef, "tempAdd"),
-  LoadedRef =
-  case hipe_rtl:load_size(I) of
-    word ->
-      PtrRef = llevm:'LLVMBuildPtrToInt'(Builder, ValueRef, ?WORD_TYPE, "pointerTmp"),
-      llevm:'LLVMBuildLoad'(Builder, PtrRef, "tempLoad");
-    Size ->
-      LoadType = type_from_size(Size),
-      LoadTypeP = llevm:'LLVMPointerType'(LoadType, 0),
-      PtrRef = llevm:'LLVMBuildPtrToInt'(Builder, ValueRef, LoadTypeP, "pointerTmp"),
-      LoadedRef_ = llevm:'LLVMBuildLoad'(Builder, PtrRef, "tempLoad"),
-      case hipe_rtl:load_sign(I) of
-        signed -> llevm:'LLVMBuildSext'(Builder, LoadedRef_, ?WORD_TYPE,
-            "convTemp");
-        unsigned -> llevm:'LLVMBuildZext'(Builder, LoadedRef_, ?WORD_TYPE,
-            "convTemp")
-      end
-  end,
-  store_opnd(LoadedRef, RtlDst, Builder, SymTab2).
-
-%%
-%% load_address
-%%
-trans_load_address(I, Builder, SymTab, Relocs) ->
- RtlDst = hipe_rtl:load_address_dst(I),
- RtlAddr = hipe_rtl:load_address_addr(I),
- {AddrRef, SymTab2, Relocs2} =
-    case hipe_rtl:load_address_type(I) of
-      constant ->
-        {ValueRef, SymTab1} = load_opnd(RtlAddr, Builder, SymTab),
-        {ValueRef, SymTab1, Relocs};
-      closure  ->
-        Closure = RtlAddr,
-        case symtab_fetch({closure, Closure}, SymTab) of
-          undefined ->
-            %% Declare a global constant and convert the pointer to integer
-            ModRef = symtab_fetch(modRef, SymTab),
-            ClosureName = mkClosureName(Closure),
-            PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, ClosureName),
-            llevm:'LLVMSetGlobalConstant'(PtrRef, true),
-            ValueRef = llevm:'LLVMConstPtrToInt'(PtrRef, ?WORD_TYPE),
-            SymTab1 = symtab_insert({closure, Closure}, ValueRef, SymTab),
-            Relocs1 = relocs_store(ClosureName, {closure, Closure}, Relocs),
-            {ValueRef, SymTab1, Relocs1};
-          ValueRef ->
-            {ValueRef, SymTab, Relocs}
-        end;
-      type ->
-        exit({?MODULE, trans_load_address, {"Type not implemented in
-              load_address", RtlAddr}})
-    end,
-  SymTab3 = store_opnd(AddrRef, RtlDst, Builder, SymTab2),
-  {SymTab3, Relocs2}.
-
-
-%%
-%% load_atom
-%%
-trans_load_atom(I, Builder, SymTab, Relocs) ->
-  Atom = hipe_rtl:load_atom_atom(I),
-  {ValueRef , SymTab1} = trans_atom(Atom, SymTab),
-  Dst = hipe_rtl:load_atom_dst(I),
-  SymTab2 = store_opnd(ValueRef, Dst, Builder, SymTab1),
-  AtomName = mkAtomName(Atom),
-  Relocs1 = relocs_store(AtomName, {atom, Atom}, Relocs),
-  {SymTab2, Relocs1}.
-
-
-trans_atom(Atom, SymTab) ->
-  case symtab_fetch({atom, Atom}, SymTab) of
-    undefined ->
-      %% Declare a global constant and convert the pointer to integer
-      ModRef = symtab_fetch(modRef, SymTab),
-      AtomName = mkAtomName(Atom),
-      PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, AtomName),
-      llevm:'LLVMSetGlobalConstant'(PtrRef, true),
-      ValueRef = llevm:'LLVMConstPtrToInt'(PtrRef, ?WORD_TYPE),
-      SymTab1 = symtab_insert({atom, Atom}, ValueRef, SymTab),
-      {ValueRef, SymTab1};
-    ValueRef ->
-      {ValueRef, SymTab}
-  end.
-
-%%
-%% move
-%%
-trans_move(I, Builder, SymTab) ->
-  RtlSrc = hipe_rtl:move_src(I),
-  RtlDst = hipe_rtl:move_dst(I),
-  {ValueRef, SymTab1} = load_opnd(RtlSrc, Builder, SymTab),
-  store_opnd(ValueRef, RtlDst, Builder, SymTab1).
-
-
-%%
-%% return
-%%
-trans_return(I, Builder, SymTab) ->
-  RetList = hipe_rtl:return_varlist(I),
-  RetListVR= [load_opnd(X, Builder, SymTab) || X<-RetList],
-  {RetListValueRef, _}= lists:unzip(RetListVR),
-  RetListValueRef1 = list_to_tuple(RetListValueRef),
-  llevm:'LLVMBuildAggregateRet'(Builder, RetListValueRef1, length(RetList)).
-
-%%
-%% store
-%%
-trans_store(I, Builder, SymTab) ->
-  {BaseRef, SymTab1} = load_opnd(hipe_rtl:store_base(I), Builder, SymTab),
-  {OffsetRef, SymTab2} = load_opnd(hipe_rtl:store_offset(I), Builder, SymTab1),
-  {SrcRef, SymTab2} = load_opnd(hipe_rtl:store_src(I), Builder, SymTab2),
-  ValueRef = llevm:'LLVMBuildAdd'(Builder, BaseRef, OffsetRef, "tempAdd"),
-  case hipe_rtl:store_size(I) of
-    word ->
-      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, ?WORD_TYPE_P, "pointerTmp"),
-      llevm:'LLVMBuildStore'(Builder, SrcRef, PtrRef);
-    Size ->
-      %% XXX: Is always trunc correct ?
-      LoadType = type_from_size(Size),
-      LoadTypePointer = llevm:'LLVMPointerType'(LoadType, 0),
-      PtrRef = llevm:'LLVMBuildIntToPtr'(Builder, ValueRef, LoadTypePointer, "pointerTmp"),
-      SrcRef2 = llevm:'LLVMBuildTrunc'(Builder, SrcRef, LoadType, "truncTmp"),
-      llevm:'LLVMBuildStore'(Builder, SrcRef2, PtrRef)
-  end,
-  SymTab2.
 
 
 %%%%
@@ -890,6 +828,7 @@ trans_store(I, Builder, SymTab) ->
 %%                                    SortOrder}, JTabLab}, Relocs),
 %%  {[I4, I3, I2, I1], Relocs2, NewData}.
 %%
+
 %%%%------------------------------------------------------------------------------
 %%%% @doc Pass on RTL code in order to fix invoke and closure calls.
 %%%% @end
@@ -899,7 +838,6 @@ fix_code(Code, Params) ->
 
 change_calls_signature(Code, Params) ->
   Precoloured = find_precoloured_registers(),
-  erlang:display(Precoloured),
   Params1 = Precoloured++Params,
   Code1 = [do_change_call_signature(I, Precoloured) || I <- Code],
   {Code1, Params1}.
@@ -914,7 +852,7 @@ do_change_call_signature(I, Precoloured) ->
     #enter{} ->
       ArgList = hipe_rtl:enter_arglist(I),
       I1 = hipe_rtl:enter_arglist_update(I, Precoloured++ArgList),
-      hipe_rtl:enter_dstlist_update(I1, Precoloured);
+      hipe_rtl:enter_dstlist_update(I1, [foo]++Precoloured);
     #return{} ->
       RetList = hipe_rtl:return_varlist(I),
       hipe_rtl:return_varlist_update(I, Precoloured++RetList);
@@ -1087,12 +1025,7 @@ mkFRegName(N) ->
 %%%%----------------------------------------------------------------------------
 %%%%------------------- Translation of Operands ---------------------------------
 %%%%----------------------------------------------------------------------------
-%%store_stack_dst(TempDst, Dst) ->
-%%  {Dst2, II1} = trans_dst(Dst),
-%%  II2 = hipe_llvm:mk_store(?WORD_TYPE, TempDst, ?WORD_TYPE_P, Dst2, [], [],
-%%                           false),
-%%  [II2, II1].
-%%
+
 %%store_float_stack(TempDst, Dst) ->
 %%  {Dst2, II1} = trans_dst(Dst),
 %%  II2 = hipe_llvm:mk_store(?FLOAT_TYPE, TempDst, ?FLOAT_TYPE_P, Dst2, [], [],
@@ -1116,66 +1049,97 @@ mkFRegName(N) ->
 %%    false -> trans_src(Src)
 %%  end.
 %%
+load_label(Label, SymTab) ->
+  case symtab_fetch({label, Label}, SymTab) of
+    undefined ->
+      ?debug_msg("Creating new block ~w~n",[Label]),
+      FunRef = symtab_fetch_fun(SymTab),
+      BBRef = llevm:'LLVMAppendBasicBlock'(FunRef, mkLabelName(Label)),
+      SymTab1 = symtab_insert({label, Label}, BBRef, SymTab),
+      {BBRef, SymTab1};
+    BBRef ->
+      {BBRef, SymTab}
+  end.
 
-%%% XXX: Make it shorter
+
+load_call(Name, RetType, ArgsType, ArgsNr, CC, SymTab) ->
+  case symtab_fetch({call, Name}, SymTab) of
+    undefined ->
+      ModRef = symtab_fetch_mod(SymTab),
+      FunTypeRef = llevm:'LLVMFunctionType'(RetType, ArgsType, ArgsNr, false),
+      FunRef = llevm:'LLVMAddFunction'(ModRef, Name, FunTypeRef),
+      case CC of
+        [] -> ok;
+        cc11 -> llevm:'LLVMSetFunctionCallConv'(FunRef, 11)
+      end,
+      SymTab1 = symtab_insert({call, Name}, FunRef, SymTab),
+      {FunRef, SymTab1};
+    FunRef ->
+      {FunRef, SymTab}
+  end.
+
 store_opnd(ValueRef, Ptr, Builder, SymTab) ->
   case hipe_rtl:is_var(Ptr) of
-    true ->
-      Var = hipe_rtl:var_index(Ptr),
-      case symtab_fetch({var, Var}, SymTab) of
-        undefined ->
-          %% Createa an alloca at the Entry block
-          CurrentBBRef = symtab_fetch_bb(SymTab),
-          FunRef = symtab_fetch_fun(SymTab),
-          EntryBBRef = llevm:'LLVMGetFirstBasicBlock'(FunRef),
-          llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
-          VarName = mkVarName(Var),
-          PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, VarName),
-          SymTab1 = symtab_insert({var, Var}, PtrRef, SymTab),
-          llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
-          %% Store the value
-          llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
-          SymTab1;
-        PtrRef ->
-          llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
-          SymTab
-      end;
+    true -> store_var(ValueRef, Ptr, Builder, SymTab);
     false ->
       case hipe_rtl:is_reg(Ptr) of
         true ->
           case isPrecoloured(Ptr) of
-            true ->
-              store_register(ValueRef, Ptr, Builder, SymTab);
             false ->
+              store_register(ValueRef, Ptr, Builder, SymTab);
+            true ->
               store_precoloured_register(ValueRef, Ptr, Builder, SymTab)
           end;
         false ->
-          case hipe_rtl:is_freg(Ptr) of
-              true ->
-                FReg = hipe_rtl:freg_index(Ptr),
-                case symtab_fetch({freg, FReg}, SymTab) of
-                  undefined ->
-                    %% Createa an alloca at the Entry block
-                    CurrentBBRef = symtab_fetch_bb(SymTab),
-                    FunRef = symtab_fetch_fun(SymTab),
-                    EntryBBRef = llevm:'LLVMGetFirstBasicBlock'(FunRef),
-                    llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
-                    FRegName = mkFRegName(FReg),
-                    PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, FRegName),
-                    SymTab1 = symtab_insert({freg, FReg}, PtrRef, SymTab),
-                    llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
-                    %% Store the value
-                    llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
-                    SymTab1;
-                  PtrRef ->
-                    llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
-                    SymTab
-                end;
-              false ->
-                exit({?MODULE, store_opnd, {"bad RTL arg",Ptr}})
-            end
-        end
-    end.
+          case hipe_rtl:is_fpreg(Ptr) of
+            true -> store_freg(ValueRef, Ptr, Builder, SymTab);
+            false ->
+              exit({?MODULE, store_opnd, {"bad RTL arg",Ptr}})
+          end
+      end
+  end.
+
+store_var(ValueRef, Ptr, Builder, SymTab) ->
+  Var = hipe_rtl:var_index(Ptr),
+  case symtab_fetch({var, Var}, SymTab) of
+    undefined ->
+      %% Createa an alloca at the Entry block
+      CurrentBBRef = symtab_fetch_bb(SymTab),
+      FunRef = symtab_fetch_fun(SymTab),
+      EntryBBRef = llevm:'LLVMGetEntryBasicBlock'(FunRef),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
+      VarName = mkVarName(Var),
+      PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, VarName),
+      SymTab1 = symtab_insert({var, Var}, PtrRef, SymTab),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
+      %% Store the value
+      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
+      SymTab1;
+    PtrRef ->
+      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
+      SymTab
+  end.
+
+store_freg(ValueRef, Ptr, Builder, SymTab) ->
+  FReg = hipe_rtl:fpreg_index(Ptr),
+  case symtab_fetch({fpreg, FReg}, SymTab) of
+    undefined ->
+      %% Createa an alloca at the Entry block
+      CurrentBBRef = symtab_fetch_bb(SymTab),
+      FunRef = symtab_fetch_fun(SymTab),
+      EntryBBRef = llevm:'LLVMGetEntryBasicBlock'(FunRef),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
+      FRegName = mkFRegName(FReg),
+      PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, FRegName),
+      SymTab1 = symtab_insert({fpreg, FReg}, PtrRef, SymTab),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
+      %% Store the value
+      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
+      SymTab1;
+    PtrRef ->
+      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
+      SymTab
+  end.
 
 store_register(ValueRef, Ptr, Builder, SymTab) ->
   Reg = hipe_rtl:reg_index(Ptr),
@@ -1184,7 +1148,7 @@ store_register(ValueRef, Ptr, Builder, SymTab) ->
       %% Createa an alloca at the Entry block
       CurrentBBRef = symtab_fetch_bb(SymTab),
       FunRef = symtab_fetch_fun(SymTab),
-      EntryBBRef = llevm:'LLVMGetFirstBasicBlock'(FunRef),
+      EntryBBRef = llevm:'LLVMGetEntryBasicBlock'(FunRef),
       llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
       RegName = mkRegName(Reg),
       PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?WORD_TYPE, RegName),
@@ -1204,56 +1168,26 @@ store_precoloured_register(ValueRef, Ptr, Builder, SymTab) ->
     false ->
       store_register(ValueRef, Ptr, Builder, SymTab);
     Offset ->
-      BaseReg = ?ARCH_REGISTERS:proc_pointer(),
-      RegName = ?ARCH_REGISTERS:reg_name(Reg),
+      BaseReg = hipe_rtl:mk_reg(?ARCH_REGISTERS:proc_pointer()),
+      %%RegName = ?ARCH_REGISTERS:reg_name(Reg),
       {PtrRef, SymTab1} = load_register(BaseReg, Builder, SymTab),
-      PtrRef1 = llevm:'LLVMConstIntToPtr'(PtrRef, ?WORD_TYPE_P),
-      %%% XXX: ERROR
-      %PtrRef2 = llevm:'LLVMBuildGEP'(Builder, PtrRef1, {Offset div (?WORD_WIDTH div 8)},
-                                    % 1, RegName),
-      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef1),
+      PtrRef1 = llevm:'LLVMBuildIntToPtr'(Builder, PtrRef, ?WORD_TYPE_P, ""),
+      OffsetConst = llevm:'LLVMConstInt'(?WORD_TYPE, Offset div (?WORD_WIDTH
+            div 8), true),
+      PtrRef2 = llevm:'LLVMBuildGEP'(Builder, PtrRef1, {OffsetConst},1,""),
+      llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef2),
       SymTab1
   end.
 
-
-%%% XXX: Make it smaller
 load_opnd(Ptr, Builder, SymTab) ->
   case hipe_rtl:is_imm(Ptr) of
-    true ->
-      %% Just create the constant
-      Value = hipe_rtl:imm_value(Ptr),
-      ValueRef = llevm:'LLVMConstInt'(?WORD_TYPE, Value, true),
-      {ValueRef, SymTab};
+    true -> load_imm(Ptr, SymTab);
     false ->
       case hipe_rtl:is_const_label(Ptr) of
-        true ->
-          ConstLabel = hipe_rtl:const_label_label(Ptr),
-          case symtab_fetch({const_label, ConstLabel}, SymTab) of
-            undefined ->
-              %% Declare a global constant and convert the pointer to integer
-              ModRef = symtab_fetch(modRef, SymTab),
-              CLName = mkConstLabelName(ConstLabel),
-              PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, CLName),
-              llevm:'LLVMSetGlobalConstant'(PtrRef, true),
-              ValueRef = llevm:'LLVMConstPtrToInt'(PtrRef, ?WORD_TYPE),
-              SymTab1 = symtab_insert({const_label, ConstLabel}, ValueRef, SymTab),
-              {ValueRef, SymTab1};
-            ValueRef ->
-              {ValueRef, SymTab}
-          end;
+        true -> load_const_label(Ptr, SymTab);
         false ->
           case hipe_rtl:is_var(Ptr) of
-            true ->
-              Var = hipe_rtl:var_index(Ptr),
-              case symtab_fetch({var, Var}, SymTab) of
-                undefined ->
-                  erlang:display(error_uninitialized_var);
-                ValueRef ->
-                  %% Load the variable
-                  VarName = mkVarName(Var),
-                  ValueRef1 = llevm:'LLVMBuildLoad'(Builder, ValueRef, VarName),
-                  {ValueRef1, SymTab}
-              end;
+            true -> load_var(Ptr, Builder, SymTab);
             false ->
               case hipe_rtl:is_reg(Ptr) of
                 true ->
@@ -1264,18 +1198,8 @@ load_opnd(Ptr, Builder, SymTab) ->
                       load_register(Ptr, Builder, SymTab)
                   end;
                 false ->
-                  case hipe_rtl:is_freg(Ptr) of
-                    true ->
-                      FReg = hipe_rtl:freg_index(Ptr),
-                      case symtab_fetch({freg, FReg}, SymTab) of
-                        undefined ->
-                          erlang:display(error_uninitialized_var);
-                        PtrRef ->
-                          %% Load the variable
-                          FRegName = mkFRegName(FReg),
-                          ValueRef = llevm:'LLVMBuildLoad'(Builder, PtrRef, FRegName),
-                          {ValueRef, SymTab}
-                      end;
+                  case hipe_rtl:is_fpreg(Ptr) of
+                    true -> load_freg(Ptr, Builder, SymTab);
                     false ->
                       exit({?MODULE, trans_dst, {"bad RTL arg",Ptr}})
                   end
@@ -1283,6 +1207,42 @@ load_opnd(Ptr, Builder, SymTab) ->
           end
       end
   end.
+
+
+load_imm(Ptr, SymTab) ->
+  %% Just create the constant
+  Value = hipe_rtl:imm_value(Ptr),
+  ValueRef = llevm:'LLVMConstInt'(?WORD_TYPE, Value, true),
+  {ValueRef, SymTab}.
+
+load_const_label(Ptr, SymTab) ->
+  ConstLabel = hipe_rtl:const_label_label(Ptr),
+  case symtab_fetch({const_label, ConstLabel}, SymTab) of
+    undefined ->
+      %% Declare a global constant and convert the pointer to integer
+      ModRef = symtab_fetch(modRef, SymTab),
+      CLName = mkConstLabelName(ConstLabel),
+      PtrRef = llevm:'LLVMAddGlobal'(ModRef, ?BYTE_TYPE, CLName),
+      llevm:'LLVMSetGlobalConstant'(PtrRef, true),
+      ValueRef = llevm:'LLVMConstPtrToInt'(PtrRef, ?WORD_TYPE),
+      SymTab1 = symtab_insert({const_label, ConstLabel}, ValueRef, SymTab),
+      {ValueRef, SymTab1};
+    ValueRef ->
+      {ValueRef, SymTab}
+  end.
+
+load_var(Ptr, Builder, SymTab) ->
+  Var = hipe_rtl:var_index(Ptr),
+  case symtab_fetch({var, Var}, SymTab) of
+    undefined ->
+      erlang:display(error_uninitialized_var);
+    ValueRef ->
+      %% Load the variable
+      VarName = mkVarName(Var),
+      ValueRef1 = llevm:'LLVMBuildLoad'(Builder, ValueRef, VarName),
+      {ValueRef1, SymTab}
+  end.
+
 
 load_register(Ptr, Builder, SymTab) ->
     Reg = hipe_rtl:reg_index(Ptr),
@@ -1303,17 +1263,29 @@ load_precoloured_register(Ptr, Builder, SymTab) ->
       load_register(Ptr, Builder, SymTab);
     Offset ->
       BaseReg = hipe_rtl:mk_reg((?ARCH_REGISTERS:proc_pointer())),
-      RegName = ?ARCH_REGISTERS:reg_name(Reg),
+      RegName = mkRegName(Offset),
       {PtrRef, SymTab1} = load_register(BaseReg, Builder, SymTab),
-      PtrRef1 = llevm:'LLVMConstIntToPtr'(PtrRef, ?WORD_TYPE_P),
+      PtrRef1 = llevm:'LLVMBuildIntToPtr'(Builder,PtrRef, ?WORD_TYPE_P,""),
                          %%%XXX: ERROR
-      %PtrRef2 = llevm:'LLVMBuildGEP'(Builder, PtrRef1, {Offset div (?WORD_WIDTH div 8)},
-      %                     "fcalls"),
-      ValueRef = llevm:'LLVMBuildLoad'(Builder, PtrRef1, RegName),
+      OffsetConst = llevm:'LLVMConstInt'(?WORD_TYPE, Offset div (?WORD_WIDTH
+            div 8), true),
+      PtrRef2 = llevm:'LLVMBuildGEP'(Builder, PtrRef1,{OffsetConst},1, ""),
+      ValueRef = llevm:'LLVMBuildLoad'(Builder, PtrRef2, RegName),
       {ValueRef, SymTab1}
   end.
 
-isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
+load_freg(Ptr, Builder, SymTab) ->
+  FReg = hipe_rtl:freg_index(Ptr),
+  case symtab_fetch({fpreg, FReg}, SymTab) of
+    undefined ->
+      erlang:display(error_uninitialized_var);
+    PtrRef ->
+      %% Load the variable
+      FRegName = mkFRegName(FReg),
+      ValueRef = llevm:'LLVMBuildLoad'(Builder, PtrRef, FRegName),
+      {ValueRef, SymTab}
+  end.
+
 
 %%%%------------------------------------------------------------------------------
 %%%% Translation of operators
@@ -1339,30 +1311,39 @@ trans_prim_op(Op) ->
 %%    fchs -> fsub;
 %%    Other -> exit({?MODULE, trans_fp_op, {"Unknown RTL float Operator",Other}})
 %%  end.
-%%
-%%%% Misc
-%%insn_dst(I) ->
-%%  case I of
-%%    #alu{} -> [hipe_rtl:alu_dst(I)];
-%%    #alub{} -> [hipe_rtl:alub_dst(I)];
-%%    #call{} ->
-%%      case hipe_rtl:call_dstlist(I) of
-%%        [] -> [];
-%%        [Dst] -> [Dst]
-%%      end;
-%%    #load{} -> [hipe_rtl:load_dst(I)];
-%%    #load_address{} -> [hipe_rtl:load_address_dst(I)];
-%%    #load_atom{} -> [hipe_rtl:load_atom_dst(I)];
-%%    #move{} -> [hipe_rtl:move_dst(I)];
-%%    #phi{} -> [hipe_rtl:phi_dst(I)];
-%%    #fconv{} -> [hipe_rtl:fconv_dst(I)];
-%%    #fload{} -> [hipe_rtl:fload_dst(I)];
-%%    #fmove{} -> [hipe_rtl:fmove_dst(I)];
-%%    #fp{} -> [hipe_rtl:fp_dst(I)];
-%%    #fp_unop{} -> [hipe_rtl:fp_unop_dst(I)];
-%%   _ -> []
-%%end.
-%%
+
+
+trans_rel_op(Op) ->
+  case Op of
+    eq -> ?LLVMIntEQ;
+    ne -> ?LLVMIntNE;
+    gtu -> ?LLVMIntUGT;
+    geu -> ?LLVMIntUGE;
+    ltu -> ?LLVMIntULT;
+    leu -> ?LLVMIntULE;
+    gt -> ?LLVMIntSGT;
+    ge -> ?LLVMIntSGE;
+    lt -> ?LLVMIntSLT;
+    le -> ?LLVMIntSLE
+  end.
+
+trans_alub_op(I, Sign) ->
+  Op =
+    case hipe_rtl:alub_op(I) of
+      add -> "llvm.sadd.with.overflow.";
+      mul -> "llvm.smul.with.overflow.";
+      sub -> "llvm.ssub.with.overflow.";
+      Other ->
+        exit({?MODULE, trans_alub_op, {"Unknown alub operator", Other}})
+    end,
+  S =
+    case Sign of
+      signed -> "s";
+      unsigned -> "u"
+    end,
+  Type = integer_to_list(?WORD_WIDTH),
+  lists:concat(["llvm.", S, Op, ".with.overflow.", Type]).
+
 type_from_size(Size) ->
  case Size of
    byte -> llevm:'LLVMInt1Type'();
@@ -1517,6 +1498,13 @@ type_from_size(Size) ->
 %%
 %% Misc Functions
 %%
+reverse_stack_args(ArgList) ->
+  case erlang:length(ArgList) > ?NR_PINNED_REGS + ?NR_ARG_REGS of
+    false -> ArgList;
+    true ->
+      {RegisterArgs, StackArgs} = lists:split(?NR_PINNED_REGS+?NR_ARG_REGS, ArgList),
+      RegisterArgs ++ lists:reverse(StackArgs)
+  end.
 
 symtab_init() -> dict:new().
 
@@ -1557,3 +1545,16 @@ dict_fetch(Key, dict) ->
   catch
     _:_ -> undefined
   end.
+
+find_first_label([]) ->
+  exit({?MODULE, find_first_label, "Empty Code"});
+find_first_label(Code) ->
+  case I=hd(Code) of
+    #label{} ->
+      hipe_rtl:label_name(I);
+    _ ->
+      exit({?MODULE, find_first_label, "First instruction is not a
+                                        label"})
+  end.
+
+isPrecoloured(X) -> hipe_rtl_arch:is_precoloured(X).
