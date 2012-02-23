@@ -414,18 +414,19 @@ create_new_fail_block(NewFailLabel, FailLabel, ArgList, RetList, Builder, SymTab
                                        PersFunction, 0, ""),
   llevm:'LLVMSetCleanup'(LandPad, true),
   %% Stack Pointer Adjustment
-  %% XXX: Seg fault from inlineasm...
-%%  SpAdj = find_sp_adj(ArgList),
-%%  case SpAdj>0 of
-%%    true ->
-%%      io:format("Mpam~n"),
-%%      StackPointer = ?ARCH_REGISTERS:reg_name(?ARCH_REGISTERS:sp()),
-%%      AsmString = "sub $0, " ++ StackPointer,
-%%      Constraints = "\"r\"(i" ++integer_to_list(?WORD_WIDTH)++","++integer_to_list(SpAdj)++")",
-%%      llevm:'LLVMConstInlineAsm'(llevm:'LLVMVoidType'(), AsmString, Constraints,
-%%                                 true, false);
-%%    false -> ok
-%%  end,
+  SpAdj = find_sp_adj(ArgList),
+  case SpAdj>0 of
+    true ->
+      AsmFunType = llevm:'LLVMFunctionType'(llevm:'LLVMVoidType'(),
+                                            {?WORD_TYPE}, 1, false),
+      StackPointer = ?ARCH_REGISTERS:reg_name(?ARCH_REGISTERS:sp()),
+      AsmString = "sub $0, " ++ StackPointer,
+      AsmFun = llevm:'LLVMConstInlineAsm'(AsmFunType, AsmString, "r",
+                                 true, false),
+      ConstSpAdj = llevm:'LLVMConstInt'(?WORD_TYPE, 1, false),
+      llevm:'LLVMBuildCall'(Builder, AsmFun, {ConstSpAdj}, 1, "");
+    false -> ok
+  end,
   %% hipe_bifs:llvm_fix_pinned_regs()
   {BifRetList, _} = lists:split(?NR_PINNED_REGS, RetList),
   {BifFunction, SymTab3} = create_bif_pinned_regs(SymTab2, BifRetList),
