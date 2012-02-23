@@ -48,7 +48,7 @@ translate(RTL, Roots) ->
   %% Append Precoloured registers to Calls params and return values
   {Code1, Params1} = pin_precoloured_regs(Code, Params),
   {ModName, FunName_, _Arity} = fix_mfa_name(Fun),
-  ?debug_rtl(Code1, FunName_),
+  ?debug_rtl(RTL, FunName_),
   %% Init unique symbol generator and initialize the label counter to the last
   %% RTL label.
   hipe_gensym:init(llvm),
@@ -769,23 +769,29 @@ trans_fp(I, Builder, SymTab) ->
        Other -> exit({?MODULE, trans_alu, {"Unknown RTL Operator", Other}})
      end,
   SymTab3 = store_float(ValueRef, RtlDst, Builder, SymTab2),
-  %% Synchronization Point
-  %CurrentBBRef = symtab_fetch_bb(SymTab),
-  %Function = symtab_fetch_fun(SymTab),
-  %EntryBBRef = llevm:'LLVMGetEntryBasicBlock'(Function),
-  %llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
-  %PtrRef = llevm:'LLVMBuildAlloca'(Builder, ?FLOAT_TYPE, "exception_sync"),
-  %%% XXX: No volatile?
-  %llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
-  %llevm:'LLVMBuildLoad'(Builder, ValueRef, ""),
-  %llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
-  SymTab3.
+  %% Synchronization point for floating point exceptions
+  {PtrRef, SymTab5} = case symtab_fetch(float_sync_point, SymTab3) of
+    undefined ->
+      CurrentBBRef = symtab_fetch_bb(SymTab3),
+      Function = symtab_fetch_fun(SymTab3),
+      EntryBBRef = llevm:'LLVMGetEntryBasicBlock'(Function),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, EntryBBRef),
+      PtrRef2 = llevm:'LLVMBuildAlloca'(Builder, ?FLOAT_TYPE,
+                                       "float_sync_point"),
+      SymTab4 = symtab_insert(float_sync, PtrRef2, SymTab3),
+      llevm:'LLVMPositionBuilderAtEnd'(Builder, CurrentBBRef),
+      {PtrRef2, SymTab4};
+    PtrRef2 -> {PtrRef2, SymTab3}
+  end,
+  llevm:'LLVMBuildVolatileStore'(Builder, ValueRef, PtrRef, true),
+  llevm:'LLVMBuildVolatileLoad'(Builder, PtrRef, "", true),
+  SymTab5.
 
 %%
 %% fp_unop
 %%
 trans_fp_unop(I, Builder, SymTab) ->
-  io:format("FP UNOP~~~~n"),
+  io:format("FP UNOP~n"),
   RtlDst = hipe_rtl:fp_unop_dst(I),
   {SrcRef1, SymTab1} = load_float(hipe_rtl:fp_unop_src(I), Builder, SymTab),
   ZeroRef = llevm:'LLVMConstReal'(?FLOAT_TYPE, 0.0),
