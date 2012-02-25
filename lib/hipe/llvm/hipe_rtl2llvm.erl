@@ -784,8 +784,10 @@ trans_fp(I, Builder, SymTab) ->
       {PtrRef2, SymTab4};
     PtrRef2 -> {PtrRef2, SymTab3}
   end,
-  llevm:'LLVMBuildVolatileStore'(Builder, ValueRef, PtrRef, true),
-  llevm:'LLVMBuildVolatileLoad'(Builder, PtrRef, "", true),
+  llevm:'LLVMSetVolatile'(llevm:'LLVMBuildStore'(Builder, ValueRef, PtrRef),
+                          true),
+  llevm:'LLVMSetVolatile'(llevm:'LLVMBuildLoad'(Builder, PtrRef, ""),
+                          true),
   SymTab5.
 
 %%
