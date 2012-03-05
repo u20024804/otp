@@ -13,38 +13,38 @@
 -module(elf_format).
 
 -export([
-	 %% File Header
-	 extract_header/1,
-	 get_header_field/2,
-	 %% Section Header Table
-	 extract_shdrtab/1,
-	 get_shdrtab_entry/2,
-	 get_shdrtab_entry_field/2,
-	 %% Section Header String Table
-	 extract_shstrtab/1,
-	 %% Symbol Table
-	 extract_symtab/1,
-	 get_symtab_entry/2,
-	 get_symtab_entry_field/2,
-	 %% String Table
-	 extract_strtab/1,
-	 get_strtab_entry/2,
-	 %% Relocations
-	 extract_rela/2,
-	 get_rela_entry/2,
-	 get_rela_entry_field/2,
-	 %% Note
-	 extract_note/2,
-	 %% Executable code
-	 extract_text/1,
-	 %% GCC Exception Table
-	 extract_gccexntab/1,
-	 get_gccexntab_field/2,
-	 %% Read-only data
-	 extract_rodata/1,
-	 %% Misc.
-	 is64bit/0
-	]).
+         %% File Header
+         extract_header/1,
+         get_header_field/2,
+         %% Section Header Table
+         extract_shdrtab/1,
+         get_shdrtab_entry/2,
+         get_shdrtab_entry_field/2,
+         %% Section Header String Table
+         extract_shstrtab/1,
+         %% Symbol Table
+         extract_symtab/1,
+         get_symtab_entry/2,
+         get_symtab_entry_field/2,
+         %% String Table
+         extract_strtab/1,
+         get_strtab_entry/2,
+         %% Relocations
+         extract_rela/2,
+         get_rela_entry/2,
+         get_rela_entry_field/2,
+         %% Note
+         extract_note/2,
+         %% Executable code
+         extract_text/1,
+         %% GCC Exception Table
+         extract_gccexntab/1,
+         get_gccexntab_field/2,
+         %% Read-only data
+         extract_rodata/1,
+         %% Misc.
+         is64bit/0
+        ]).
 
 -include("elf_format.hrl").
 -include("elf_datatypes.hrl").
@@ -80,10 +80,10 @@ extract_header(Elf) ->
   %% Export ELF Class to distinguish between ELF32 and ELF64:
   put(elf_class, EI_Class),
   Ident = elf_datatypes:mk_ehdr_ident(EI_Class, EI_Data, EI_Version, EI_Osabi,
-			      EI_Abiversion, EI_Pad, EI_Nident),
+                              EI_Abiversion, EI_Pad, EI_Nident),
   elf_datatypes:mk_ehdr(Ident, Type, Machine, Version, Entry, Phoff, Shoff,
-			Flags, Ehsize, Phentsize, Phnum, Shentsize, Shnum,
-			Shstrndx).
+                        Flags, Ehsize, Phentsize, Phnum, Shentsize, Shnum,
+                        Shstrndx).
 
 %% @doc Extracts information from an ELF File Header. This function takes
 %%      as arguments: a `FileHeader' record and a valid `Field' and returns the
@@ -125,7 +125,7 @@ get_shdrtab_entries(Shdr_bin, Acc) ->
      MoreShdrE/binary
   >> = Shdr_bin,
   ShdrE = elf_datatypes:mk_shdr(Name, Type, Flags, Addr, Offset,
-		      Size, Link, Info, Addralign, Entsize),
+                      Size, Link, Info, Addralign, Entsize),
   get_shdrtab_entries(MoreShdrE, [ShdrE | Acc]).
 
 %% @doc Extracts a specific Entry of a Section Header Table. This function
@@ -157,9 +157,12 @@ extract_shstrtab(Elf) ->
   %% Get actual Section-header String Table
   ShStrOffset = get_shdrtab_entry_field(Shdr, sh_offset),
   ShStrSize   = get_shdrtab_entry_field(Shdr, sh_size),
-  ShStrTab    = get_binary_segment(Elf, {ShStrOffset, ShStrSize}),
-  %% Convert to string table
-  [Name || {Name, _Size} <- get_names(ShStrTab)].
+  case get_binary_segment(Elf, {ShStrOffset, ShStrSize}) of
+    <<>> -> %% Segment empty
+      [];
+    ShStrTab -> %% Convert to string table
+      [Name || {Name, _Size} <- get_names(ShStrTab)]
+  end.
 
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Symbol Table
@@ -179,21 +182,21 @@ get_symtab_entries(Symtab_bin, Acc) ->
   case is64bit() of
     true ->
       << %% Structural patern-matching on fields.
-	 Name:?bits(?ST_NAME_SIZE)/integer-little,
-	 Info:?bits(?ST_INFO_SIZE)/integer-little,
-	 Other:?bits(?ST_OTHER_SIZE)/integer-little,
-	 Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
-	 Value:?bits(?ST_VALUE_SIZE)/integer-little,
-	 Size:?bits(?ST_SIZE_SIZE)/integer-little
+         Name:?bits(?ST_NAME_SIZE)/integer-little,
+         Info:?bits(?ST_INFO_SIZE)/integer-little,
+         Other:?bits(?ST_OTHER_SIZE)/integer-little,
+         Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
+         Value:?bits(?ST_VALUE_SIZE)/integer-little,
+         Size:?bits(?ST_SIZE_SIZE)/integer-little
       >> = SymE_bin;
     false ->
       << %% Same fields in different order:
-	Name:?bits(?ST_NAME_SIZE)/integer-little,
-	Value:?bits(?ST_VALUE_SIZE)/integer-little,
-	Size:?bits(?ST_SIZE_SIZE)/integer-little,
-	Info:?bits(?ST_INFO_SIZE)/integer-little,
-	Other:?bits(?ST_OTHER_SIZE)/integer-little,
-	Shndx:?bits(?ST_SHNDX_SIZE)/integer-little
+        Name:?bits(?ST_NAME_SIZE)/integer-little,
+        Value:?bits(?ST_VALUE_SIZE)/integer-little,
+        Size:?bits(?ST_SIZE_SIZE)/integer-little,
+        Info:?bits(?ST_INFO_SIZE)/integer-little,
+        Other:?bits(?ST_OTHER_SIZE)/integer-little,
+        Shndx:?bits(?ST_SHNDX_SIZE)/integer-little
       >> = SymE_bin
   end,
   SymE = elf_datatypes:mk_sym(Name, Info, Other, Shndx, Value, Size),
@@ -252,22 +255,22 @@ get_rela_entries(<<>>, Acc) ->
   lists:reverse(Acc);
 get_rela_entries(Rela_bin, Acc) ->
   RelaE = case is64bit() of
-	    true ->
-	      <<%% Structural patern-matching on fields of a Rela Entry.
-		Offset:?bits(?R_OFFSET_SIZE)/integer-little,
-		Info:?bits(?R_INFO_SIZE)/integer-little,
-		Addend:?bits(?R_ADDEND_SIZE)/integer-little,
-		MoreRelaE/binary
-	      >> = Rela_bin,
-	      elf_datatypes:mk_rela(Offset, Info, Addend);
-	    false ->
-	      <<%% Structural patern-matching on fields of a Rel Entry.
-		Offset:?bits(?R_OFFSET_SIZE)/integer-little,
-		Info:?bits(?R_INFO_SIZE)/integer-little,
-		MoreRelaE/binary
-	      >> = Rela_bin,
-	      elf_datatypes:mk_rel(Offset, Info)
-	  end,
+            true ->
+              <<%% Structural patern-matching on fields of a Rela Entry.
+                Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+                Info:?bits(?R_INFO_SIZE)/integer-little,
+                Addend:?bits(?R_ADDEND_SIZE)/integer-little,
+                MoreRelaE/binary
+              >> = Rela_bin,
+              elf_datatypes:mk_rela(Offset, Info, Addend);
+            false ->
+              <<%% Structural patern-matching on fields of a Rel Entry.
+                Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+                Info:?bits(?R_INFO_SIZE)/integer-little,
+                MoreRelaE/binary
+              >> = Rela_bin,
+              elf_datatypes:mk_rel(Offset, Info)
+          end,
   get_rela_entries(MoreRelaE, [RelaE | Acc]).
 
 %% @doc Extract the `EntryNum' (serial number) Reloacation Entry.
@@ -328,24 +331,24 @@ extract_gccexntab(Elf) ->
       %% Second byte is the Landing Pad base (if it's encoding is not
       %% DW_EH_PE_omit) (optional).
       {LPBase, LSDACont} =
-	case LBenc == ?DW_EH_PE_omit of
-	  true ->  % No landing pad base byte. (-1 denotes that)
-	    {-1, More};
-	  false -> % Landing pad base.
-	    <<Base:8, More2/binary>> = More,
-	    {Base, More2}
-	end,
+        case LBenc == ?DW_EH_PE_omit of
+          true ->  % No landing pad base byte. (-1 denotes that)
+            {-1, More};
+          false -> % Landing pad base.
+            <<Base:8, More2/binary>> = More,
+            {Base, More2}
+        end,
       %% Next byte of LSDA is the encoding of the Type Table.
       <<TTenc:8, More3/binary>> = LSDACont,
       %% Next byte is the Types Table offset encoded in U-LEB128 (optional).
       {TTOff, LSDACont2} =
-	case TTenc == ?DW_EH_PE_omit of
-	  true ->  % There is no Types Table pointer. (-1 denotes that)
-	    {-1, More3};
-	  false -> % The byte offset from this field to the start of the Types
-		   % Table used for exception matching.
-	    leb128_decode(More3)
-	end,
+        case TTenc == ?DW_EH_PE_omit of
+          true ->  % There is no Types Table pointer. (-1 denotes that)
+            {-1, More3};
+          false -> % The byte offset from this field to the start of the Types
+                   % Table used for exception matching.
+            leb128_decode(More3)
+        end,
       %% Next byte of LSDA is the encoding of the fields in the Call-site Table.
       <<CSenc:8, More4/binary>> = LSDACont2,
       %% Sixth byte is the size (in bytes) of the Call-site Table encoded in
@@ -354,7 +357,7 @@ extract_gccexntab(Elf) ->
       %% Extract all call-site information
       GccCallSites = get_gccexntab_callsites(CSTable, []),
       elf_datatypes:mk_gccexntab(LBenc, LPBase, TTenc, TTOff, CSenc, CSTabSize,
-				 GccCallSites)
+                                 GccCallSites)
   end.
 
 get_gccexntab_callsites(<<>>, Acc) ->
@@ -414,7 +417,7 @@ extract_segment_by_name(Elf, SectionName) ->
   %% Find Section Header Table entry by name
   case lists:keyfind(SectionName, 1, L) of
     {SectionName, ShdrE} -> %% Note: Same name.
-      Off = get_shdrtab_entry_field(ShdrE, sh_offset),
+      Off  = get_shdrtab_entry_field(ShdrE, sh_offset),
       Size = get_shdrtab_entry_field(ShdrE, sh_size),
       get_binary_segment(Elf, {Off, Size});
     false -> %% Not found.
@@ -424,7 +427,9 @@ extract_segment_by_name(Elf, SectionName) ->
 %% @doc Extracts a list of strings with (zero-separated) names from a binary.
 %%      Returns tuples of `{Name, Size}'.
 %%      XXX: Skip trailing 0.
--spec get_names( binary() ) -> [ string() ].
+-spec get_names( binary() ) -> [ {string(), integer()} ].
+get_names(<<>>) ->
+  [];
 get_names(<<0, Bin/binary>>) ->
   NamesSizes = get_names(Bin, []),
   fix_names(NamesSizes, []).
@@ -440,29 +445,31 @@ get_names(Bin, Acc) ->
 %%           ".rel.text". In that way, the Section Header String Table is more
 %%           compact. Add ".text" just *before* the corresponding rela-field,
 %%           etc.
+-spec fix_names( [{string(), integer()}], [{string(), integer()}] )
+               -> [{string(), integer()}].
 fix_names([], Acc) ->
   lists:reverse(Acc);
 fix_names([{Name, Size}=T | Names], Acc) ->
   case is64bit() of
     true ->
       case string:str(Name, ".rela") =:= 1 of
-	true -> %% Name starts with ".rela":
-	  Section = string:substr(Name, 6),
-	  fix_names(Names, [{Section, Size - 5}
-			    | [T | Acc]]); % XXX: Is order ok? (".text"
-						% always before ".rela.text")
-	false -> %% Name does not start with ".rela":
-	  fix_names(Names, [T | Acc])
+        true -> %% Name starts with ".rela":
+          Section = string:substr(Name, 6),
+          fix_names(Names, [{Section, Size - 5}
+                            | [T | Acc]]); % XXX: Is order ok? (".text"
+                                           % always before ".rela.text")
+        false -> %% Name does not start with ".rela":
+          fix_names(Names, [T | Acc])
       end;
     false ->
       case string:str(Name, ".rel") =:= 1 of
-	true -> %% Name starts with ".rel":
-	  Section = string:substr(Name, 5),
-	  fix_names(Names, [{Section, Size - 4}
-			    | [T | Acc]]); % XXX: Is order ok? (".text"
-						% always before ".rela.text")
-	false -> %% Name does not start with ".rel":
-	  fix_names(Names, [T | Acc])
+        true -> %% Name starts with ".rel":
+          Section = string:substr(Name, 5),
+          fix_names(Names, [{Section, Size - 4}
+                            | [T | Acc]]); % XXX: Is order ok? (".text"
+                                           % always before ".rela.text")
+        false -> %% Name does not start with ".rel":
+          fix_names(Names, [T | Acc])
       end
   end.
 
