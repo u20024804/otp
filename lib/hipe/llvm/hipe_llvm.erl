@@ -615,9 +615,9 @@ pp_ins(Dev, I) ->
       write(Dev, "switch "),
       pp_type(Dev, switch_type(I)),
       write(Dev, [" ", switch_value(I), ", label ", switch_default_label(I),
-		  " \n   [\n"]),
+                  " \n   [\n"]),
       pp_switch_value_label_list(Dev, switch_type(I),
-				 switch_value_label_list(I)),
+                                 switch_value_label_list(I)),
       write(Dev, "    ]\n");
     #llvm_invoke{} ->
       write(Dev, [invoke_dst(I), " = invoke ", invoke_cconv(I), " "]),
@@ -628,10 +628,10 @@ pp_ins(Dev, I) ->
       write(Dev, ") "),
       pp_options(Dev, invoke_fn_attrs(I)),
       write(Dev, [" to label ", invoke_to_label(I)," unwind label ",
-		  invoke_unwind_label(I), " \n"]);
+                  invoke_unwind_label(I), " \n"]);
     #llvm_br_cond{} ->
       write(Dev, ["br i1 ", br_cond_cond(I), ", label ", br_cond_true_label(I),
-		  ", label ", br_cond_false_label(I), "\n"]);
+                  ", label ", br_cond_false_label(I), "\n"]);
     #llvm_indirectbr{} ->
       write(Dev, "indirectbr "),
       pp_type(Dev, indirectbr_type(I)),
@@ -872,8 +872,8 @@ pp_type(Dev, Type) ->
       pp_type_list(Dev, struct_type_list(Type)),
       write(Dev, "}");
     #llvm_vector{} ->
-      write(Dev, ["{", integer_to_list(array_size(Type)), " x "]),
-      pp_type(Dev, array_type(Type)),
+      write(Dev, ["{", integer_to_list(vector_size(Type)), " x "]),
+      pp_type(Dev, vector_type(Type)),
       write(Dev, "}")
   end.
 
