@@ -427,7 +427,8 @@ extract_segment_by_name(Elf, SectionName) ->
 %% @doc Extracts a list of strings with (zero-separated) names from a binary.
 %%      Returns tuples of `{Name, Size}'.
 %%      XXX: Skip trailing 0.
--spec get_names(binary()) -> [{string(), non_neg_integer()}].
+-type name_sizes() :: [{string(), non_neg_integer()}].
+-spec get_names(<<_:8,_:_*8>>) -> name_sizes().
 get_names(<<0, Bin/binary>>) ->
   NamesSizes = get_names(Bin, []),
   fix_names(NamesSizes, []).
@@ -443,8 +444,7 @@ get_names(Bin, Acc) ->
 %%           ".rel.text". In that way, the Section Header String Table is more
 %%           compact. Add ".text" just *before* the corresponding rela-field,
 %%           etc.
--spec fix_names([{string(), non_neg_integer()}], [{string(), non_neg_integer()}])
-               -> [{string(), non_neg_integer()}].
+-spec fix_names(name_sizes(), name_sizes()) -> name_sizes().
 fix_names([], Acc) ->
   lists:reverse(Acc);
 fix_names([{Name, Size}=T | Names], Acc) ->
