@@ -49,8 +49,7 @@
 %%=====================================================================
 
 -type comp_icode_ret() :: {'native',hipe_architecture(),{'unprofiled',_}}
-                        | {'llvm_binary', binary()}
-                        | {'rtl',tuple()}.
+			| {'rtl',tuple()} | {'llvm_binary',term()}.
 
 %%=====================================================================
 
@@ -124,10 +123,10 @@ compile_icode(MFA, LinearIcode0, Options, Servers, DebugState) ->
         false ->
           rtl_to_native(MFA, LinearRTL, Options, DebugState);
         true ->
-          %% The LLVM back end returns binary code, unlike the rest HiPE back ends
-          %% which return native assembly
+          %% The LLVM back end returns binary code, unlike the rest of
+          %% the HiPE back ends which return native assembly
           rtl_to_llvm_to_binary(MFA, LinearRTL, Roots, Options, DebugState)
-			end;
+      end;
     true ->
       put(hipe_debug, DebugState),
       {rtl, LinearRTL}
