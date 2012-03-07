@@ -70,13 +70,12 @@ translate(RTL, Roots) ->
 
 find_code_entry_label([]) ->
   exit({?MODULE, find_code_entry_label, "Empty Code"});
-find_code_entry_label(Code) ->
-  case I=hd(Code) of
+find_code_entry_label([I|_]) ->
+  case I of
     #label{} ->
       put(first_label, hipe_rtl:label_name(I));
     _ ->
-      exit({?MODULE, find_code_entry_label, "First instruction is not a
-          label"})
+      exit({?MODULE, find_code_entry_label, "First instruction is not a label"})
   end.
 
 %% @doc Create a stack slot for each virtual register. The stack slots
@@ -230,7 +229,7 @@ trans_alu(I, Relocs) ->
   TmpDst = mk_temp(),
   {Src1, I1} = trans_src(hipe_rtl:alu_src1(I)),
   {Src2, I2} = trans_src(hipe_rtl:alu_src2(I)),
-  Op =  trans_op(hipe_rtl:alu_op(I)),
+  Op = trans_op(hipe_rtl:alu_op(I)),
   I3 = hipe_llvm:mk_operation(TmpDst, Op, ?WORD_TYPE, Src1, Src2, []),
   I4 = store_stack_dst(TmpDst, RtlDst),
   {[I4, I3, I2, I1], Relocs}.
@@ -240,7 +239,7 @@ trans_alu(I, Relocs) ->
 %%
 trans_alub(I, Relocs) ->
   case hipe_rtl:alub_cond(I) of
-    Op  when Op=:= overflow orelse Op =:= not_overflow ->
+    Op when Op=:= overflow orelse Op =:= not_overflow ->
       trans_alub_overflow(I, signed, Relocs);
     ltu -> %% ltu means unsigned overflow
       trans_alub_overflow(I, unsigned, Relocs);
@@ -285,24 +284,21 @@ trans_alub_op(I, Sign) ->
           add -> "llvm.sadd.with.overflow.";
           mul -> "llvm.smul.with.overflow.";
           sub -> "llvm.ssub.with.overflow.";
-          Op ->
-            exit({?MODULE, trans_alub_op, {"Unknown alub operator",Op}})
+          Op  -> exit({?MODULE, trans_alub_op, {"Unknown alub operator", Op}})
         end;
       unsigned ->
         case hipe_rtl:alub_op(I) of
           add -> "llvm.uadd.with.overflow.";
           mul -> "llvm.umul.with.overflow.";
           sub -> "llvm.usub.with.overflow.";
-          Op ->
-            exit({?MODULE, trans_alub_op, {"Unknown alub operator",Op}})
+          Op  -> exit({?MODULE, trans_alub_op, {"Unknown alub operator", Op}})
         end
     end,
   Type =
     case ?WORD_TYPE of
       #llvm_int{width=32} -> "i32";
-      #llvm_int{width=64} -> "i64";
-      Other ->
-          exit({?MODULE, trans_alub_op, {"Unknown type", Other}})
+      #llvm_int{width=64} -> "i64"
+      %% Other -> exit({?MODULE, trans_alub_op, {"Unknown type", Other}})
     end,
     Name++Type.
 
@@ -314,7 +310,7 @@ trans_alub_no_overflow(I, Relocs) ->
   %% A trans_alu instruction cannot change relocations
   {I1, _} = trans_alu(T, Relocs),
   %% icmp
-  %% Translate destination as src, to match with the semantic of instruction
+  %% Translate destination as src, to match with the semantics of instruction
   {Dst, I2} = trans_src(hipe_rtl:alub_dst(I)),
   Cond = trans_rel_op(hipe_rtl:alub_cond(I)),
   T3 = mk_temp(),
@@ -437,7 +433,7 @@ trans_call_name(RtlCallName, Relocs, CallArgs, FinalArgs) ->
                                         ?WORD_TYPE_P),
           TT2 = mk_temp(),
           RetType = ?FUN_RETURN_TYPE,
-          ArgsTypeList = lists:map(fun (_) -> ?WORD_TYPE end, FinalArgs),
+          ArgsTypeList = [?WORD_TYPE || _ <- FinalArgs],
           FunType = hipe_llvm:mk_fun(RetType, ArgsTypeList),
           FunTypeP = hipe_llvm:mk_pointer(FunType),
           II3 = hipe_llvm:mk_conversion(TT2, bitcast, ?WORD_TYPE_P, TT1,
@@ -453,12 +449,13 @@ trans_call_args(ArgList) ->
   {Args, I} = lists:unzip(trans_args(ArgList)),
   %% Reverse arguments that are passed to stack to match with the Erlang
   %% calling convention(Propably not needed in prim calls).
-  ReversedArgs = case erlang:length(Args) > ?NR_ARG_REGS of
-    false ->
-      Args;
-    true ->
-      {ArgsInRegs, ArgsInStack} = lists:split(?NR_ARG_REGS, Args),
-      ArgsInRegs ++ lists:reverse(ArgsInStack)
+  ReversedArgs =
+    case erlang:length(Args) > ?NR_ARG_REGS of
+      false ->
+	Args;
+      true ->
+	{ArgsInRegs, ArgsInStack} = lists:split(?NR_ARG_REGS, Args),
+	ArgsInRegs ++ lists:reverse(ArgsInStack)
   end,
   %% Reverse I, because some of the arguments may go out of scope and should be
   %% killed(store -5). When two or more
@@ -582,13 +579,12 @@ trans_fp_unop(I, Relocs) ->
 %%
 trans_fstore(I, Relocs) ->
   Base = hipe_rtl:fstore_base(I),
-  I1 = case isPrecoloured(Base) of
+  case isPrecoloured(Base) of
     true ->
       trans_fstore_reg(I, Relocs);
     false ->
       exit({?MODULE, trans_fstore ,{"Non Implemened yet", false}})
-  end,
-  I1.
+  end.
 
 trans_fstore_reg(I, Relocs) ->
   {Base, I0}  = trans_reg(hipe_rtl:fstore_base(I), dst),
@@ -714,8 +710,8 @@ trans_return(I, Relocs) ->
   end,
   FixedRegs = fixed_registers(),
   {LoadedFixedRegs, I2} = load_fixed_regs(FixedRegs),
-  FixedRet = lists:map(fun(X) -> {?WORD_TYPE, X} end, LoadedFixedRegs),
-  Ret = lists:append(FixedRet, VarRet),
+  FixedRet = [{?WORD_TYPE, X} || X <- LoadedFixedRegs],
+  Ret = FixedRet ++ VarRet,
   {RetTypes, _RetNames} = lists:unzip(Ret),
   Type = hipe_llvm:mk_struct(RetTypes),
   {RetStruct, I3} = mk_return_struct(Ret, Type),
@@ -750,7 +746,7 @@ trans_store(I, Relocs) ->
       T2 = mk_temp(),
       II1 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1, ?WORD_TYPE_P),
       II2 = hipe_llvm:mk_store(?WORD_TYPE, Value, ?WORD_TYPE_P, T2, [], [],
-                              false),
+			       false),
       [II2, II1];
     Size ->
       %% XXX: Is always trunc correct ?
@@ -773,12 +769,12 @@ trans_switch(I, Relocs, Data) ->
   RtlSrc = hipe_rtl:switch_src(I),
   {Src, I1} = trans_src(RtlSrc),
   Labels = hipe_rtl:switch_labels(I),
-  JumpLabels = lists:map(fun mk_jump_label/1, Labels),
+  JumpLabels = [mk_jump_label(L) || L <- Labels],
   SortOrder = hipe_rtl:switch_sort_order(I),
   NrLabels = length(Labels),
   TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
   TableTypeP = hipe_llvm:mk_pointer(TableType),
-  TypedJumpLabels = lists:map(fun(X) -> {#llvm_label_type{}, X} end, JumpLabels),
+  TypedJumpLabels = [{#llvm_label_type{}, X} || X <- JumpLabels],
   T1 = mk_temp(),
   {Src2, []} = trans_dst(RtlSrc),
   TableName = "table_"++tl(Src2),
@@ -872,10 +868,7 @@ find_sp_adj(ArgList) ->
 
 %% @doc Add landingpad instruction in Fail Blocks
 add_landingpads(LLVM_Code, FailLabels) ->
-  FailLabels2 =
-    lists:map(fun({X,Y,Z}) ->
-          {"L"++integer_to_list(X), "FL"++integer_to_list(Y), Z}
-      end, FailLabels),
+  FailLabels2 = [convert_label(T) || T <- FailLabels],
   add_landingpads(LLVM_Code, FailLabels2, []).
 
 add_landingpads([], _, Acc) ->
@@ -889,6 +882,9 @@ add_landingpads([I|Is], FailLabels, Acc) ->
     _ ->
       add_landingpads(Is, FailLabels, [I|Acc])
   end.
+
+convert_label({X,Y,Z}) ->
+  {"L"++integer_to_list(X), "FL"++integer_to_list(Y), Z}.
 
 %% @doc Create a fail block wich
 create_fail_blocks(_, []) -> [];
@@ -935,11 +931,11 @@ trans_args(ArgList) ->
 
 %% @doc Convert a list of Precoloured registers to LLVM argument list
 fix_reg_args(ArgList) ->
-  lists:map(fun(A) -> {?WORD_TYPE, A} end, ArgList).
+  [{?WORD_TYPE, A} || A <- ArgList].
 
 %% @doc Load Precoloured registers.
 load_fixed_regs(RegList) ->
-  Names = lists:map(fun mk_temp_reg/1, RegList),
+  Names = [mk_temp_reg(R) || R <- RegList],
   Fun1 =
     fun (X,Y) ->
         hipe_llvm:mk_load(X, ?WORD_TYPE_P, "%"++Y++"_reg_var", [],
@@ -951,7 +947,7 @@ load_fixed_regs(RegList) ->
 %% @doc  Store Precoloured registers.
 store_fixed_regs(RegList, Name) ->
   Type = ?FUN_RETURN_TYPE,
-  Names = lists:map(fun mk_temp_reg/1, RegList),
+  Names = [mk_temp_reg(R) || R <- RegList],
   Indexes = lists:seq(0, erlang:length(RegList)-1),
   Fun1 =
     fun(X,Y) ->
@@ -975,11 +971,11 @@ store_fixed_regs(RegList, Name) ->
 make_llvm_id(Name) ->
   case Name of
     "" -> "Empty";
-    Other -> lists:flatten(lists:map(fun llvm_id/1, Other))
+    Other -> lists:flatten([llvm_id(C) || C <- Other])
   end.
 
 %%
-llvm_id(C) when C==46; C>47 andalso C<58; C>64 andalso C<91; C==95;
+llvm_id(C) when C=:=46; C>47 andalso C<58; C>64 andalso C<91; C=:=95;
                 C>96 andalso C<123 -> C;
 llvm_id(C) ->
  io_lib:format("_~2.16.0B_",[C]).
@@ -1359,24 +1355,24 @@ handle_relocations(Relocs, Data, Fun) ->
   {CallList, AtomList, ClosureList, ClosureLabels, SwitchList} =
     seperate_relocs(RelocsList),
   %% Create code to declare atoms
-  AtomDecl = lists:map(fun declare_atom/1, AtomList),
+  AtomDecl = [declare_atom(A) || A <- AtomList],
   %% Create code to create local name for atoms
-  AtomLoad = lists:map(fun load_atom/1, AtomList),
+  AtomLoad = [load_atom(A) || A <- AtomList],
   %% Create code to declare closures
-  ClosureDecl = lists:map(fun declare_closure/1, ClosureList),
+  ClosureDecl = [declare_closure(C) || C <- ClosureList],
   %% Create code to create local name for closures
-  ClosureLoad = lists:map(fun load_closure/1, ClosureList),
+  ClosureLoad = [load_closure(C) || C <- ClosureList],
   %% Find function calls
   IsExternalCall = fun (X) -> is_external_call(X, Fun) end,
   ExternalCallList = lists:filter(IsExternalCall, CallList),
   %% Create code to declare external function
-  FunDecl = fixed_fun_decl()++lists:map(fun call_to_decl/1, ExternalCallList),
+  FunDecl = fixed_fun_decl() ++ [call_to_decl(C) || C <- ExternalCallList],
   %% Extract constant labels from Constant Map (remove duplicates)
   ConstLabels = hipe_consttab:labels(Data),
   %% Create code to declare constants
-  ConstDecl = lists:map(fun declare_constant/1, ConstLabels),
+  ConstDecl = [declare_constant(C) || C <- ConstLabels],
   %% Create code to create local name for constants
-  ConstLoad = lists:map(fun load_constant/1, ConstLabels),
+  ConstLoad = [load_constant(C) || C <- ConstLabels],
   %% Create code to create jump tables
   SwitchDecl = declare_switches(SwitchList, Fun),
   %% Create code to create a table with the labels of all closure calls
@@ -1386,9 +1382,9 @@ handle_relocations(Relocs, Data, Fun) ->
   %% Temporary Store inc_stack and llvm_fix_pinned_regs to Dictionary
   %% TODO: Remove this
   Relocs3 = dict:store("inc_stack_0",
-                      {call, {bif, inc_stack_0, 0}}, Relocs2),
+		       {call, {bif, inc_stack_0, 0}}, Relocs2),
   Relocs4 = dict:store("hipe_bifs.llvm_fix_pinned_regs.0",
-                      {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs3),
+		       {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs3),
   ExternalDeclarations =
     AtomDecl++ClosureDecl++ConstDecl++FunDecl++ClosureLabelDecl++SwitchDecl,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
@@ -1445,11 +1441,8 @@ declare_switches(JumpTableList, Fun) ->
   lists:map(Fun1, JumpTableList).
 
 declare_switch_table({Name, {switch, {TableType, Labels, _, _}, _}}, FunName) ->
-  LabelList = lists:map(fun mk_jump_label/1, Labels),
-  Fun1 =
-    fun(X) ->
-        "i8* blockaddress(@"++FunName++", "++X++")"
-    end,
+  LabelList = [mk_jump_label(L) || L <- Labels],
+  Fun1 = fun(X) -> "i8* blockaddress(@"++FunName++", "++X++")" end,
   List2 = lists:map(Fun1, LabelList),
   List3 = string:join(List2, ",\n"),
   List4 = "[\n" ++ List3 ++ "\n]\n",
@@ -1490,11 +1483,11 @@ call_to_decl({Name, {call, MFA}}) ->
     case M of
       llvm ->
         {hipe_llvm:mk_struct([?WORD_TYPE, hipe_llvm:mk_int(1)]),
-          lists:seq(1,2)};
+	 lists:seq(1,2)};
       %% +precoloured regs
       _ -> {?FUN_RETURN_TYPE, lists:seq(1,A+?NR_PINNED_REGS)}
     end,
-  ArgsTypes = lists:map(fun(_) -> ?WORD_TYPE end, Args),
+  ArgsTypes = [?WORD_TYPE || _ <- Args],
   hipe_llvm:mk_fun_decl([], [], Cconv, [], Type, "@"++Name, ArgsTypes, []).
 
 %% @doc This functions are always declared, even if not used
