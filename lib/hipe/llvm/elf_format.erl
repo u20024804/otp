@@ -219,7 +219,7 @@ get_symtab_entry_field(Sym, Field) ->
 %%------------------------------------------------------------------------------
 
 %% @doc Extracts String Table from an ELF formated Object File.
--spec extract_strtab( binary() ) -> [ {string(), integer()} ].
+-spec extract_strtab(binary()) -> [{string(), integer()}].
 extract_strtab(Elf) ->
   Strtab_bin = extract_segment_by_name(Elf, ?STRTAB),
   NamesSizes = get_names(Strtab_bin),
@@ -293,7 +293,7 @@ get_rela_entry_field(RelaE, Field) ->
 %% @doc This function gets as arguments an ELF formated binary file and
 %%      returns the Executable Code (".text" segment) or an empty binary if it
 %%      is not found.
--spec extract_text( binary() ) -> binary().
+-spec extract_text(binary()) -> binary().
 extract_text(Elf) ->
   extract_segment_by_name(Elf, ?TEXT).
 
@@ -306,7 +306,7 @@ extract_text(Elf) ->
 %%      wanted Note Section (<b>without</b> the ".note" prefix!). It returns
 %%      the specified binary segment or an empty binary if no such section
 %%      exists.
--spec extract_note( binary(), string() ) -> binary().
+-spec extract_note(binary(), string()) -> binary().
 extract_note(Elf, Name) ->
   extract_segment_by_name(Elf, ?NOTE(Name)).
 
@@ -394,7 +394,7 @@ get_rodata_entries(Rodata_bin, Acc) ->
 %% @doc Returns the binary segment starting at `Offset' with length `Size'
 %%      (bytes) from a binary file. If `Offset' is bigger than the byte size of
 %%      the binary, an empty binary (`<<>>') is returned.
--spec get_binary_segment( binary(), {integer(), integer()} ) -> binary().
+-spec get_binary_segment(binary(), {integer(), integer()}) -> binary().
 get_binary_segment(Bin, {Offset, _Size}) when Offset > byte_size(Bin) ->
   <<>>;
 get_binary_segment(Bin, {Offset, Size}) ->
@@ -406,7 +406,7 @@ get_binary_segment(Bin, {Offset, Size}) ->
 %%      an empty binary (`<<>>') if there exists no segment with that name.
 %%      There are handy macros defined in elf_format.hrl for all Standar
 %%      Section Names.
--spec extract_segment_by_name( binary(), string() ) -> binary().
+-spec extract_segment_by_name(binary(), string()) -> binary().
 extract_segment_by_name(Elf, SectionName) ->
   %% Extract Section Header Table and Section Header String Table from binary
   SHdrTable = extract_shdrtab(Elf),
@@ -427,9 +427,7 @@ extract_segment_by_name(Elf, SectionName) ->
 %% @doc Extracts a list of strings with (zero-separated) names from a binary.
 %%      Returns tuples of `{Name, Size}'.
 %%      XXX: Skip trailing 0.
--spec get_names( binary() ) -> [ {string(), integer()} ].
-get_names(<<>>) ->
-  [];
+-spec get_names(binary()) -> [{string(), non_neg_integer()}].
 get_names(<<0, Bin/binary>>) ->
   NamesSizes = get_names(Bin, []),
   fix_names(NamesSizes, []).
@@ -445,8 +443,8 @@ get_names(Bin, Acc) ->
 %%           ".rel.text". In that way, the Section Header String Table is more
 %%           compact. Add ".text" just *before* the corresponding rela-field,
 %%           etc.
--spec fix_names( [{string(), integer()}], [{string(), integer()}] )
-               -> [{string(), integer()}].
+-spec fix_names([{string(), non_neg_integer()}], [{string(), non_neg_integer()}])
+               -> [{string(), non_neg_integer()}].
 fix_names([], Acc) ->
   lists:reverse(Acc);
 fix_names([{Name, Size}=T | Names], Acc) ->
@@ -476,11 +474,11 @@ fix_names([{Name, Size}=T | Names], Acc) ->
 
 %% @doc A function that byte-reverses a binary. This might be needed because of
 %%      little (fucking!) endianess.
--spec bin_reverse( binary() ) -> binary().
+-spec bin_reverse(binary()) -> binary().
 bin_reverse(Bin) when is_binary(Bin) ->
   bin_reverse(Bin, <<>>).
 
--spec bin_reverse( binary(), binary() ) -> binary().
+-spec bin_reverse(binary(), binary()) -> binary().
 bin_reverse(<<>>, Acc) ->
   Acc;
 bin_reverse(<<Head, More/binary>>, Acc) ->
@@ -488,7 +486,7 @@ bin_reverse(<<Head, More/binary>>, Acc) ->
 
 %% @doc A function that extracts a null-terminated string from a binary. It
 %%      returns the found string along with the rest of the binary.
--spec bin_get_string( binary() ) -> {string(), binary() }.
+-spec bin_get_string(binary()) -> {string(), binary()}.
 bin_get_string(Bin) ->
   bin_get_string(Bin, <<>>).
 
@@ -503,14 +501,14 @@ bin_get_string(<<Letter, Tail/binary>>, BinAcc) ->
 
 %% @doc
 make_offsets(NamesSizes) ->
-    {Names, Sizes} = lists:unzip(NamesSizes),
-    Offsets = make_offsets_from_sizes(Sizes, 1, []),
-    lists:zip(Names, Offsets).
+  {Names, Sizes} = lists:unzip(NamesSizes),
+  Offsets = make_offsets_from_sizes(Sizes, 1, []),
+  lists:zip(Names, Offsets).
 
 make_offsets_from_sizes([], _, Acc) ->
-    lists:reverse(Acc);
+  lists:reverse(Acc);
 make_offsets_from_sizes([Size | Sizes], Cur, Acc) ->
-    make_offsets_from_sizes(Sizes, Size+Cur+1, [Cur | Acc]). % For the "."!
+  make_offsets_from_sizes(Sizes, Size+Cur+1, [Cur | Acc]). % For the "."!
 
 %% @doc Little-Endian Base 128 (LEB128) Decoder
 %%     This function extracts the <b>first</b> LEB128-encoded integer in a
@@ -519,11 +517,11 @@ make_offsets_from_sizes([Size | Sizes], Cur, Acc) ->
 %%     extracting only one number in a binary and continuing parsing the binary
 %%     for other kind of data (e.g. different encoding).
 % FIXME: Only decodes unsigned data!
--spec leb128_decode( binary() ) -> {integer(), binary()}.
+-spec leb128_decode(binary()) -> {integer(), binary()}.
 leb128_decode(LebNum) ->
   leb128_decode(LebNum, 0, <<>>).
 
--spec leb128_decode( binary(), integer(), binary() ) -> {integer(), binary()}.
+-spec leb128_decode(binary(), integer(), binary()) -> {integer(), binary()}.
 leb128_decode(LebNum, NoOfBits, Acc) ->
   <<Sentinel:1/bits, NextBundle:7/bits, MoreLebNums/bits>> = LebNum,
   case Sentinel of
