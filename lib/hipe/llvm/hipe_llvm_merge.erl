@@ -60,8 +60,7 @@ merge_refs([{MFA, _, CodeSize, _, Refs, _}|Rest], ConstMap, TotalSize, Acc) ->
   %% must change all the constant labels in the Refs to the corresponding
   %% ConstNo, that can be found in the ConstMap (#pcm_entry{}).
   UpdatedRefs = labels_to_numbers(MFA, Refs, ConstMap),
-  NewRefs = lists:map(fun(X) -> add_offset_to_ref(X, TotalSize) end,
-                      UpdatedRefs),
+  NewRefs = [add_offset_to_ref(X, TotalSize) || X <- UpdatedRefs],
   merge_refs(Rest, ConstMap, TotalSize+CodeSize, NewRefs++Acc).
 
 labels_to_numbers(MFA, Refs, ConstMap) ->
