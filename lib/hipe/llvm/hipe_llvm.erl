@@ -308,11 +308,11 @@ operation_options(#llvm_operation{options=Options}) -> Options.
 %%
 mk_extractvalue(Dst, Type, Val, Idx, Idxs) ->
   #llvm_extractvalue{dst=Dst,type=Type,val=Val,idx=Idx,idxs=Idxs}.
-extractvalue_dst(#llvm_extractvalue{dst=Dst})-> Dst.
-extractvalue_type(#llvm_extractvalue{type=Type})-> Type.
-extractvalue_val(#llvm_extractvalue{val=Val})-> Val.
-extractvalue_idx(#llvm_extractvalue{idx=Idx})-> Idx.
-extractvalue_idxs(#llvm_extractvalue{idxs=Idxs})-> Idxs.
+extractvalue_dst(#llvm_extractvalue{dst=Dst}) -> Dst.
+extractvalue_type(#llvm_extractvalue{type=Type}) -> Type.
+extractvalue_val(#llvm_extractvalue{val=Val}) -> Val.
+extractvalue_idx(#llvm_extractvalue{idx=Idx}) -> Idx.
+extractvalue_idxs(#llvm_extractvalue{idxs=Idxs}) -> Idxs.
 
 %%
 %% insertvalue
@@ -334,9 +334,9 @@ insertvalue_idxs(#llvm_insertvalue{idxs=Idxs}) -> Idxs.
 mk_alloca(Dst, Type, Num, Align) ->
   #llvm_alloca{dst=Dst, type=Type, num=Num, align=Align}.
 alloca_dst(#llvm_alloca{dst=Dst}) -> Dst.
-alloca_type(#llvm_alloca{type=Type})-> Type.
-alloca_num(#llvm_alloca{num=Num})-> Num.
-alloca_align(#llvm_alloca{align=Align})-> Align.
+alloca_type(#llvm_alloca{type=Type}) -> Type.
+alloca_num(#llvm_alloca{num=Num}) -> Num.
+alloca_align(#llvm_alloca{align=Align}) -> Align.
 
 %%
 %% load
@@ -344,12 +344,12 @@ alloca_align(#llvm_alloca{align=Align})-> Align.
 mk_load(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_load{dst=Dst, p_type=Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
-load_dst(#llvm_load{dst=Dst})-> Dst.
-load_p_type(#llvm_load{p_type=Type})-> Type.
-load_pointer(#llvm_load{pointer=Pointer})-> Pointer.
-load_alignment(#llvm_load{alignment=Alignment})-> Alignment.
-load_nontemporal(#llvm_load{nontemporal=Nontemporal})-> Nontemporal.
-load_volatile(#llvm_load{volatile=Volatile})-> Volatile.
+load_dst(#llvm_load{dst=Dst}) -> Dst.
+load_p_type(#llvm_load{p_type=Type}) -> Type.
+load_pointer(#llvm_load{pointer=Pointer}) -> Pointer.
+load_alignment(#llvm_load{alignment=Alignment}) -> Alignment.
+load_nontemporal(#llvm_load{nontemporal=Nontemporal}) -> Nontemporal.
+load_volatile(#llvm_load{volatile=Volatile}) -> Volatile.
 
 %%
 %% store
@@ -357,13 +357,13 @@ load_volatile(#llvm_load{volatile=Volatile})-> Volatile.
 mk_store(Type, Value, P_Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_store{type=Type, value=Value, p_type=P_Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
-store_type(#llvm_store{type=Type})-> Type.
-store_value(#llvm_store{value=Value})-> Value.
-store_p_type(#llvm_store{p_type=P_Type})-> P_Type.
-store_pointer(#llvm_store{pointer=Pointer})-> Pointer.
-store_alignment(#llvm_store{alignment=Alignment})-> Alignment.
-store_nontemporal(#llvm_store{nontemporal=Nontemporal})-> Nontemporal.
-store_volatile(#llvm_store{volatile=Volatile})-> Volatile.
+store_type(#llvm_store{type=Type}) -> Type.
+store_value(#llvm_store{value=Value}) -> Value.
+store_p_type(#llvm_store{p_type=P_Type}) -> P_Type.
+store_pointer(#llvm_store{pointer=Pointer}) -> Pointer.
+store_alignment(#llvm_store{alignment=Alignment}) -> Alignment.
+store_nontemporal(#llvm_store{nontemporal=Nontemporal}) -> Nontemporal.
+store_volatile(#llvm_store{volatile=Volatile}) -> Volatile.
 
 %%
 %% getelementptr
@@ -380,7 +380,8 @@ getelementptr_inbounds(#llvm_getelementptr{inbounds=Inbounds}) -> Inbounds.
 %%
 %% conversion
 %%
-mk_conversion(Dst, Op, Src_type, Src, Dst_type) -> #llvm_conversion{dst=Dst, op=Op, src_type=Src_type, src=Src, dst_type=Dst_type}.
+mk_conversion(Dst, Op, Src_type, Src, Dst_type) ->
+  #llvm_conversion{dst=Dst, op=Op, src_type=Src_type, src=Src, dst_type=Dst_type}.
 conversion_dst(#llvm_conversion{dst=Dst}) -> Dst.
 conversion_op(#llvm_conversion{op=Op}) -> Op.
 conversion_src_type(#llvm_conversion{src_type=Src_type}) -> Src_type.
@@ -390,7 +391,8 @@ conversion_dst_type(#llvm_conversion{dst_type=Dst_type}) -> Dst_type.
 %%
 %% sitofp
 %%
-mk_sitofp(Dst, Src_type, Src, Dst_type) -> #llvm_sitofp{dst=Dst, src_type=Src_type, src=Src, dst_type=Dst_type}.
+mk_sitofp(Dst, Src_type, Src, Dst_type) ->
+  #llvm_sitofp{dst=Dst, src_type=Src_type, src=Src, dst_type=Dst_type}.
 sitofp_dst(#llvm_sitofp{dst=Dst}) -> Dst.
 sitofp_src_type(#llvm_sitofp{src_type=Src_type}) -> Src_type.
 sitofp_src(#llvm_sitofp{src=Src}) -> Src.
@@ -451,7 +453,8 @@ phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
 %%
 %% select
 %%
-mk_select(Dst, Cond, Typ1, Val1, Typ2, Val2) -> #llvm_select{dst=Dst, 'cond'=Cond, typ1=Typ1, val1=Val1, typ2=Typ2, val2=Val2}.
+mk_select(Dst, Cond, Typ1, Val1, Typ2, Val2) ->
+  #llvm_select{dst=Dst, 'cond'=Cond, typ1=Typ1, val1=Val1, typ2=Typ2, val2=Val2}.
 select_dst(#llvm_select{dst=Dst}) -> Dst.
 select_cond(#llvm_select{'cond'=Cond}) -> Cond.
 select_typ1(#llvm_select{typ1=Typ1}) -> Typ1.
@@ -478,7 +481,7 @@ call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 %% fun_def
 %%
 mk_fun_def(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist,
-  Fn_attrs, Align, Body)->
+	   Fn_attrs, Align, Body) ->
   #llvm_fun_def{
     linkage=Linkage,
     visibility=Visibility,
@@ -543,7 +546,8 @@ label_label(#llvm_label{label=Label}) -> Label.
 %%
 %% constant declaration
 %%
-mk_const_decl(Dst, Decl_type, Type, Value) -> #llvm_const_decl{dst=Dst, decl_type=Decl_type, type=Type, value=Value}.
+mk_const_decl(Dst, Decl_type, Type, Value) ->
+  #llvm_const_decl{dst=Dst, decl_type=Decl_type, type=Type, value=Value}.
 const_decl_dst(#llvm_const_decl{dst=Dst}) -> Dst.
 const_decl_decl_type(#llvm_const_decl{decl_type=Decl_type}) -> Decl_type.
 const_decl_type(#llvm_const_decl{type=Type}) -> Type.
@@ -552,12 +556,12 @@ const_decl_value(#llvm_const_decl{value=Value}) -> Value.
 mk_asm(Instruction) -> #llvm_asm{instruction=Instruction}.
 asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
 
-
 mk_adj_stack(Offset, Register, Type) ->
   #llvm_adj_stack{offset=Offset, 'register'=Register, type=Type}.
 adj_stack_offset(#llvm_adj_stack{offset=Offset}) -> Offset.
 adj_stack_register(#llvm_adj_stack{'register'=Register}) -> Register.
 adj_stack_type(#llvm_adj_stack{type=Type}) -> Type.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
@@ -594,7 +598,6 @@ pp_ins_list(_Dev, []) -> ok;
 pp_ins_list(Dev, [I|Is]) ->
   pp_ins(Dev, I),
   pp_ins_list(Dev, Is).
-
 
 pp_ins(Dev, I) ->
   case indent(I) of
@@ -838,10 +841,10 @@ pp_type(Dev, Type) ->
       write(Dev, "void");
     #llvm_label_type{} ->
       write(Dev, "label");
-    %Integer
+    %% Integer
     #llvm_int{} ->
       write(Dev, ["i", integer_to_list(int_width(Type))]);
-    %Float
+    %% Float
     #llvm_float{} ->
       write(Dev, "float");
     #llvm_double{} ->
@@ -852,17 +855,17 @@ pp_type(Dev, Type) ->
       write(Dev, "fp128");
     #llvm_ppc_fp128{} ->
       write(Dev, "ppc_fp128");
-    %Pointer
+    %% Pointer
     #llvm_pointer{} ->
       pp_type(Dev, pointer_type(Type)),
       write(Dev, "*");
-    %Function
+    %% Function
     #llvm_fun{} ->
       pp_type(Dev, function_ret_type(Type)),
       write(Dev, " ("),
       pp_type_list(Dev, function_arg_type_list(Type)),
       write(Dev, ")");
-    %Aggregate
+    %% Aggregate
     #llvm_array{} ->
       write(Dev, ["[", integer_to_list(array_size(Type)), " x "]),
       pp_type(Dev, array_type(Type)),
@@ -897,7 +900,7 @@ pp_args(Dev, [{Type, Arg} | Args]) ->
 
 %% @doc Pretty-print a list of options
 pp_options(_Dev, []) -> ok;
-pp_options(Dev, [O|Os])->
+pp_options(Dev, [O|Os]) ->
   write(Dev, [atom_to_list(O), " "]),
   pp_options(Dev, Os).
 
