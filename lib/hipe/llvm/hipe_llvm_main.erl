@@ -74,11 +74,11 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, UseBuffer) ->
         "/dev/shm/" ++ DirName
     end,
   %% Create temp directory
-  os:cmd("mkdir " ++ Dir),
+  "" = os:cmd("mkdir " ++ Dir),
   %% Print LLVM assembly to file
   OpenOpts = [append, raw] ++
     case UseBuffer of
-      true  -> [delayed_write]; % Use delayed_write!
+      %% true  -> [delayed_write]; % Use delayed_write!
       false -> []
     end,
   {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", OpenOpts),
@@ -104,7 +104,7 @@ llvm_as(Dir, Fun_Name) ->
   Dest    = Dir ++ Fun_Name ++ ".bc",
   Command = "llvm-as " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
-    [] -> ok;
+    "" -> ok;
     Error -> exit({?MODULE, opt, Error})
   end.
 
@@ -117,7 +117,7 @@ llvm_opt(Dir, Fun_Name, Options) ->
   Command  = "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
   %% io:format("OPT: ~s~n", [Command]),
   case os:cmd(Command) of
-    [] -> ok;
+    "" -> ok;
     Error -> exit({?MODULE, opt, Error})
   end.
 
@@ -125,13 +125,13 @@ llvm_opt(Dir, Fun_Name, Options) ->
 llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
-  Align = find_stack_alignment(),
+  Align    = find_stack_alignment(),
   LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
               "-stack-alignment=" ++ Align, "-tailcallopt"],
   Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   %% io:format("LLC: ~s~n", [Command]),
   case os:cmd(Command) of
-    [] -> ok;
+    "" -> ok;
     Error -> exit({?MODULE, opt, Error})
   end.
 
@@ -142,7 +142,7 @@ compile(Dir, Fun_Name, Compiler) ->
   Dest    = Dir ++ Fun_Name ++ ".o",
   Command = Compiler ++ " -c " ++ Source ++ " -o " ++ Dest,
   case os:cmd(Command) of
-    [] -> ok;
+    "" -> ok;
     Error -> exit({?MODULE, llvmc, Error})
   end,
   Dest.
@@ -151,11 +151,8 @@ find_stack_alignment() ->
   case get(hipe_target_arch) of
     x86 -> "8";
     amd64 -> "8";
-    _ ->
-      exit({?MODULE, find_stack_alignment, "Unimplemented
-          Architecture"})
+    _ -> exit({?MODULE, find_stack_alignment, "Unimplemented architecture"})
   end.
-
 
 %% Join options
 fix_opts(Opts) ->
@@ -201,23 +198,17 @@ get_tables(Elf) ->
                  elf_format:get_symtab_entry_field(SymtabE, st_value),
                  elf_format:get_symtab_entry_field(SymtabE, st_size) div ?ELF_XWORD_SIZE}
                 || SymtabE <- elf_format:extract_symtab(Elf)],
-  SymtabTemp2 = lists:filter(fun ({Name, _, _}) -> Name =/= 0 end, SymtabTemp),
+  SymtabTemp2 = [T || T={Name, _, _} <- SymtabTemp, Name =/= 0],
   {NameIndices, ValueOffs, Sizes} = lists:unzip3(SymtabTemp2),
   %% Find the names of the symbols.
   %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
   %% relevant entries:
   Strtab = elf_format:extract_strtab(Elf),
-  RelevantNames = lists:map(fun (Off) ->
-                                elf_format:get_strtab_entry(Strtab, Off)
-                            end, NameIndices),
+  Relevant = [elf_format:get_strtab_entry(Strtab, Off) || Off <- NameIndices],
   %% Zip back to {Name, ValueOff, Size}:
-  T = lists:zip3(RelevantNames, ValueOffs, Sizes),
-  Switches = lists:filter(fun({SymName, _, _}) ->
-                              string:str(SymName, "table_") =:= 1
-                          end, T),
-  Closures = lists:filter(fun({SymName, _, _}) ->
-                              string:str(SymName, "table_closures") =:= 1
-                          end, Switches),
+  Triples = lists:zip3(Relevant, ValueOffs, Sizes),
+  Switches = [T || T={"table_"++_, _, _} <- Triples],
+  Closures = [T || T={"table_closures"++_, _, _} <- Switches],
   {Switches, Closures}.
 
 %% @doc This functions associates symbols who point to some table of labels with
@@ -290,11 +281,9 @@ get_text_relocs(Elf) ->
   %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
   %% relevant entries:
   Strtab = elf_format:extract_strtab(Elf),
-  RelevantNames = lists:map(fun (Off) ->
-                                elf_format:get_strtab_entry(Strtab, Off)
-                            end, SymtabEs2),
+  Relevant = [elf_format:get_strtab_entry(Strtab, Off) || Off <- SymtabEs2],
   %% Zip back with actual offsets:
-  lists:zip(RelevantNames, ActualOffsets).
+  lists:zip(Relevant, ActualOffsets).
 
 %% @doc Correlate object file relocation symbols with info from translation to
 %%      llvm code.
@@ -538,7 +527,7 @@ fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
         case length(NewRootsList) > 0 andalso hd(NewRootsList) >= 0 of
           true ->
             {?SDESC, Offset, {ExnHandler, FrameSize-Arity, StkArity,
-              list_to_tuple(NewRootsList)}};
+			      list_to_tuple(NewRootsList)}};
           false ->
             {?SDESC, Offset, {ExnHandler, FrameSize, StkArity, Roots}}
         end,
@@ -568,9 +557,7 @@ open_object_file(ObjFile) ->
 remove_temp_folder(Dir, Options) ->
   case proplists:get_bool(llvm_save_temps, Options) of
     true -> ok;
-    false -> spawn(fun () ->
-                       os:cmd("rm -rf " ++ Dir)
-                   end)
+    false -> spawn(fun () -> "" = os:cmd("rm -rf " ++ Dir) end), ok
   end.
 
 unique_id() ->
