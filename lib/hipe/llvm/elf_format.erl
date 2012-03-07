@@ -231,8 +231,8 @@ extract_strtab(Elf) ->
 %%      XXX: There might be a bug here because of the "compact" saving the ELF
 %%      format uses: e.g. only stores ".rela.text" for ".rela.text" and ".text".
 get_strtab_entry(Strtab, Offset) ->
-  case lists:keysearch(Offset, 2, Strtab) of
-    {value, {Name, Offset}} -> Name;
+  case lists:keyfind(Offset, 2, Strtab) of
+    {Name, Offset} -> Name;
     false -> ""
   end.
 
