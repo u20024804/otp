@@ -270,7 +270,7 @@ insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
 
 %% @doc Extract a list of the form `[{SymbolName, Offset}]' with all relocatable
 %%      symbols and their offsets in the code from the ".text" section.
--spec get_text_relocs( binary() ) -> [ {string(), integer()} ].
+-spec get_text_relocs(binary()) -> [{string(), integer()}].
 get_text_relocs(Elf) ->
   %% Only care about the symbol table index and the offset:
   NameOffsetTemp = [{?ELF_R_SYM(elf_format:get_rela_entry_field(RelaE, r_info)),
