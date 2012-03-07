@@ -506,7 +506,6 @@ fun_def_fn_attrs(#llvm_fun_def{fn_attrs=Fn_attrs}) -> Fn_attrs.
 fun_def_align(#llvm_fun_def{align=Align}) -> Align.
 fun_def_body(#llvm_fun_def{body=Body}) -> Body.
 
-
 %%
 %% fun_decl
 %%
@@ -601,7 +600,7 @@ pp_ins_list(Dev, [I|Is]) ->
 
 pp_ins(Dev, I) ->
   case indent(I) of
-    true ->  write(Dev, "  ");
+    true  -> write(Dev, "  ");
     false -> ok
   end,
   case I of
@@ -672,7 +671,7 @@ pp_ins(Dev, I) ->
           write(Dev, [" ", Num, " "])
       end,
       case alloca_align(I) of
-        [] ->ok;
+        [] -> ok;
         Align -> write(Dev, [",align ", Align])
       end,
       write(Dev, "\n");
@@ -751,7 +750,7 @@ pp_ins(Dev, I) ->
     #llvm_call{} ->
       case call_dst(I) of
         [] -> ok;
-        Dst ->  write(Dev, [Dst, " = "])
+        Dst -> write(Dev, [Dst, " = "])
       end,
       case call_is_tail(I) of
         true -> write(Dev, "tail ");
@@ -806,7 +805,7 @@ pp_ins(Dev, I) ->
       end,
       write(Dev, "\n");
     #llvm_comment{} ->
-      write(Dev, ["; ", comment_text(I), "\n"]);
+      write(Dev, ["; ", atom_to_list(comment_text(I)), "\n"]);
     #llvm_label{} ->
       write(Dev, [label_label(I), ":\n"]);
     #llvm_const_decl{} ->
@@ -940,4 +939,4 @@ indent(I) ->
 
 %% @doc Abstracts actual writing to file operations
 write(Dev, Msg) ->
-  file:write(Dev, Msg).
+  ok = file:write(Dev, Msg).
