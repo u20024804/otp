@@ -65,7 +65,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
 compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, UseBuffer) ->
   Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
-  DirName = "llvm_" ++ unique_id() ++ "/",
+  DirName = "llvm_" ++ unique_id(Fun_Name, Arity) ++ "/",
   Dir =
     case proplists:get_bool(llvm_save_temps, Options) of
       true ->  %% Store folder in current directory
@@ -560,8 +560,8 @@ remove_temp_folder(Dir, Options) ->
     false -> spawn(fun () -> "" = os:cmd("rm -rf " ++ Dir) end), ok
   end.
 
-unique_id() ->
-  integer_to_list(erlang:phash2({node(),now()})).
+unique_id(FunName, Arity) ->
+  integer_to_list(erlang:phash2({FunName, Arity, now()})).
 
 %% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
