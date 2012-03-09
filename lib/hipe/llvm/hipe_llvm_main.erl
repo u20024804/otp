@@ -23,6 +23,8 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Extract information from object file
   %%
   ObjBin = open_object_file(ObjectFile),
+  %% Read and set the ELF class
+  elf_format:set_architecture_flag(ObjBin),
   %% Get labels info (for switches and jump tables)
   Labels = get_rodata_relocs(ObjBin),
   {Switches, Closures} = get_tables(ObjBin),
@@ -544,15 +546,12 @@ fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
 %%      the name of the file and returns an Erlang binary.
 -spec open_object_file( string() ) -> binary().
 open_object_file(ObjFile) ->
-  Bin =
-    case file:read_file(ObjFile) of
-      {ok, Binary} ->
-        Binary;
-      {error, Reason} ->
-        exit({?MODULE, open_file, Reason})
-    end,
-  elf_format:extract_header(Bin), % Read and set the ELF class (ignore hdr).
-  Bin.
+  case file:read_file(ObjFile) of
+    {ok, Binary} ->
+      Binary;
+    {error, Reason} ->
+      exit({?MODULE, open_file, Reason})
+  end.
 
 remove_temp_folder(Dir, Options) ->
   case proplists:get_bool(llvm_save_temps, Options) of
