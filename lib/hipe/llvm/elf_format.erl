@@ -43,6 +43,7 @@
          %% Read-only data
          extract_rodata/1,
          %% Misc.
+         set_architecture_flag/1,
          is64bit/0
         ]).
 
@@ -77,8 +78,6 @@ extract_header(Elf) ->
   <<16#7f, $E, $L, $F, EI_Class, EI_Data, EI_Version, EI_Osabi, EI_Abiversion,
     EI_Pad:6/binary, EI_Nident
   >> = Ident_bin,
-  %% Export ELF Class to distinguish between ELF32 and ELF64:
-  put(elf_class, EI_Class),
   Ident = elf_datatypes:mk_ehdr_ident(EI_Class, EI_Data, EI_Version, EI_Osabi,
                               EI_Abiversion, EI_Pad, EI_Nident),
   elf_datatypes:mk_ehdr(Ident, Type, Machine, Version, Entry, Phoff, Shoff,
@@ -532,6 +531,16 @@ leb128_decode(LebNum, NoOfBits, Acc) ->
       <<Num:Size/integer>> = <<NextBundle:7/bits, Acc/bits>>,
       {Num, MoreLebNums}
   end.
+
+%% @doc Extract ELF Class from ELF header and export symbol to process
+%%      dictionary.
+-spec set_architecture_flag(binary()) -> ok.
+set_architecture_flag(Elf) ->
+  %% Extract information about ELF Class from ELF Header
+  <<16#7f, $E, $L, $F, EI_Class, _MoreHeader/binary>>
+    = get_binary_segment(Elf, {0, ?ELF_EHDR_SIZE}),
+  put(elf_class, EI_Class),
+  ok.
 
 %% @doc Read from object file header if the file class is ELF32 or ELF64.
 is64bit() ->
