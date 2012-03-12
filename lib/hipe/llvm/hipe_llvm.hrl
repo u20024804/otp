@@ -11,7 +11,7 @@
 %% Terminator Instructions
 -record(llvm_ret, {ret_list=[]}).
 -record(llvm_br, {dst}).
--record(llvm_br_cond, {'cond', true_label, false_label}).
+-record(llvm_br_cond, {'cond', true_label, false_label, meta=[]}).
 -record(llvm_indirectbr, {type, address, label_list}).
 -record(llvm_switch, {type, value, default_label, value_label_list=[]}).
 -record(llvm_invoke, {dst, cconv=[], ret_attrs=[], type, fnptrval, arglist=[],
@@ -53,6 +53,8 @@
 
 -record(llvm_asm, {instruction}).
 -record(llvm_adj_stack, {offset, 'register', type}).
+
+-record(llvm_branch_meta, {id, true_weight, false_weight}).
 
 
 %% Types
