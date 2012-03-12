@@ -18,6 +18,9 @@
 -define(BYTE_TYPE_P, #llvm_pointer{type=?BYTE_TYPE}).
 -define(FUN_RETURN_TYPE, fun_return_type()).
 
+-define(BRANCH_META_TAKEN, "0").
+-define(BRANCH_META_NOT_TAKEN, "1").
+
 fun_return_type() ->
   RetTyp = lists:duplicate(?NR_PINNED_REGS+1, ?WORD_TYPE),
   #llvm_struct{type_list=RetTyp}.
@@ -268,10 +271,12 @@ trans_alub_overflow(I, Sign, Relocs) ->
   case hipe_rtl:alub_cond(I) of
     Op when Op =:= overflow orelse Op =:= ltu ->
       True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
-      False_label = mk_jump_label(hipe_rtl:alub_false_label(I));
+      False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
+      Metadata = branch_metadata(hipe_rtl:alub_pred(I));
     not_overflow ->
       True_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
-      False_label = mk_jump_label(hipe_rtl:alub_true_label(I))
+      False_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
+      Metadata = branch_metadata(1-hipe_rtl:alub_pred(I))
   end,
   I7 = hipe_llvm:mk_br_cond(T2, True_label, False_label),
   {[I7, I6, I5, I4, I3, I2, I1], NewRelocs}.
@@ -316,9 +321,10 @@ trans_alub_no_overflow(I, Relocs) ->
   T3 = mk_temp(),
   I5 = hipe_llvm:mk_icmp(T3, Cond, ?WORD_TYPE, Dst, "0"),
   %% br
+  Metadata = branch_metadata(hipe_rtl:alub_pred(I)),
   True_label = mk_jump_label(hipe_rtl:alub_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:alub_false_label(I)),
-  I6 = hipe_llvm:mk_br_cond(T3, True_label, False_label),
+  I6 = hipe_llvm:mk_br_cond(T3, True_label, False_label, Metadata),
   {[I6, I5, I2, I1], Relocs}.
 
 %%
@@ -334,10 +340,15 @@ trans_branch(I, Relocs) ->
   %% br
   True_label = mk_jump_label(hipe_rtl:branch_true_label(I)),
   False_label = mk_jump_label(hipe_rtl:branch_false_label(I)),
-  I4 = hipe_llvm:mk_br_cond(T1, True_label, False_label),
+  Metadata = branch_metadata(hipe_rtl:branch_pred(I)),
+  I4 = hipe_llvm:mk_br_cond(T1, True_label, False_label, Metadata),
   {[I4, I3, I2, I1], Relocs}.
 
-%%
+branch_metadata(X) when X==0.5 -> [];
+branch_metadata(X) when X>0.5 -> ?BRANCH_META_TAKEN;
+branch_metadata(X) when X<0.5 -> ?BRANCH_META_NOT_TAKEN.
+
+  %%
 %% call
 %%
 trans_call(I, Relocs) ->
@@ -1384,9 +1395,13 @@ handle_relocations(Relocs, Data, Fun) ->
   Relocs3 = dict:store("inc_stack_0",
 		       {call, {bif, inc_stack_0, 0}}, Relocs2),
   Relocs4 = dict:store("hipe_bifs.llvm_fix_pinned_regs.0",
-		       {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs3),
-  ExternalDeclarations =
-    AtomDecl++ClosureDecl++ConstDecl++FunDecl++ClosureLabelDecl++SwitchDecl,
+           {call, {hipe_bifs, llvm_fix_pinned_regs, 0}}, Relocs3),
+  BranchMetaData = [
+    hipe_llvm:mk_branch_meta(?BRANCH_META_TAKEN, "99", "1"),
+    hipe_llvm:mk_branch_meta(?BRANCH_META_NOT_TAKEN, "1", "99")
+  ],
+  ExternalDeclarations = AtomDecl++ClosureDecl++ConstDecl++FunDecl++
+                         ClosureLabelDecl++SwitchDecl++BranchMetaData,
   LocalVariables = AtomLoad++ClosureLoad++ConstLoad,
   {Relocs4, ExternalDeclarations, LocalVariables}.
 
