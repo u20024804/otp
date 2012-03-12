@@ -107,7 +107,7 @@ llvm_opt(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   Dest     = Source,
   OptLevel = trans_optlev_flag(opt, Options),
-  OptFlags = [OptLevel, "-mem2reg", "-strip-debug"],
+  OptFlags = [OptLevel, "-mem2reg", "-strip-debug", "-block-placement"],
   Command  = "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
   %% io:format("OPT: ~s~n", [Command]),
   case os:cmd(Command) of
