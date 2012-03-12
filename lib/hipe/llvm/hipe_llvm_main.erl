@@ -61,29 +61,14 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
 %% LLVM tool chain
 %%------------------------------------------------------------------------------
 
-%% @doc Compile function Fun_Name/Arity to LLVM. Return Dir (in order to remove
+%% @doc Compile function FunName/Arity to LLVM. Return Dir (in order to remove
 %%      it if we do not want to store temporary files) and ObjectFile name that
 %%      is created by the LLVM tools.
-compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, UseBuffer) ->
-  Filename = atom_to_list(Fun_Name) ++ "_" ++ integer_to_list(Arity),
+compile_with_llvm(FunName, Arity, LLVMCode, Options, UseBuffer) ->
+  Filename = atom_to_list(FunName) ++ "_" ++ integer_to_list(Arity),
   %% Save temp files in a unique folder
-  DirName = "llvm_" ++ unique_id(Fun_Name, Arity) ++ "/",
-  Dir =
-    case proplists:get_bool(llvm_save_temps, Options) of
-      true ->  %% Store folder in current directory
-        DirName;
-      false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
-        "/dev/shm/" ++ DirName
-    end,
-  %% Create temp directory after removing existent Dir (caused by bad
-  %% "uniqueness")
-  case filelib:ensure_dir(Dir) of
-    ok -> %% Dir already exists!
-        "" = os:cmd("rm -rf " ++ Dir);
-    {error, _Reason} ->
-      ok
-  end,
-  "" = os:cmd("mkdir " ++ Dir),
+  Dir = unique_folder(FunName, Arity, Options),
+  ok = file:make_dir(Dir),
   %% Print LLVM assembly to file
   OpenOpts = [append, raw] ++
     case UseBuffer of
@@ -568,6 +553,29 @@ remove_temp_folder(Dir, Options) ->
 
 unique_id(FunName, Arity) ->
   integer_to_list(erlang:phash2({FunName, Arity, now()})).
+
+unique_folder(FunName, Arity, Options) ->
+  DirName = "llvm_" ++ unique_id(FunName, Arity) ++ "/",
+  Dir =
+    case proplists:get_bool(llvm_save_temps, Options) of
+      true ->  %% Store folder in current directory
+        DirName;
+      false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
+        "/dev/shm/" ++ DirName
+    end,
+  %% Make sure it does not exist
+  case dir_exists(Dir) of
+    true -> %% Dir already exists! Generate again.
+      unique_folder(FunName, Arity, Options);
+    false ->
+      Dir
+  end.
+
+%% @doc Function that checks that a given Filename is an existing Directory
+%%      Name (from http://rosettacode.org/wiki/Ensure_that_a_file_exists#Erlang)
+dir_exists(Filename) ->
+  {Flag, Info} = file:read_file_info(Filename),
+  (Flag == ok) andalso (element(3, Info) == directory).
 
 %% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
