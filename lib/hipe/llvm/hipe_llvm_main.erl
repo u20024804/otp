@@ -120,8 +120,9 @@ llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
   Align    = find_stack_alignment(),
-  LlcFlags = [OptLevel, "-load=ErlangGC.so", "-code-model=medium",
-              "-stack-alignment=" ++ Align, "-tailcallopt"],
+  LlcFlags = [OptLevel, "-hipe-prologue", "-load=ErlangGC.so",
+              "-code-model=medium", "-stack-alignment=" ++ Align,
+              "-tailcallopt"],
   Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   %% io:format("LLC: ~s~n", [Command]),
   case os:cmd(Command) of
