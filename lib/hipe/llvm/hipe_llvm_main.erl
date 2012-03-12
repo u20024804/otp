@@ -8,9 +8,9 @@
 -include("elf_format.hrl").
 
 %% @doc Translation of RTL to a loadable object. This functions takes the RTL
-%% code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to LLVM
-%% code. After this, LLVM asm is printed to a file and the LLVM tool chain is
-%% invoked in order to produce an object file.
+%%      code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to
+%%      LLVM code. After this, LLVM asm is printed to a file and the LLVM tool
+%%      chain is invoked in order to produce an object file.
 rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Compile to LLVM and get Instruction List (along with infos)
   {LLVMCode, RelocsDict, ConstTab} =
@@ -75,7 +75,14 @@ compile_with_llvm(Fun_Name, Arity, LLVMCode, Options, UseBuffer) ->
       false -> %% Temporarily store folder in tempfs (/dev/shm/)" (rm afterwards)
         "/dev/shm/" ++ DirName
     end,
-  %% Create temp directory
+  %% Create temp directory after removing existent Dir (caused by bad
+  %% "uniqueness")
+  case filelib:ensure_dir(Dir) of
+    ok -> %% Dir already exists!
+        "" = os:cmd("rm -rf " ++ Dir);
+    {error, _Reason} ->
+      ok
+  end,
   "" = os:cmd("mkdir " ++ Dir),
   %% Print LLVM assembly to file
   OpenOpts = [append, raw] ++
