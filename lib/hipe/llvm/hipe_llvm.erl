@@ -9,9 +9,11 @@
     br_dst/1,
 
     mk_br_cond/3,
+    mk_br_cond/4,
     br_cond_cond/1,
     br_cond_true_label/1,
     br_cond_false_label/1,
+    br_cond_meta/1,
 
     mk_indirectbr/3,
     indirectbr_type/1,
@@ -191,7 +193,13 @@
     mk_adj_stack/3,
     adj_stack_offset/1,
     adj_stack_register/1,
-    adj_stack_type/1
+    adj_stack_type/1,
+
+    mk_branch_meta/3,
+    branch_meta_id/1,
+    branch_meta_true_weight/1,
+    branch_meta_false_weight/1
+
   ]).
 
 
@@ -247,10 +255,14 @@ br_dst(#llvm_br{dst=Dst}) -> Dst.
 %%
 mk_br_cond(Cond, True_label, False_label) ->
   #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label}.
+mk_br_cond(Cond, True_label, False_label,Metadata) ->
+  #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label,
+    meta=Metadata}.
 br_cond_cond(#llvm_br_cond{'cond'=Cond}) -> Cond.
 br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
   False_label.
+br_cond_meta(#llvm_br_cond{meta=Metadata}) -> Metadata.
 
 %%
 %% indirectbr
@@ -561,6 +573,15 @@ adj_stack_offset(#llvm_adj_stack{offset=Offset}) -> Offset.
 adj_stack_register(#llvm_adj_stack{'register'=Register}) -> Register.
 adj_stack_type(#llvm_adj_stack{type=Type}) -> Type.
 
+%%
+%% Branch Metadata
+%%
+mk_branch_meta(Id, True_weight, False_weight) ->
+  #llvm_branch_meta{id=Id, true_weight=True_weight, false_weight=False_weight}.
+branch_meta_id(#llvm_branch_meta{id=Id}) -> Id.
+branch_meta_true_weight(#llvm_branch_meta{true_weight=True_weight}) -> True_weight.
+branch_meta_false_weight(#llvm_branch_meta{false_weight=False_weight}) -> False_weight.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
@@ -633,7 +654,13 @@ pp_ins(Dev, I) ->
                   invoke_unwind_label(I), " \n"]);
     #llvm_br_cond{} ->
       write(Dev, ["br i1 ", br_cond_cond(I), ", label ", br_cond_true_label(I),
-                  ", label ", br_cond_false_label(I), "\n"]);
+		  ", label ", br_cond_false_label(I)]),
+      case br_cond_meta(I) of
+        [] -> ok;
+        Metadata ->
+          write(Dev, [", !prof !", Metadata])
+      end,
+      write(Dev, "\n");
     #llvm_indirectbr{} ->
       write(Dev, "indirectbr "),
       pp_type(Dev, indirectbr_type(I)),
@@ -822,6 +849,10 @@ pp_ins(Dev, I) ->
           adj_stack_register(I), "\", \"r\"("]),
       pp_type(Dev, adj_stack_type(I)),
       write(Dev, [" ", adj_stack_offset(I),")\n"]);
+    #llvm_branch_meta{} ->
+      write(Dev, ["!", branch_meta_id(I), " = metadata !{metadata !\"branch_weights\",
+          i32 ", branch_meta_true_weight(I), ", i32 ",
+          branch_meta_false_weight(I), "}\n"]);
     Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
@@ -934,6 +965,7 @@ indent(I) ->
     #llvm_fun_def{} -> false;
     #llvm_fun_decl{} -> false;
     #llvm_const_decl{} -> false;
+    #llvm_branch_meta{} -> false;
     _ -> true
   end.
 
