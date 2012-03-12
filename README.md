@@ -33,24 +33,24 @@ Building and Installing
 
 *  Compiling:
 
-	    cd otp/
-	    ./otp_build autoconf
-	    ./configure
-	    make
+        cd otp/
+        ./otp_build autoconf
+        ./configure
+        make
 
-*  Installing (*optional*):
+*  Installing:
 
         sudo make install
 
 *  Verifying that the installation was successful (this
    step considers [custom LLVM] [5] to be **already** successfully
-   installed in your system): 
+   installed in your system):
 
     1.  Write an Erlang module:
-         
+
             -module(test).
-            -export(hello/1).
-            
+            -export([hello/1]).
+
             hello(Name) ->
                 io:format("Hello ~w!~n", [Name]).
 
@@ -65,19 +65,19 @@ Building and Installing
 
     3.  Compile module to BEAM bytecode:
 
-            1> c(foo).
-            {ok,foo}
+            1> c(test).
+            {ok,test}
 
     4.  Compile whole module using the LLVM back-end:
 
-            2> hipe:c(foo, [to_llvm]).
-            {ok,foo}
+            2> hipe:c(test, [to_llvm]).
+            {ok,test}
 
     5.  It works! :-)
 
-            3> foo:hello(world).	
-            Hello world!	
-            ok	 
+            3> test:hello(world).
+            Hello world!
+            ok
             4>
 
 Copyright and License
@@ -99,7 +99,6 @@ Copyright and License
 > under the License.
 >
 > %CopyrightEnd%
-
 
 
    [1]: http://www.erlang.org
