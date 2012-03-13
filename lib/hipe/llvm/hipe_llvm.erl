@@ -677,11 +677,11 @@ pp_ins(Dev, I) ->
       write(Dev, "\n");
     #llvm_load{} ->
       write(Dev, [load_dst(I), " = "]),
+      write(Dev, "load "),
       case load_volatile(I) of
         true -> write(Dev, "volatile ");
         false -> ok
       end,
-      write(Dev, "load "),
       pp_type(Dev, load_p_type(I)),
       write(Dev, [" ", load_pointer(I), " "]),
       case load_alignment(I) of
@@ -694,11 +694,11 @@ pp_ins(Dev, I) ->
       end,
       write(Dev, "\n");
     #llvm_store{} ->
+      write(Dev, "store "),
       case store_volatile(I) of
         true -> write(Dev, "volatile ");
         false -> ok
       end,
-      write(Dev, "store "),
       pp_type(Dev, store_type(I)),
       write(Dev, [" ", store_value(I), ", "]),
       pp_type(Dev, store_p_type(I)),
