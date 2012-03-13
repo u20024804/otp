@@ -2,7 +2,7 @@
 %%
 %% %CopyrightBegin%
 %% 
-%% Copyright Ericsson AB 2001-2009. All Rights Reserved.
+%% Copyright Ericsson AB 2001-2011. All Rights Reserved.
 %% 
 %% The contents of this file are subject to the Erlang Public License,
 %% Version 1.1, (the "License"); you may not use this file except in
@@ -50,14 +50,13 @@
 %% Flags:
 %%  DEBUG           - Turns on debugging. (Can be defined to a integer
 %%                    value to determine the level of debugging)
-%%  VERBOSE         - More info is printed...
 %%  HIPE_LOGGING    - Turn on logging of messages with erl_logger.
-%%  DO_ASSERT       - Turn on Assertions.
+%%  DO_ASSERT       - Turn on assertions.
 %%  TIMING          - Turn on timing.
 %%  HIPE_INSTRUMENT_COMPILER - Turn on instrumentation of the compiler.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
--define(VERSION_STRING(),"3.8").
+-define(VERSION_STRING(),"3.8.1").
 -define(MSGTAG, "<HiPE (v " ++ ?VERSION_STRING() ++ ")> ").
                                                                                 
 %%
@@ -119,13 +118,9 @@
 %%
 %% Define the exit macro
 %%
--ifdef(VERBOSE).
--define(EXIT(Reason), erlang:error({?MODULE,?LINE,Reason})).
--else.
 -define(EXIT(Reason),
  	?msg("EXITED with reason ~w @~w:~w\n", [Reason,?MODULE,?LINE]),
  	erlang:error({?MODULE,?LINE,Reason})).
--endif.
 
 %%
 %% Assertions.
