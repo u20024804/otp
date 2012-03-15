@@ -27,9 +27,10 @@ fun_return_type() ->
 
 %%------------------------------------------------------------------------------
 %% @doc Main function for translating an RTL function to LLVM Assembly. Takes as
-%% input the RTL code and the variable indexes of possible garbage collection
-%% roots and returns the corresponing LLVM, a dictionary with all the
-%% relocations in the code and a hipe_constab() with informaton about data
+%%      input the RTL code and the variable indexes of possible garbage
+%%      collection roots and returns the corresponing LLVM, a dictionary with
+%%      all the relocations in the code and a hipe_constab() with informaton
+%%      about data.
 %%------------------------------------------------------------------------------
 translate(RTL, Roots) ->
   Fun = hipe_rtl:rtl_fun(RTL),
@@ -88,19 +89,19 @@ alloca_stack(Code, Params, Roots) ->
   %% Find all assigned virtual registers
   Destinations = collect_destinations(Code),
   %% Declare virtual registers, and declare garbage collection roots
-  do_alloca_stack(Destinations++Params, Roots).
+  do_alloca_stack(Destinations++Params, Params, Roots).
 
 %% @doc
 collect_destinations(Code) ->
   lists:usort(lists:flatmap(fun insn_dst/1, Code)).
 
 %% @doc
-do_alloca_stack(Destinations, Roots) ->
-  do_alloca_stack(Destinations, Roots, []).
+do_alloca_stack(Destinations, Params, Roots) ->
+  do_alloca_stack(Destinations, Params, Roots, []).
 
-do_alloca_stack([], _, Acc) ->
+do_alloca_stack([], _, _, Acc) ->
   Acc;
-do_alloca_stack([D|Ds], Roots, Acc) ->
+do_alloca_stack([D|Ds], Params, Roots, Acc) ->
   {Name, _I} = trans_dst(D),
   case hipe_rtl:is_var(D) of
     true ->
@@ -115,22 +116,27 @@ do_alloca_stack([D|Ds], Roots, Acc) ->
           GcRootArgs = [{BYTE_TYPE_PP, T1}, {?BYTE_TYPE_P, "@gc_metadata"}],
           I3 = hipe_llvm:mk_call([], false, [], [], #llvm_void{},
                                  "@llvm.gcroot", GcRootArgs, []),
-          do_alloca_stack(Ds, Roots, [I1, I2, I3 | Acc]);
+          I4 = case lists:member(D, Params) of
+                 false -> hipe_llvm:mk_store(?WORD_TYPE, "-5", ?WORD_TYPE_P, Name,
+                                             [], [], false);
+                 true -> []
+               end,
+          do_alloca_stack(Ds, Params, Roots, [I1, I2, I3, I4 | Acc]);
         false ->
-          do_alloca_stack(Ds, Roots, [I1|Acc])
+          do_alloca_stack(Ds, Params, Roots, [I1|Acc])
       end;
     false ->
       case hipe_rtl:is_reg(D) andalso isPrecoloured(D) of
         true -> %% Precoloured registers are mapped to "special" stack slots
-          do_alloca_stack(Ds, Roots,  Acc);
+          do_alloca_stack(Ds, Params, Roots,  Acc);
         false ->
           case hipe_rtl:is_fpreg(D) of
             true -> %% Floating point registers
               I1 = hipe_llvm:mk_alloca(Name, ?FLOAT_TYPE, [], []),
-              do_alloca_stack(Ds, Roots, [I1|Acc]);
+              do_alloca_stack(Ds, Params, Roots, [I1|Acc]);
             false ->
               I1 = hipe_llvm:mk_alloca(Name, ?WORD_TYPE, [], []),
-              do_alloca_stack(Ds, Roots, [I1|Acc])
+              do_alloca_stack(Ds, Params, Roots, [I1|Acc])
           end
       end
   end.
