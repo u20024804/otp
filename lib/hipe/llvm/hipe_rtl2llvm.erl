@@ -29,7 +29,7 @@ fun_return_type() ->
 %% @doc Main function for translating an RTL function to LLVM Assembly. Takes as
 %%      input the RTL code and the variable indexes of possible garbage
 %%      collection roots and returns the corresponing LLVM, a dictionary with
-%%      all the relocations in the code and a hipe_constab() with informaton
+%%      all the relocations in the code and a hipe_consttab() with informaton
 %%      about data.
 %%------------------------------------------------------------------------------
 translate(RTL, Roots) ->
@@ -83,8 +83,8 @@ find_code_entry_label([I|_]) ->
   end.
 
 %% @doc Create a stack slot for each virtual register. The stack slots
-%% that correspond to possible garbage collection roots must be
-%% marked as such.
+%%      that correspond to possible garbage collection roots must be
+%%      marked as such.
 alloca_stack(Code, Params, Roots) ->
   %% Find all assigned virtual registers
   Destinations = collect_destinations(Code),
@@ -143,9 +143,8 @@ do_alloca_stack([D|Ds], Params, Roots, Acc) ->
 
 %%------------------------------------------------------------------------------
 %% @doc Translation of the linearized RTL Code. Each RTL instruction is
-%% translated to a list of LLVM Assembly instructions. The relocation
-%% dictionary is updated when needed.
-%% @end
+%%      translated to a list of LLVM Assembly instructions. The relocation
+%%      dictionary is updated when needed.
 %%------------------------------------------------------------------------------
 translate_instr_list([], Acc, Relocs, Data) ->
   {lists:reverse(lists:flatten(Acc)), Relocs, Data};
@@ -736,7 +735,7 @@ trans_return(I, Relocs) ->
   {[I4, I3, I2, I1], Relocs}.
 
 %% @doc Create a structure to hold the return value and the precoloured
-%% registers.
+%%      registers.
 mk_return_struct(RetValues, Type) ->
   mk_return_struct(RetValues, Type, [], "undef", 0).
 
@@ -816,7 +815,6 @@ trans_switch(I, Relocs, Data) ->
 
 %%------------------------------------------------------------------------------
 %% @doc Pass on RTL code in order to fix invoke and closure calls.
-%% @end
 %%------------------------------------------------------------------------------
 fix_code(Code) ->
   fix_calls(Code).
@@ -843,14 +841,14 @@ fix_calls([I|Is], Acc, FailLabels) ->
   end.
 
 %% @doc When a call has a fail continuation label it must be extended with a
-%% normal continuation label to go with the LLVM's invoke instruction.
-%% FailLabels is the list of labels of all fail blocks, which is needed to be
-%% declared as landing pads. Also we must go to fail labels and add a call to
-%% hipe_bifs:llvm_fix_pinned_regs:0 in order to avoid the reloading of old
-%% values of pinned registers (This happens because at fail labels, the result
-%% of an invoke instruction is no available, and we cannot get the correct
-%% values of pinned registers). Finnaly when there are stack arguments the stack
-%% needs to be readjusted.
+%%      normal continuation label to go with the LLVM's invoke instruction.
+%%      FailLabels is the list of labels of all fail blocks, which are needed to
+%%      be declared as landing pads. Furtermore, we must add to fail labels a
+%%      call to hipe_bifs:llvm_fix_pinned_regs/0 in order to avoid reloading old
+%%      values of pinned registers. This may happen because the result of an
+%%      invoke instruction is not available at fail-labels, and, thus, we cannot
+%%      get the correct values of pinned registers. Finally, the stack needs to
+%%      be re-adjusted when there are stack arguments.
 fix_invoke_call(I, FailLabel, FailLabels) ->
   NewLabel = hipe_gensym:new_label(llvm),
   NewCall1 =  hipe_rtl:call_normal_update(I, NewLabel),
@@ -1130,7 +1128,7 @@ trans_dst(A) ->
   end.
 
 %% @doc Translate a register. If it is precoloured it must be mapped to the
-%% correct stack slot that holds the precoloured register value.
+%%      correct stack slot that holds the precoloured register value.
 trans_reg(Arg, Position) ->
   Index = hipe_rtl:reg_index(Arg),
   case isPrecoloured(Arg) of
@@ -1280,9 +1278,9 @@ type_from_size(Size) ->
 
 %%-----------------------------------------------------------------------------
 %% @doc Create definition for the compiled function. The parameters that are
-%% passed to the stack must be reversed to much with the CC. Also precoloured
-%% registers that are passed as arguments must be stored to the corresonding
-%% stack slots.
+%%      passed to the stack must be reversed to match with the CC. Also
+%%      precoloured registers that are passed as arguments must be stored to
+%%      the corresonding stack slots.
 %%-----------------------------------------------------------------------------
 create_function_definition(Fun, Params, Code, LocalVars) ->
   FunctionName = trans_mfa_name(Fun),

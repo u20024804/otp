@@ -228,8 +228,8 @@ correlate_labels(Tables, Labels) ->
   end.
 
 %% @doc Create a gb_tree which contains information about the labels that used
-%% for switch's jump tables. The keys of the gb_tree are of the form {MFA,
-%% Label} and the Values are the actual Offsets
+%%      for switch's jump tables. The keys of the gb_tree are of the form
+%%      {MFA, Label} and the values are the actual Offsets.
 create_labelmap(MFA, SwitchInfos, RelocsDict) ->
   create_labelmap(MFA, SwitchInfos, RelocsDict, gb_trees:empty()).
 
@@ -421,7 +421,7 @@ find_exn_handler(RA, [{Start, End, Handler} | MoreExnHandlers]) ->
 
 %% @doc This function is responsible for correcting the stack descriptors of
 %%      the calls that are found in the code and have more than NR_ARG_REGS
-%%      (thus some of their arguments are passed to the stack). Because of the
+%%      (thus, some of their arguments are passed to the stack). Because of the
 %%      Reserved Call Frame feature that the LLVM uses, the stack descriptors
 %%      are not correct since at the point of call the frame size is reduced
 %%      proportionally to the number of arguments that are passed on the stack.
@@ -446,9 +446,9 @@ fix_stack_descriptors(RelocsDict, Relocs, SDescs, ExposedClosures) ->
   ClosuresOffs = closures_offsets_arity(ExposedClosures1, SDescs),
   fix_sdescs(NamedCallsOffs++ClosuresOffs, SDescs).
 
-%% @doc This function takes as argument the relocation dictionary as produced
-%% by the translation of RTL code to LLVM and finds the names of the calls (MFA
-%% and BIF calls) that have more than NR_ARG_REGS.
+%% @doc This function takes as argument the relocation dictionary as produced by
+%%      the translation of RTL code to LLVM and finds the names of the calls
+%%      (MFA and BIF calls) that have more than NR_ARG_REGS.
 calls_with_stack_args(Dict) ->
   calls_with_stack_args(dict:to_list(Dict), []).
 
@@ -465,7 +465,7 @@ calls_with_stack_args([_|Rest], Calls) ->
   calls_with_stack_args(Rest, Calls).
 
 %% @doc This functions extracts the stack arity and the offset in the code of
-%% the named calls (MFAs, BIFs) that have stack arguments.
+%%      the named calls (MFAs, BIFs) that have stack arguments.
 calls_offsets_arity(AccRefs, CallsWithStackArgs) ->
   calls_offsets_arity(AccRefs, CallsWithStackArgs, []).
 
@@ -487,11 +487,11 @@ calls_offsets_arity([{Type, Offset, Term} | Rest], CallsWithStackArgs, Acc)
 calls_offsets_arity([_|Rest], CallsWithStackArgs, Acc) ->
   calls_offsets_arity(Rest, CallsWithStackArgs, Acc).
 
-%% @doc this functions extract that stack arity and the offsets in the code of
-%% closures that have stack arity. The Closures argument represent the
-%% hipe_bifs:llvm_exposure_closure/0 calls in the code. The actual closure is
-%% the next call in the code, so the offset of the next call must be found from
-%% the stack descriptors.
+%% @doc This functions extracts the stack arity and the offsets of closures that
+%%      have stack arity. The Closures argument represents the
+%%      hipe_bifs:llvm_exposure_closure/0 calls in the code. The actual closure
+%%      is the next call in the code, so the offset of the next call must be
+%%      from calculated from the stack descriptors.
 closures_offsets_arity([], _) ->
   [];
 closures_offsets_arity(ExposedClosures, SDescs) ->
@@ -507,8 +507,8 @@ find_offsets([{Off,Arity}|Rest], Offsets, Acc) ->
   [I | RestOffsets] = lists:dropwhile(fun (Y) -> Y<Off end, Offsets),
   find_offsets(Rest, RestOffsets, [{I, Arity}|Acc]).
 
-%%%% The below functions correct the arity of calls, that are identified by
-%%%% offset, in the stack descriptors.
+%% The functions below correct the arity of calls, that are identified by offset,
+%% in the stack descriptors.
 fix_sdescs([], SDescs) -> SDescs;
 fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
   case lists:keyfind(Offset, 2, SDescs) of
