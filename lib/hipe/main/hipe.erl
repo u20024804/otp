@@ -1338,6 +1338,7 @@ opt_keys() ->
      to_rtl,
      to_llvm, % Use the LLVM backend
      llvm_save_temps, % Save LLVM intermediate files in current dir
+     llvm_bplace, % Use -enable-block-placement in llc (experimental)
      llvm_llc, % LLC optimization-level flag (o1, o2, o3, undefined)
      llvm_opt, % OPT optimization-level flag (o1, o2, o3, undefined)
      use_indexing,
