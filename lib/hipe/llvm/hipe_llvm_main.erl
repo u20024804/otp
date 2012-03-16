@@ -107,7 +107,7 @@ llvm_opt(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   Dest     = Source,
   OptLevel = trans_optlev_flag(opt, Options),
-  OptFlags = [OptLevel, "-mem2reg", "-strip-debug", "-block-placement"],
+  OptFlags = [OptLevel, "-mem2reg", "-strip"],
   Command  = "opt " ++ fix_opts(OptFlags) ++ " " ++ Source ++ " -o " ++ Dest,
   %% io:format("OPT: ~s~n", [Command]),
   case os:cmd(Command) of
@@ -120,9 +120,13 @@ llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
   Align    = find_stack_alignment(),
-  LlcFlags = [OptLevel, "-hipe-prologue", "-load=ErlangGC.so",
-              "-code-model=medium", "-stack-alignment=" ++ Align,
-              "-tailcallopt"],
+  LlcFlagsTemp = [OptLevel, "-hipe-prologue", "-load=ErlangGC.so",
+                  "-code-model=medium", "-stack-alignment=" ++ Align,
+                  "-tailcallopt"], %, "-enable-block-placement"],
+  LlcFlags = case proplists:get_bool(llvm_bplace, Options) of
+               true -> ["-enable-block-placement" | LlcFlagsTemp];
+               false -> LlcFlagsTemp
+             end,
   Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   %% io:format("LLC: ~s~n", [Command]),
   case os:cmd(Command) of
