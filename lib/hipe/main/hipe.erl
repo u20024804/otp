@@ -1414,9 +1414,6 @@ o3_opts() ->
       ?EXIT({executing_on_an_unsupported_architecture,Arch})
   end.
 
-llvm_opts(O) ->
-  [to_llvm, {llvm_opt, O}, {llvm_llc, O}].
-
 %% Note that in general, the normal form for options should be positive.
 %% This is a good programming convention, so that tests in the code say
 %% "if 'x' ..." instead of "if not 'no_x' ...".
@@ -1482,7 +1479,7 @@ opt_expansions() ->
   [{o1, o1_opts()},
    {o2, o2_opts()},
    {o3, o3_opts()},
-   {to_llvm, llvm_opts(o2)},
+   {to_llvm, llvm_opts(o3)},
    {{to_llvm, o0}, llvm_opts(o0)},
    {{to_llvm, o1}, llvm_opts(o1)},
    {{to_llvm, o2}, llvm_opts(o2)},
@@ -1491,6 +1488,9 @@ opt_expansions() ->
    {inline_fp, case get(hipe_target_arch) of %% XXX: Temporary until x86
 		 x86 -> [x87, inline_fp];    %%       has sse2
 		 _ -> [inline_fp] end}].
+
+llvm_opts(O) ->
+  [to_llvm, {llvm_opt, O}, {llvm_llc, o2}].
 
 %% This expands "basic" options, which may be tested early and cannot be
 %% in conflict with options found in the source code.
