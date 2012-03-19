@@ -51,7 +51,7 @@ compute_code_size([{_MFA, _BinaryCode, CodeSize, _, _, _}|Code], Size) ->
   compute_code_size(Code, align_entry(Size+CodeSize));
 compute_code_size([], Size) -> Size.
 
-combine_label_maps([{MFA, CodeBinary, CodeSize, _, _, LabelMap}|Code], Address, CLM) ->
+combine_label_maps([{MFA, _, CodeSize, _, _, LabelMap}|Code], Address, CLM) ->
   NewCLM = merge_label_map(gb_trees:to_list(LabelMap), MFA, Address, CLM),
   combine_label_maps(Code, align_entry(Address+CodeSize), NewCLM);
 combine_label_maps([], _Address, CLM) -> CLM.
