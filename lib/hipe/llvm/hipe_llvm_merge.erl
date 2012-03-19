@@ -26,10 +26,6 @@ finalize(CompiledCode, Closures, Exports) ->
   ?ASSERT(CodeSize =:= byte_size(CodeBinary)),
   AccRefs = merge_refs(CompiledCode1, ConstMap, 0, []),
   %% Bring CompiledCode to a combine_label_maps-acceptable form.
-  CompiledCode2 = [ {MFA, Ccode, CcodeSize, LabelMap} ||
-                    {MFA, Ccode, CcodeSize, _, _, LabelMap} <- CompiledCode1 ],
-  %% LabelMap = hipe_pack_constants:combine_label_maps(CompiledCode2, 0,
-  %%                                                   gb_trees:empty()),
   LabelMap   = combine_label_maps(CompiledCode1, 0, gb_trees:empty()),
   SC         = hipe_pack_constants:slim_constmap(ConstMap),
   DataRelocs = hipe_pack_constants:mk_data_relocs(RefsFromConsts, LabelMap),
