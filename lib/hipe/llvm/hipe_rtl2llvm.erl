@@ -89,7 +89,7 @@ alloca_stack(Code, Params, Roots) ->
   %% Find all assigned virtual registers
   Destinations = collect_destinations(Code),
   %% Declare virtual registers, and declare garbage collection roots
-  do_alloca_stack(Destinations++Params, Params, Roots).
+  do_alloca_stack(lists:usort(Destinations++Params), Params, Roots).
 
 %% @doc
 collect_destinations(Code) ->

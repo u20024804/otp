@@ -391,20 +391,20 @@ icode_to_rtl(MFA, Icode, Options, Servers) ->
   %% hipe_rtl_cfg:pp(RtlCfg3),
   pp(RtlCfg3, MFA, rtl_liveness, pp_rtl_liveness, Options, Servers),
   RtlCfg4 = rtl_lcm(RtlCfg3, Options),
+  pp(RtlCfg4, MFA, rtl, pp_rtl, Options, Servers),
+  LinearRtl1 = hipe_rtl_cfg:linearize(RtlCfg4),
+  LinearRtl2 = hipe_rtl_cleanup_const:cleanup(LinearRtl1),
   %% LLVM: A liveness analysis on RTL must be performed in order to find the
   %% GC roots and explicitly mark them in RTL when they go out of scope (only
   %% when the LLVM backend is used).
-  {RtlCfg5, Roots} =
+  {LinearRtl3, Roots} =
     case proplists:get_bool(to_llvm, Options) of
-      false -> {RtlCfg4, []};
-      true -> hipe_llvm_liveness:analyze(RtlCfg4)
+      false -> {LinearRtl2, []};
+      true -> hipe_llvm_liveness:analyze(LinearRtl2, RtlCfg4)
     end,
   %%
-  pp(RtlCfg5, MFA, rtl, pp_rtl, Options, Servers),
-  LinearRTL1 = hipe_rtl_cfg:linearize(RtlCfg5),
-  LinearRTL2 = hipe_rtl_cleanup_const:cleanup(LinearRTL1),
   %% hipe_rtl:pp(standard_io, LinearRTL2),
-  {LinearRTL2, Roots}.
+  {LinearRtl3, Roots}.
 
 translate_to_rtl(Icode, Options) ->
   %% GC tests should have been added in the conversion to Icode.

@@ -99,6 +99,7 @@
 -export([mk_rtl/8,
 	 rtl_fun/1,
 	 rtl_params/1,
+   rtl_params_update/2,
 	 rtl_is_closure/1,
 	 rtl_is_leaf/1, 
 	 rtl_code/1,
@@ -335,6 +336,7 @@
 	 %% subst/2,
 	 subst_uses/2,
 	 subst_defines/2,
+   subst_list/2,
 	 defines/1,
 	 redirect_jmp/3,
 	 is_safe/1,
@@ -389,6 +391,7 @@ mk_rtl(Fun, ArgList, Closure, Leaf, Code, Data, VarRange, LabelRange) ->
        var_range=VarRange, label_range=LabelRange}.
 rtl_fun(#rtl{'fun'=Fun}) -> Fun.
 rtl_params(#rtl{arglist=ArgList}) -> ArgList.
+rtl_params_update(Rtl, Params) -> Rtl#rtl{arglist=Params}.
 rtl_is_closure(#rtl{is_closure=Closure}) -> Closure.
 rtl_is_leaf(#rtl{is_leaf=Leaf}) -> Leaf.
 rtl_code(#rtl{code=Code}) -> Code.
