@@ -45,7 +45,7 @@ analyze(RTL, RtlCfg) ->
   %% Live intervals for the minimized roots
   RootIntervals2 = update_root_intervals(StackMap, RootIntervals),
   %%
-  RtlDict3 = kill_dead_vars(RtlDict2, RootIntervals2),
+  RtlDict3 = kill_dead_vars(RtlDict2, RootIntervals2, CallIndexes),
   {_, FinalCode} = lists:unzip(orddict:to_list(RtlDict3)),
   %% Update the RTL
   RTL2 = hipe_rtl:rtl_code_update(RTL, FinalCode),
@@ -283,9 +283,16 @@ do_update_intervals([V|Vs], S, Roots) ->
   do_update_intervals(Vs, S ,Root2).
 
 
-kill_dead_vars(RtlDict, RootIntervals) ->
+kill_dead_vars(RtlDict, RootIntervals, CallIndexes) ->
   Intervals = dict:to_list(RootIntervals),
-  kill_dead_vars2(Intervals, RtlDict).
+  Calls =  [{X,0} || X <- CallIndexes],
+  Intervals2 = lists:map(
+    fun({Var, IList}) ->
+        I1 = lists:keymerge(1, IList, Calls),
+        I2 = filter_intervals(I1, []),
+        {Var, I2}
+    end, Intervals),
+  kill_dead_vars2(Intervals2, RtlDict).
 
 kill_dead_vars2([], RtlDict) -> RtlDict;
 kill_dead_vars2([{Var, Intervals}|Rest], RtlDict) ->
@@ -301,6 +308,10 @@ kill_dead_var([{_Start, Stop}|Rest], Var, RtlDict) ->
   RtlDict2 = orddict:store(Stop, NewIns, RtlDict),
   kill_dead_var(Rest, Var, RtlDict2).
 
+filter_intervals([], Acc) -> Acc;
+filter_intervals([I,{_,0}|Rest], Acc) ->
+  filter_intervals(Rest, [I|Acc]);
+filter_intervals([_|Rest], Acc) -> filter_intervals(Rest, Acc).
 
 %%----------------------------------------------------------------------------
 %% @doc Convert a list of elements, to a an ordered dictionary
