@@ -14,7 +14,7 @@ analyze(RTL, RtlCfg) ->
   %% hipe_rtl_liveness:pp(RtlCfg),
   RtlCode = hipe_rtl:rtl_code(RTL),
   Params = hipe_rtl:rtl_params(RTL),
-  %% hipe_rtl:pp(RtlLinear),
+  %% hipe_rtl:pp(RTL),
   %% Store the code in an ordered dictionary, with keys being the
   %% numbering of instructions
   RtlDict = rtl_to_dict(RtlCode, orddict:new(), 0),
@@ -44,6 +44,7 @@ analyze(RTL, RtlCfg) ->
   RtlDict2 = rtl_to_dict(RtlCode2, orddict:new(), 0),
   %% Live intervals for the minimized roots
   RootIntervals2 = update_root_intervals(StackMap, RootIntervals),
+  %% erlang:display(RootIntervals2),
   %%
   RtlDict3 = kill_dead_vars(RtlDict2, RootIntervals2, CallIndexes),
   {_, FinalCode} = lists:unzip(orddict:to_list(RtlDict3)),
@@ -268,11 +269,10 @@ update_params([{Root, Vars}|Rest], Params) ->
   update_params(Rest, Params2).
 
 update_root_intervals([], RootIntervals) ->
-  dict:map(fun normalize_intervals/2, RootIntervals);
+  RootIntervals;
 update_root_intervals([{R,Rs}|Rest], RootIntervals) ->
-  RootsI2 = dict:store(R, [], RootIntervals),
-  RootsI3 = do_update_intervals(Rs, R, RootsI2),
-  update_root_intervals(Rest, RootsI3).
+  RootsI1 = do_update_intervals(Rs, R, RootIntervals),
+  update_root_intervals(Rest, RootsI1).
 
 do_update_intervals([], _, Roots) -> Roots;
 do_update_intervals([V|Vs], S, Roots) ->
@@ -288,7 +288,7 @@ kill_dead_vars(RtlDict, RootIntervals, CallIndexes) ->
   Calls =  [{X,0} || X <- CallIndexes],
   Intervals2 = lists:map(
     fun({Var, IList}) ->
-        I1 = lists:keymerge(1, IList, Calls),
+        I1 = lists:ukeysort(1, Calls++IList),
         I2 = filter_intervals(I1, []),
         {Var, I2}
     end, Intervals),
