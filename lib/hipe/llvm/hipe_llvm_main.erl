@@ -186,8 +186,10 @@ get_rodata_relocs(Elf) ->
       [elf_format:get_rela_entry_field(RelaE, r_addend)
        || RelaE <- elf_format:extract_rela(Elf, ?RODATA)];
     false ->
-      %% Find offsets hardcoded in ".rodata" entry:
-      elf_format:extract_rodata(Elf)
+      %% Find offsets hardcoded in ".rodata" entry
+      %%XXX: Treat all 0s as padding and skip them!
+      [SkipPadding || SkipPadding <- elf_format:extract_rodata(Elf),
+                      SkipPadding =/= 0]
   end.
 
 %% @doc Get switch table and closure table.
