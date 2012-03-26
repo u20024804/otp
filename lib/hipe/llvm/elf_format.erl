@@ -79,7 +79,7 @@ extract_header(Elf) ->
     EI_Pad:6/binary, EI_Nident
   >> = Ident_bin,
   Ident = elf_datatypes:mk_ehdr_ident(EI_Class, EI_Data, EI_Version, EI_Osabi,
-                              EI_Abiversion, EI_Pad, EI_Nident),
+                                      EI_Abiversion, EI_Pad, EI_Nident),
   elf_datatypes:mk_ehdr(Ident, Type, Machine, Version, Entry, Phoff, Shoff,
                         Flags, Ehsize, Phentsize, Phnum, Shentsize, Shnum,
                         Shstrndx).
