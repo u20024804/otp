@@ -39,8 +39,7 @@
 
 %% File header
 mk_ehdr(Ident, Type, Machine, Version, Entry, Phoff, Shoff, Flags, Ehsize,
-	Phentsize, Phnum, Shentsize, Shnum, Shstrndx
-	) ->
+	Phentsize, Phnum, Shentsize, Shnum, Shstrndx) ->
     #elf_ehdr{e_ident=Ident, e_type=Type, e_machine=Machine, e_version=Version,
 	      e_entry=Entry, e_phoff=Phoff, e_shoff=Shoff, e_flags=Flags,
 	      e_ehsize=Ehsize, e_phentsize=Phentsize, e_phnum=Phnum,
