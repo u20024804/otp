@@ -1,12 +1,10 @@
 %% -*- erlang-indent-level: 2 -*-
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
 %% Provides abstract datatypes for LLVM Assembly.
 %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%%---------------------------------------------------------------------
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Terminator Instructions
 -record(llvm_ret, {ret_list=[]}).
@@ -15,19 +13,23 @@
 -record(llvm_indirectbr, {type, address, label_list}).
 -record(llvm_switch, {type, value, default_label, value_label_list=[]}).
 -record(llvm_invoke, {dst, cconv=[], ret_attrs=[], type, fnptrval, arglist=[],
-    fn_attrs=[], to_label, unwind_label}).
+                      fn_attrs=[], to_label, unwind_label}).
+
 %% Binary Operations
 -record(llvm_operation, {dst, op, type, src1, src2, options=[]}).
+
 %% Aggregate Operations
 -record(llvm_extractvalue, {dst, type, val, idx, idxs=[]}).
 -record(llvm_insertvalue, {dst, val_type, val, elem_type, elem, idx, idxs=[]}).
+
 %% Memory Access And Addressing Operations
--record(llvm_alloca, {dst, type, num = [], align = []}).
--record(llvm_load, {dst, p_type, pointer, alignment = [], nontemporal = [],
-    volatile = false}).
--record(llvm_store, {type, value, p_type, pointer, alignment = [], nontemporal = [],
-    volatile = false}).
--record(llvm_getelementptr, {dst, p_type, value, typed_idxs = [], inbounds = false}).
+-record(llvm_alloca, {dst, type, num=[], align=[]}).
+-record(llvm_load, {dst, p_type, pointer, alignment=[], nontemporal=[],
+                    volatile=false}).
+-record(llvm_store, {type, value, p_type, pointer, alignment=[],
+                     nontemporal=[], volatile=false}).
+-record(llvm_getelementptr, {dst, p_type, value, typed_idxs, inbounds}).
+
 %% Conversion Operations
 -record(llvm_conversion, {dst, op, src_type, src, dst_type}).
 -record(llvm_sitofp, {dst, src_type, src, dst_type}).

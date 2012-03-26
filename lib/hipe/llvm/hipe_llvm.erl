@@ -381,8 +381,8 @@ store_volatile(#llvm_store{volatile=Volatile}) -> Volatile.
 %% getelementptr
 %%
 mk_getelementptr(Dst, P_Type, Value, Typed_Idxs, Inbounds) ->
-  #llvm_getelementptr{dst=Dst,p_type=P_Type, value=Value, typed_idxs=Typed_Idxs,
-    inbounds=Inbounds}.
+  #llvm_getelementptr{dst=Dst,p_type=P_Type, value=Value,
+                      typed_idxs=Typed_Idxs, inbounds=Inbounds}.
 getelementptr_dst(#llvm_getelementptr{dst=Dst}) -> Dst.
 getelementptr_p_type(#llvm_getelementptr{p_type=P_Type}) -> P_Type.
 getelementptr_value(#llvm_getelementptr{value=Value}) -> Value.
@@ -493,7 +493,7 @@ call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 %% fun_def
 %%
 mk_fun_def(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist,
-	   Fn_attrs, Align, Body) ->
+           Fn_attrs, Align, Body) ->
   #llvm_fun_def{
     linkage=Linkage,
     visibility=Visibility,
@@ -654,7 +654,7 @@ pp_ins(Dev, I) ->
                   invoke_unwind_label(I), " \n"]);
     #llvm_br_cond{} ->
       write(Dev, ["br i1 ", br_cond_cond(I), ", label ", br_cond_true_label(I),
-		  ", label ", br_cond_false_label(I)]),
+                  ", label ", br_cond_false_label(I)]),
       case br_cond_meta(I) of
         [] -> ok;
         Metadata ->
