@@ -120,7 +120,7 @@ llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
   Align    = find_stack_alignment(),
-  LlcFlagsTemp = [OptLevel, "-enable-hipe-prologue", "-load=ErlangGC.so",
+  LlcFlagsTemp = [OptLevel, "-hipe-prologue", "-load=ErlangGC.so",
                   "-code-model=medium", "-stack-alignment=" ++ Align,
                   "-tailcallopt"], %, "-enable-block-placement"],
   LlcFlags = case proplists:get_bool(llvm_bplace, Options) of
