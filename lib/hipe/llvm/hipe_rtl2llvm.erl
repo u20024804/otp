@@ -1303,7 +1303,7 @@ create_function_definition(Fun, Params, Code, LocalVars) ->
   EntryBlock = lists:flatten([EntryLabel, Exception_Sync, I2, LocalVars,
                               StoredParams, I3]),
   Final_Code = EntryBlock++Code,
-  FunctionOptions =  [nounwind, noredzone, list_to_atom("gc \"erlang_gc\"")],
+  FunctionOptions =  [nounwind, noredzone, list_to_atom("gc \"erlang\"")],
   hipe_llvm:mk_fun_def([], [], "cc 11", [], ?FUN_RETURN_TYPE, FunctionName,
                        Args, FunctionOptions, [], Final_Code).
 

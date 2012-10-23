@@ -18,7 +18,8 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Fix function name to an acceptable LLVM identifier (needed for closures)
   {_Module, Fun, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
-  {ok, Dir, ObjectFile} = compile_with_llvm(Fun, Arity, LLVMCode, Options, false),
+  {ok, Dir, ObjectFile} =
+    compile_with_llvm(Fun, Arity, LLVMCode, Options, false),
   %%
   %% Extract information from object file
   %%
@@ -46,7 +47,8 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   SDescs   = get_sdescs(ObjBin),
   %% FixedSDescs are the stack descriptors after correcting calls that have
   %% arguments in the stack
-  FixedSDescs = fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
+  FixedSDescs =
+    fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
   Refs = AccRefs++FixedSDescs,
   %% Get binary code from object file
   BinCode = elf_format:extract_text(ObjBin),
@@ -97,9 +99,10 @@ llvm_as(Dir, Fun_Name) ->
   Source  = Dir ++ Fun_Name ++ ".ll",
   Dest    = Dir ++ Fun_Name ++ ".bc",
   Command = "llvm-as " ++ Source ++ " -o " ++ Dest,
+  %% io:format("LLVM-AS: ~s~n", [Command]),
   case os:cmd(Command) of
     "" -> ok;
-    Error -> exit({?MODULE, opt, Error})
+    Error -> exit({?MODULE, as, Error})
   end.
 
 %% @doc Invoke opt tool to optimize the bitcode.
@@ -120,18 +123,13 @@ llvm_llc(Dir, Fun_Name, Options) ->
   Source   = Dir ++ Fun_Name ++ ".bc",
   OptLevel = trans_optlev_flag(llc, Options),
   Align    = find_stack_alignment(),
-  LlcFlagsTemp = [OptLevel, "-hipe-prologue", "-load=ErlangGC.so",
-                  "-code-model=medium", "-stack-alignment=" ++ Align,
-                  "-tailcallopt"], %, "-enable-block-placement"],
-  LlcFlags = case proplists:get_bool(llvm_bplace, Options) of
-               true -> ["-enable-block-placement" | LlcFlagsTemp];
-               false -> LlcFlagsTemp
-             end,
+  LlcFlags = [OptLevel, "-code-model=medium", "-stack-alignment=" ++ Align
+             , "-tailcallopt"],
   Command  = "llc " ++ fix_opts(LlcFlags) ++ " " ++ Source,
   %% io:format("LLC: ~s~n", [Command]),
   case os:cmd(Command) of
     "" -> ok;
-    Error -> exit({?MODULE, opt, Error})
+    Error -> exit({?MODULE, llc, Error})
   end.
 
 %% @doc Invoke the compiler tool ("gcc", "llvmc", etc.) to generate an object
@@ -140,15 +138,16 @@ compile(Dir, Fun_Name, Compiler) ->
   Source  = Dir ++ Fun_Name ++ ".s",
   Dest    = Dir ++ Fun_Name ++ ".o",
   Command = Compiler ++ " -c " ++ Source ++ " -o " ++ Dest,
+  %% io:format("~s: ~s~n", [Compiler,Command]),
   case os:cmd(Command) of
     "" -> ok;
-    Error -> exit({?MODULE, llvmc, Error})
+    Error -> exit({?MODULE, cc, Error})
   end,
   Dest.
 
 find_stack_alignment() ->
   case get(hipe_target_arch) of
-    x86 -> "8";
+    x86 -> "4";
     amd64 -> "8";
     _ -> exit({?MODULE, find_stack_alignment, "Unimplemented architecture"})
   end.
@@ -157,13 +156,12 @@ find_stack_alignment() ->
 fix_opts(Opts) ->
   string:join(Opts, " ").
 
-%% Translate optimization-level flag (default is "none")
+%% Translate optimization-level flag (default is "O2")
 trans_optlev_flag(Tool, Options) ->
-  Flag =
-    case Tool of
-      opt -> llvm_opt;
-      llc -> llvm_llc
-    end,
+  Flag = case Tool of
+          opt -> llvm_opt;
+          llc -> llvm_llc
+         end,
   case proplists:get_value(Flag, Options) of
     o0 -> ""; % "-O0" does not exist in opt tool
     o1 -> "-O1";
