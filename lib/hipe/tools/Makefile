@@ -42,8 +42,8 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 # ----------------------------------------------------
 # Target Specs
 # ----------------------------------------------------
-MODULES = hipe_profile hipe_jit
-#	  hipe_timer
+MODULES = hipe_tool hipe_profile hipe_ceach hipe_jit
+#	         hipe_timer
 
 HRL_FILES=
 ERL_FILES= $(MODULES:%=%.erl)
