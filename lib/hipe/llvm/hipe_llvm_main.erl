@@ -341,7 +341,7 @@ get_sdescs(Elf) ->
       SPCount = length(RelaNoteGC),
       T = SPCount * ?SP_ADDR_SIZE,
       %% Pattern-match fields of ".note.gc":
-      <<_SPCount:(?bits(?SP_COUNT_SIZE))/integer-little, % Skip count
+      <<SPCount:(?bits(?SP_COUNT_SIZE))/integer-little, % Sanity check!
         SPAddrs:T/binary, %NOTE: In 64bit they 're relocs!
         StkFrameSize:(?bits(?SP_STKFRAME_SIZE))/integer-little,
         StkArity:(?bits(?SP_STKARITY_SIZE))/integer-little,
@@ -389,7 +389,7 @@ get_liveroots(<<Root:?bits(?LR_STKINDEX_SIZE)/integer-little,
 get_spoffs(<<>>, Acc) ->
   lists:reverse(Acc);
 get_spoffs(SPOffs, Acc) ->
-  <<SPOff:?bits(?ELF_ADDR_SIZE)/integer-little,
+  <<SPOff:?bits(?SP_ADDR_SIZE)/integer-little,
     More/binary>> = SPOffs,
   get_spoffs(More, [SPOff | Acc]).
 

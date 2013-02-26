@@ -346,7 +346,7 @@
 %%------------------------------------------------------------------------------
 -define(ELF_DYN_SIZE, (?D_TAG_SIZE + ?D_VAL_PTR_SIZE) ).
 
--define(D_TAG_SIZE, ?ELF_SXWORD_SIZE).
+-define(D_TAG_SIZE,     ?ELF_SXWORD_SIZE).
 -define(D_VAL_PTR_SIZE, ?ELF_ADDR_SIZE).
 
 %% Offsets of each field in Dynamic Table entry in binary
