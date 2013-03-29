@@ -73,7 +73,7 @@ include ../native.mk
 
 ERL_COMPILE_FLAGS += +inline +warn_missing_spec
 
-# if in 32 bit back end define BIT32 symbol
+# if in 32 bit backend define BIT32 symbol
 ARCH = $(shell echo $(TARGET) | sed 's/^\(x86_64\)-.*/64bit/')
 ifneq ($(ARCH), 64bit)
 ERL_COMPILE_FLAGS += -DBIT32

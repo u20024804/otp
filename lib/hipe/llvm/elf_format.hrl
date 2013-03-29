@@ -429,44 +429,44 @@
 
 %%      The structure of this section is the following:
 %%
-%%       .long <n>       # number of safe points in code
+%%       .short <n>       # number of safe points in code
 %%
 %%       .long .L<label1> # safe point address               |
 %%       .long .L<label2> # safe point address               |-> safe point addrs
 %%          .....                                            |
 %%       .long .L<label3> # safe point address               |
 %%
-%%       .long <n>       # stack frame size (in words)      |-> fixed-size part
-%%       .long <n>       # stack arity                      |
-%%       .long <n>       # number of live roots that follow |
+%%       .short <n>       # stack frame size (in words)      |-> fixed-size part
+%%       .short <n>       # stack arity                      |
+%%       .short <n>       # number of live roots that follow |
 %%
-%%       .long <n>       # live root's stack index  |
-%%          .....                                   |-> live root indices
-%%       .long <n>       #          >>              |
+%%       .short <n>       # live root's stack index  |
+%%          .....                                    |-> live root indices
+%%       .short <n>       #          >>              |
 
 %% The name of the custom Note Section
 -define(NOTE_ERLGC_NAME, ".gc").
 
 %% The first word of a Note Section for Erlang GC (".note.gc") is always the
 %% number of safepoints in code.
--define(SP_COUNT, {?SP_COUNT_OFFSET, ?SP_COUNT_SIZE}).
--define(SP_COUNT_SIZE,   ?ELF_WORD_SIZE).
+-define(SP_COUNT,        {?SP_COUNT_OFFSET, ?SP_COUNT_SIZE}).
+-define(SP_COUNT_SIZE,   ?ELF_HALF_SIZE).
 -define(SP_COUNT_OFFSET, 0).                %(always the first entry in sdesc)
 
 %% The fixed-size part of a safe point (SP) entry consists of 4 words: the SP
 %% address (offset in code), the stack frame size of the function (where the SP
 %% is located), the stack arity of the function (the registered values are *not*
 %% counted), the number of live roots in the specific SP.
--define(SP_FIXED, {?SP_FIXED_OFF, ?SP_FIXED_SIZE}).
+-define(SP_FIXED,     {?SP_FIXED_OFF, ?SP_FIXED_SIZE}).
 -define(SP_FIXED_OFF, 0).
 %%XXX: Exclude SP_ADDR_SIZE from SP_FIXED_SIZE in lew of new GC layout
 -define(SP_FIXED_SIZE, (?SP_STKFRAME_SIZE + ?SP_STKARITY_SIZE
 			 + ?SP_LIVEROOTCNT_SIZE)).
 
 -define(SP_ADDR_SIZE,        ?ELF_WORD_SIZE).
--define(SP_STKFRAME_SIZE,    ?ELF_WORD_SIZE).
--define(SP_STKARITY_SIZE,    ?ELF_WORD_SIZE).
--define(SP_LIVEROOTCNT_SIZE, ?ELF_WORD_SIZE).
+-define(SP_STKFRAME_SIZE,    ?ELF_HALF_SIZE).
+-define(SP_STKARITY_SIZE,    ?ELF_HALF_SIZE).
+-define(SP_LIVEROOTCNT_SIZE, ?ELF_HALF_SIZE).
 
 %%XXX: SP_STKFRAME is the first piece of information in the new GC layout
 -define(SP_STKFRAME_OFFSET,    0).
@@ -480,7 +480,7 @@
 
 %% After the fixed-size part a variable-size part exists. This part holds the
 %% stack frame index of every live root in the specific SP.
--define(LR_STKINDEX_SIZE, ?ELF_WORD_SIZE).
+-define(LR_STKINDEX_SIZE, ?ELF_HALF_SIZE).
 
 %%------------------------------------------------------------------------------
 %% Misc.
