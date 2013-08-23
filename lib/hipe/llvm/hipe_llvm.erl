@@ -255,9 +255,9 @@ br_dst(#llvm_br{dst=Dst}) -> Dst.
 %%
 mk_br_cond(Cond, True_label, False_label) ->
   #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label}.
-mk_br_cond(Cond, True_label, False_label,Metadata) ->
+mk_br_cond(Cond, True_label, False_label, Metadata) ->
   #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label,
-    meta=Metadata}.
+		meta=Metadata}.
 br_cond_cond(#llvm_br_cond{'cond'=Cond}) -> Cond.
 br_cond_true_label(#llvm_br_cond{true_label=True_label}) -> True_label.
 br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
