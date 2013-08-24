@@ -49,7 +49,7 @@ int hipe_patch_insn(void *address, Uint32 value, Eterm type)
         break;
       case am_atom:
       case am_c_const:
-       break;
+	break;
       case am_x86_abs_pcrel:
 	value += (Uint)address;
 	break;
