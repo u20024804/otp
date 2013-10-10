@@ -188,7 +188,6 @@ load_nosmp(Mod, Bin) ->
 
 %%------------------------------------------------------------------------
 
-
 load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
   %% Unpack the binary.
   [{Version, CheckSum},
@@ -228,7 +227,7 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
       {MFAs,Addresses} = exports(ExportMap, CodeAddress),
       %% Remove references to old versions of the module.
       ReferencesToPatch = get_refs_from(MFAs, []),
-      %io:format("ReferencesToPatch ~w~n", [ReferencesToPatch]),
+      %%io:format("ReferencesToPatch ~w~n", [ReferencesToPatch]),
       ok = remove_refs_from(MFAs),
       %% Patch all dynamic references in the code.
       %%  Function calls, Atoms, Constants, System calls
@@ -254,8 +253,7 @@ load_common(Mod, Bin, Beam, OldReferencesToPatch) ->
 	  AddressesOfClosuresToPatch =
 	    calculate_addresses(ClosurePatches, CodeAddress, Addresses),
 	  export_funs(Addresses),
-	  export_funs(Mod, BeamBinary, Addresses, AddressesOfClosuresToPatch),
-	  ok
+	  export_funs(Mod, BeamBinary, Addresses, AddressesOfClosuresToPatch)
       end,
       %% Redirect references to the old module to the new module's BEAM stub.
       patch_to_emu_step2(OldReferencesToPatch),
@@ -558,6 +556,7 @@ patch_sdesc(?STACK_DESC(SymExnRA, FSize, Arity, Live),
   ?ASSERT(assert_local_patch(Address)),
   DBG_MFA = ?IF_DEBUG(address_to_mfa_lth(Address, _Addresses), {undefined,undefined,0}),
   hipe_bifs:enter_sdesc({Address, ExnRA, FSize, Arity, Live, DBG_MFA}).
+
 
 %%----------------------------------------------------------------
 %% Handle a 'load_address'-type patch.
