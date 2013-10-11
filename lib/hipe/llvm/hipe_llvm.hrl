@@ -2,7 +2,7 @@
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%
-%% Provides abstract datatypes for LLVM Assembly.
+%% Provides Abstract Datatype Declarations for LLVM Assembly.
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -22,7 +22,7 @@
 -record(llvm_extractvalue, {dst, type, val, idx, idxs=[]}).
 -record(llvm_insertvalue, {dst, val_type, val, elem_type, elem, idx, idxs=[]}).
 
-%% Memory Access And Addressing Operations
+%% Memory Access and Addressing Operations
 -record(llvm_alloca, {dst, type, num=[], align=[]}).
 -record(llvm_load, {dst, p_type, pointer, alignment=[], nontemporal=[],
                     volatile=false}).
@@ -35,6 +35,7 @@
 -record(llvm_sitofp, {dst, src_type, src, dst_type}).
 -record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
 -record(llvm_inttoptr, {dst, src_type, src, dst_type}).
+
 %% Other Operations
 -record(llvm_icmp, {dst, 'cond', type, src1, src2}).
 -record(llvm_fcmp, {dst, 'cond', type, src1, src2}).
