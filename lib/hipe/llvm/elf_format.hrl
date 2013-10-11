@@ -198,14 +198,14 @@
 -define(SHF_MASKPROC,  16#F0000000).
 
 %%
-%% Standar Section names for Code and Data
+%% Standard Section names for Code and Data
 %%
 -define(BSS,        ".bss").
 -define(DATA,       ".data").
 -define(INTERP,     ".interp").
 -define(RODATA,     ".rodata").
 -define(TEXT,       ".text").
-%% Other Standar Section names
+%% Other Standard Section names
 -define(COMMENT,    ".comment").
 -define(DYNAMIC,    ".dynamic").
 -define(DYNSTR,     ".dynstr").
