@@ -7,7 +7,7 @@
 -include("hipe_llvm_arch.hrl").
 -include("elf_format.hrl").
 
-%% @doc Translation of RTL to a loadable object. This functions takes the RTL
+%% @doc Translation of RTL to a loadable object. This function takes the RTL
 %%      code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to
 %%      LLVM code. After this, LLVM asm is printed to a file and the LLVM tool
 %%      chain is invoked in order to produce an object file.
@@ -32,9 +32,9 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
     correlate_labels(Switches++Closures, Labels),
-    %% SwitchInfos:     [{"table_50", [Labels]}]
-    %% ExposedClosures: [{"table_closures", [Labels]}]
-
+  %% SwitchInfos:     [{"table_50", [Labels]}]
+  %% ExposedClosures: [{"table_closures", [Labels]}]
+  
   %% Labelmap contains the offsets of the labels in the code that are
   %% used for switch's jump tables
   LabelMap = create_labelmap(MFA, SwitchInfos, RelocsDict),
@@ -53,7 +53,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Get binary code from object file
   BinCode = elf_format:extract_text(ObjBin),
   %% Remove temp files (if needed)
-  remove_temp_folder(Dir, Options),
+  ok = remove_temp_folder(Dir, Options),
   %% Return the code together with information that will be used in the
   %% hipe_llvm_merge module to produce the final binary that will be loaded
   %% by the hipe unified loader.
@@ -79,9 +79,9 @@ compile_with_llvm(FunName, Arity, LLVMCode, Options, UseBuffer) ->
     end,
   {ok, File_llvm} = file:open(Dir ++ Filename ++ ".ll", OpenOpts),
   hipe_llvm:pp_ins_list(File_llvm, LLVMCode),
-  %% delayed write can cause file:close not to do a close
-  file:close(File_llvm),
-  file:close(File_llvm),
+  %% delayed_write can cause file:close not to do a close, hence the two calls
+  ok = file:close(File_llvm),
+  __ = file:close(File_llvm),
   %% Invoke LLVM compiler tools to produce an object file
   ObjectFile = invoke_llvm_tools(Dir, Filename, Options),
   {ok, Dir, ObjectFile}.
@@ -159,8 +159,8 @@ fix_opts(Opts) ->
 %% Translate optimization-level flag (default is "O2")
 trans_optlev_flag(Tool, Options) ->
   Flag = case Tool of
-          opt -> llvm_opt;
-          llc -> llvm_llc
+	   opt -> llvm_opt;
+	   llc -> llvm_llc
          end,
   case proplists:get_value(Flag, Options) of
     o0 -> ""; % "-O0" does not exist in opt tool
@@ -297,7 +297,7 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc) ->
                  [{?LOAD_ATOM, Offset, AtomName}|RelocAcc]);
     {constant, Label} ->
       fix_relocs(Rs, RelocsDict, MFA,
-                [{?LOAD_ADDRESS, Offset, {constant, Label}}|RelocAcc]);
+		 [{?LOAD_ADDRESS, Offset, {constant, Label}}|RelocAcc]);
     {switch, _, JTabLab} -> %% Treat switch exactly as constant
       fix_relocs(Rs, RelocsDict, MFA,
                  [{?LOAD_ADDRESS, Offset, {constant, JTabLab}}|RelocAcc]);
@@ -316,8 +316,8 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc) ->
       fix_relocs(Rs, RelocsDict, MFA,
                  [{?CALL_REMOTE, Offset, CallMFA}|RelocAcc]);
     Other ->
-      exit({?MODULE, fix_relocs, {"Relocation Not In Relocation Dictionary",
-                  Other}})
+      exit({?MODULE, fix_relocs,
+	    {"Relocation Not In Relocation Dictionary", Other}})
   end.
 
 %%------------------------------------------------------------------------------
@@ -396,7 +396,7 @@ get_spoffs(SPOffs, Acc) ->
 create_sdesc_list([], _, _, _, Acc) ->
   lists:reverse(Acc);
 create_sdesc_list([{ExnLbl, SPOff} | MoreExnAndSPOffs],
-                 StkFrameSize, StkArity, LiveRoots, Acc) ->
+		  StkFrameSize, StkArity, LiveRoots, Acc) ->
   Hdlr = case ExnLbl of
            0 -> [];
            N -> N
@@ -443,7 +443,7 @@ fix_stack_descriptors(RelocsDict, Relocs, SDescs, ExposedClosures) ->
             case ExposedClosures of
               {_,  Offsets} -> lists:zip(Offsets, ArityList);
               _ -> exit({?MODULE, fix_stack_descriptors,
-                        {"Wrong exposed closures", ExposedClosures}})
+			 {"Wrong exposed closures", ExposedClosures}})
             end;
       false -> []
     end,
@@ -458,7 +458,7 @@ calls_with_stack_args(Dict) ->
 
 calls_with_stack_args([], Calls) -> Calls;
 calls_with_stack_args([ {_Name, {call, {M, F, A}}} | Rest], Calls)
-                      when A > ?NR_ARG_REGS ->
+  when A > ?NR_ARG_REGS ->
   Call =
     case M of
       bif -> {F,A};
@@ -475,7 +475,7 @@ calls_offsets_arity(AccRefs, CallsWithStackArgs) ->
 
 calls_offsets_arity([], _, Acc) -> Acc;
 calls_offsets_arity([{Type, Offset, Term} | Rest], CallsWithStackArgs, Acc)
-                    when Type == ?CALL_REMOTE orelse Type == ?CALL_LOCAL ->
+  when Type =:= ?CALL_REMOTE orelse Type =:= ?CALL_LOCAL ->
   case lists:member(Term, CallsWithStackArgs) of
     true ->
       Arity =
@@ -499,11 +499,10 @@ calls_offsets_arity([_|Rest], CallsWithStackArgs, Acc) ->
 closures_offsets_arity([], _) ->
   [];
 closures_offsets_arity(ExposedClosures, SDescs) ->
-  Offsets = [ Offset || {_, Offset, _} <- SDescs ],
-  SortedOffsets = lists:sort(Offsets), %% Offsets must be sorted in order
-                                       %% find_offsets/3 fun to work
-  SortedExposedClosures = lists:keysort(1, ExposedClosures), %% Same for
-                                                             %% closures
+  Offsets = [Offset || {_, Offset, _} <- SDescs],
+  %% Offsets and closures must be sorted in order for find_offsets/3 to work
+  SortedOffsets = lists:sort(Offsets),
+  SortedExposedClosures = lists:keysort(1, ExposedClosures),
   find_offsets(SortedExposedClosures, SortedOffsets, []).
 
 find_offsets([], _, Acc) -> Acc;
@@ -511,8 +510,8 @@ find_offsets([{Off,Arity}|Rest], Offsets, Acc) ->
   [I | RestOffsets] = lists:dropwhile(fun (Y) -> Y<Off end, Offsets),
   find_offsets(Rest, RestOffsets, [{I, Arity}|Acc]).
 
-%% The functions below correct the arity of calls, that are identified by offset,
-%% in the stack descriptors.
+%% The functions below correct the arity of calls, that are identified
+%% by offset, in the stack descriptors.
 fix_sdescs([], SDescs) -> SDescs;
 fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
   case lists:keyfind(Offset, 2, SDescs) of
@@ -580,7 +579,7 @@ unique_folder(FunName, Arity, Options) ->
 %%      Name (from http://rosettacode.org/wiki/Ensure_that_a_file_exists#Erlang)
 dir_exists(Filename) ->
   {Flag, Info} = file:read_file_info(Filename),
-  (Flag == ok) andalso (element(3, Info) == directory).
+  (Flag =:= ok) andalso (element(3, Info) =:= directory).
 
 %% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
