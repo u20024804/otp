@@ -78,8 +78,7 @@ ehdr_ident_field(Ident, ei_nident)     -> Ident#elf_ehdr_ident.ei_nident.
 mk_shdr(Name, Type, Flags, Addr, Offset, Size, Link, Info, Addralign, Entsize) ->
     #elf_shdr{sh_name=Name, sh_type=Type, sh_flags=Flags, sh_addr=Addr,
 	      sh_offset=Offset, sh_size=Size, sh_link=Link, sh_info=Info,
-	      sh_addralign=Addralign, sh_entsize=Entsize
-	     }.
+	      sh_addralign=Addralign, sh_entsize=Entsize}.
 
 shdr_field(Shdr, sh_name)      -> Shdr#elf_shdr.sh_name;
 shdr_field(Shdr, sh_type)      -> Shdr#elf_shdr.sh_type;
@@ -94,9 +93,8 @@ shdr_field(Shdr, sh_entsize)   -> Shdr#elf_shdr.sh_entsize.
 
 %% Symbol Table
 mk_sym(Name, Info, Other, Shndx, Value, Size) ->
-    #elf_sym{st_name=Name, st_info=Info, st_other=Other,
-	     st_shndx=Shndx, st_value=Value, st_size=Size
-	    }.
+  #elf_sym{st_name=Name, st_info=Info, st_other=Other,
+	   st_shndx=Shndx, st_value=Value, st_size=Size}.
 sym_field(Sym, st_name)  -> Sym#elf_sym.st_name;
 sym_field(Sym, st_info)  -> Sym#elf_sym.st_info;
 sym_field(Sym, st_other) -> Sym#elf_sym.st_other;
@@ -106,12 +104,12 @@ sym_field(Sym, st_size)  -> Sym#elf_sym.st_size.
 
 %% Relocations
 mk_rel(Offset, Info) ->
-    #elf_rel{r_offset=Offset, r_info=Info}.
+  #elf_rel{r_offset=Offset, r_info=Info}.
 rel_field(Rel, r_offset) -> Rel#elf_rel.r_offset;
 rel_field(Rel, r_info)   -> Rel#elf_rel.r_info.
 
 mk_rela(Offset, Info, Addend) ->
-    #elf_rela{r_offset=Offset, r_info=Info, r_addend=Addend}.
+  #elf_rela{r_offset=Offset, r_info=Info, r_addend=Addend}.
 rela_field(Rela, r_offset) -> Rela#elf_rela.r_offset;
 rela_field(Rela, r_info)   -> Rela#elf_rela.r_info;
 rela_field(Rela, r_addend) -> Rela#elf_rela.r_addend.
@@ -132,11 +130,11 @@ gccexntab_field(Ge, ge_cstab)     -> Ge#elf_gccexntab.ge_cstab.
 mk_gccexntab_callsite(Start, Size, LP, Action) ->
    #elf_gccexntab_callsite{gee_start=Start, gee_size=Size, gee_lp=LP,
 			   gee_onaction=Action}.
-gccexntab_callsite_field(CsE, gee_start)    ->
+gccexntab_callsite_field(CsE, gee_start) ->
   CsE#elf_gccexntab_callsite.gee_start;
-gccexntab_callsite_field(CsE, gee_size)     ->
+gccexntab_callsite_field(CsE, gee_size) ->
   CsE#elf_gccexntab_callsite.gee_size;
-gccexntab_callsite_field(CsE, gee_lp)       ->
+gccexntab_callsite_field(CsE, gee_lp) ->
   CsE#elf_gccexntab_callsite.gee_lp;
 gccexntab_callsite_field(CsE, gee_onaction) ->
   CsE#elf_gccexntab_callsite.gee_onaction.
