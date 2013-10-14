@@ -27,7 +27,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Read and set the ELF class
   elf_format:set_architecture_flag(ObjBin),
   %% Get labels info (for switches and jump tables)
-  Labels = get_rodata_relocs(ObjBin),
+  Labels = elf_format:get_rodata_relocs(ObjBin),
   {Switches, Closures} = get_tables(ObjBin),
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
@@ -39,12 +39,12 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% used for switch's jump tables
   LabelMap = create_labelmap(MFA, SwitchInfos, RelocsDict),
   %% Get relocation info
-  TextRelocs = get_text_relocs(ObjBin),
+  TextRelocs = elf_format:get_text_relocs(ObjBin),
   %% AccRefs contains the offsets of all references to relocatable symbols in
   %% the code:
-  AccRefs  = fix_relocations(TextRelocs, RelocsDict, MFA),
+  AccRefs = fix_relocations(TextRelocs, RelocsDict, MFA),
   %% Get stack descriptors
-  SDescs   = get_sdescs(ObjBin),
+  SDescs = get_sdescs(ObjBin),
   %% FixedSDescs are the stack descriptors after correcting calls that have
   %% arguments in the stack
   FixedSDescs =
@@ -174,43 +174,15 @@ trans_optlev_flag(Tool, Options) ->
 %% Functions to manage Relocations
 %%------------------------------------------------------------------------------
 
-%% @doc This function gets as argument an ELF binary file and returns a list
-%%      with all .rela.rodata labels (i.e. constants and literals in code)
-%%      or an empty list if no ".rela.rodata" section exists in code.
-get_rodata_relocs(Elf) ->
-  case elf_format:is64bit() of
-    true ->
-      %% Only care about the addends (== offsets):
-      [elf_format:get_rela_entry_field(RelaE, r_addend)
-       || RelaE <- elf_format:extract_rela(Elf, ?RODATA)];
-    false ->
-      %% Find offsets hardcoded in ".rodata" entry
-      %%XXX: Treat all 0s as padding and skip them!
-      [SkipPadding || SkipPadding <- elf_format:extract_rodata(Elf),
-                      SkipPadding =/= 0]
-  end.
-
 %% @doc Get switch table and closure table.
 get_tables(Elf) ->
   %% Search Symbol Table for an entry with name prefixed with "table_":
-  SymtabTemp = [{elf_format:get_symtab_entry_field(SymtabE, st_name),
-                 elf_format:get_symtab_entry_field(SymtabE, st_value),
-                 elf_format:get_symtab_entry_field(SymtabE, st_size) div ?ELF_XWORD_SIZE}
-                || SymtabE <- elf_format:extract_symtab(Elf)],
-  SymtabTemp2 = [T || T={Name, _, _} <- SymtabTemp, Name =/= 0],
-  {NameIndices, ValueOffs, Sizes} = lists:unzip3(SymtabTemp2),
-  %% Find the names of the symbols.
-  %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
-  %% relevant entries:
-  Strtab = elf_format:extract_strtab(Elf),
-  Relevant = [elf_format:get_strtab_entry(Strtab, Off) || Off <- NameIndices],
-  %% Zip back to {Name, ValueOff, Size}:
-  Triples = lists:zip3(Relevant, ValueOffs, Sizes),
+  Triples = elf_format:get_tab_entries(Elf),
   Switches = [T || T={"table_"++_, _, _} <- Triples],
   Closures = [T || T={"table_closures"++_, _, _} <- Switches],
   {Switches, Closures}.
 
-%% @doc This functions associates symbols who point to some table of labels with
+%% @doc This function associates symbols who point to some table of labels with
 %%      the corresponding offsets of the labels in the code. These tables can
 %%      either be jump tables for switches or a table which contains the labels
 %%      of blocks that contain closure calls with more than ?NR_ARG_REGS.
@@ -258,32 +230,6 @@ insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
       insert_to_labelmap(Rest, LabelMap)
   end.
 
-%% @doc Extract a list of the form `[{SymbolName, Offset}]' with all relocatable
-%%      symbols and their offsets in the code from the ".text" section.
--spec get_text_relocs(binary()) -> [{string(), integer()}].
-get_text_relocs(Elf) ->
-  %% Only care about the symbol table index and the offset:
-  NameOffsetTemp = [{?ELF_R_SYM(elf_format:get_rela_entry_field(RelaE, r_info)),
-                     elf_format:get_rela_entry_field(RelaE, r_offset)}
-                    || RelaE <- elf_format:extract_rela(Elf, ?TEXT)],
-  {NameIndices, ActualOffsets} = lists:unzip(NameOffsetTemp),
-  %% Find the names of the symbols:
-  %%
-  %% Get those symbol table entries that are related to Text relocs:
-  Symtab    = elf_format:extract_symtab(Elf),
-  SymtabEs  = [ lists:nth(Index+1, Symtab) || Index <- NameIndices ],
-                                                %XXX: not zero-indexed!
-  %% Symbol table entries contain the offset of the name of the symbol in
-  %% String Table:
-  SymtabEs2 = [elf_format:get_symtab_entry_field(SymE, st_name)
-               || SymE <- SymtabEs], %XXX: Do we need to sort SymtabE?
-  %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
-  %% relevant entries:
-  Strtab = elf_format:extract_strtab(Elf),
-  Relevant = [elf_format:get_strtab_entry(Strtab, Off) || Off <- SymtabEs2],
-  %% Zip back with actual offsets:
-  lists:zip(Relevant, ActualOffsets).
-
 %% @doc Correlate object file relocation symbols with info from translation to
 %%      llvm code.
 fix_relocations(Relocs, RelocsDict, MFA) ->
@@ -317,7 +263,7 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc) ->
                  [{?CALL_REMOTE, Offset, CallMFA}|RelocAcc]);
     Other ->
       exit({?MODULE, fix_relocs,
-	    {"Relocation Not In Relocation Dictionary", Other}})
+	    {"Relocation not in Relocation Dictionary", Other}})
   end.
 
 %%------------------------------------------------------------------------------
@@ -340,38 +286,25 @@ get_sdescs(Elf) ->
       RelaNoteGC = elf_format:extract_rela(Elf, ?NOTE(?NOTE_ERLGC_NAME)),
       SPCount = length(RelaNoteGC),
       T = SPCount * ?SP_ADDR_SIZE,
-      %% Pattern-match fields of ".note.gc":
+      %% Pattern match fields of ".note.gc":
       <<SPCount:(?bits(?SP_COUNT_SIZE))/integer-little, % Sanity check!
-        SPAddrs:T/binary, %NOTE: In 64bit they 're relocs!
+        SPAddrs:T/binary, % NOTE: In 64bit they are relocs!
         StkFrameSize:(?bits(?SP_STKFRAME_SIZE))/integer-little,
         StkArity:(?bits(?SP_STKARITY_SIZE))/integer-little,
-        _LiveRootCount:(?bits(?SP_LIVEROOTCNT_SIZE))/integer-little,
-                                                % Skip rootcnt
+        _LiveRootCount:(?bits(?SP_LIVEROOTCNT_SIZE))/integer-little, % Skip
         Roots/binary>> = NoteGC_bin,
       LiveRoots = get_liveroots(Roots, []),
       %% Extract information about the safe point addresses:
       SPOffs =
         case elf_format:is64bit() of
           true -> %% Find offsets in ".rela.note.gc":
-            [elf_format:get_rela_entry_field(RelaE, r_addend)
-             || RelaE <- RelaNoteGC];
+            elf_format:get_rela_addends(RelaNoteGC);
           false -> %% Find offsets in SPAddrs (in ".note.gc"):
             get_spoffs(SPAddrs, [])
         end,
       %% Extract Exception Handler labels:
-      ExnHandlers =
-        case elf_format:extract_gccexntab(Elf) of
-          [] -> [];
-          GccExntab ->
-            CallSites   = elf_format:get_gccexntab_field(GccExntab, ge_cstab),
-            %% A list with `{Start, End, HandlerOffset}' for all Call Sites in the code
-            [{elf_datatypes:gccexntab_callsite_field(CallSite, gee_start),
-              elf_datatypes:gccexntab_callsite_field(CallSite, gee_size)
-              + elf_datatypes:gccexntab_callsite_field(CallSite, gee_start),
-              elf_datatypes:gccexntab_callsite_field(CallSite, gee_lp)}
-             || CallSite <- CallSites]
-        end,
-      %% Combine ExnLbls and Safe point addresses (return addresses) properly:
+      ExnHandlers = elf_format:get_exn_handlers(Elf),
+      %% Combine ExnHandlers and Safe point addresses (return addresses):
       ExnAndSPOffs = combine_ras_and_exns(ExnHandlers, SPOffs, []),
       create_sdesc_list(ExnAndSPOffs, StkFrameSize, StkArity, LiveRoots, [])
   end.
@@ -388,22 +321,8 @@ get_liveroots(<<Root:?bits(?LR_STKINDEX_SIZE)/integer-little,
 %%      a tuple as need for stack descriptors.
 get_spoffs(<<>>, Acc) ->
   lists:reverse(Acc);
-get_spoffs(SPOffs, Acc) ->
-  <<SPOff:?bits(?SP_ADDR_SIZE)/integer-little,
-    More/binary>> = SPOffs,
+get_spoffs(<<SPOff:?bits(?SP_ADDR_SIZE)/integer-little, More/binary>>, Acc) ->
   get_spoffs(More, [SPOff | Acc]).
-
-create_sdesc_list([], _, _, _, Acc) ->
-  lists:reverse(Acc);
-create_sdesc_list([{ExnLbl, SPOff} | MoreExnAndSPOffs],
-		  StkFrameSize, StkArity, LiveRoots, Acc) ->
-  Hdlr = case ExnLbl of
-           0 -> [];
-           N -> N
-         end,
-  create_sdesc_list(MoreExnAndSPOffs, StkFrameSize, StkArity, LiveRoots,
-                    [{?SDESC, SPOff, {Hdlr, StkFrameSize, StkArity, LiveRoots}}
-                     | Acc]).
 
 combine_ras_and_exns(_, [], Acc) ->
   lists:reverse(Acc);
@@ -422,6 +341,18 @@ find_exn_handler(RA, [{Start, End, Handler} | MoreExnHandlers]) ->
     false ->
       find_exn_handler(RA, MoreExnHandlers)
   end.
+
+create_sdesc_list([], _, _, _, Acc) ->
+  lists:reverse(Acc);
+create_sdesc_list([{ExnLbl, SPOff} | MoreExnAndSPOffs],
+		  StkFrameSize, StkArity, LiveRoots, Acc) ->
+  Hdlr = case ExnLbl of
+           0 -> [];
+           N -> N
+         end,
+  create_sdesc_list(MoreExnAndSPOffs, StkFrameSize, StkArity, LiveRoots,
+                    [{?SDESC, SPOff, {Hdlr, StkFrameSize, StkArity, LiveRoots}}
+                     | Acc]).
 
 %% @doc This function is responsible for correcting the stack descriptors of
 %%      the calls that are found in the code and have more than NR_ARG_REGS
@@ -468,7 +399,7 @@ calls_with_stack_args([ {_Name, {call, {M, F, A}}} | Rest], Calls)
 calls_with_stack_args([_|Rest], Calls) ->
   calls_with_stack_args(Rest, Calls).
 
-%% @doc This functions extracts the stack arity and the offset in the code of
+%% @doc This function extracts the stack arity and the offset in the code of
 %%      the named calls (MFAs, BIFs) that have stack arguments.
 calls_offsets_arity(AccRefs, CallsWithStackArgs) ->
   calls_offsets_arity(AccRefs, CallsWithStackArgs, []).
@@ -491,11 +422,11 @@ calls_offsets_arity([{Type, Offset, Term} | Rest], CallsWithStackArgs, Acc)
 calls_offsets_arity([_|Rest], CallsWithStackArgs, Acc) ->
   calls_offsets_arity(Rest, CallsWithStackArgs, Acc).
 
-%% @doc This functions extracts the stack arity and the offsets of closures that
+%% @doc This function extracts the stack arity and the offsets of closures that
 %%      have stack arity. The Closures argument represents the
 %%      hipe_bifs:llvm_exposure_closure/0 calls in the code. The actual closure
 %%      is the next call in the code, so the offset of the next call must be
-%%      from calculated from the stack descriptors.
+%%      calculated from the stack descriptors.
 closures_offsets_arity([], _) ->
   [];
 closures_offsets_arity(ExposedClosures, SDescs) ->
@@ -517,7 +448,7 @@ fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
   case lists:keyfind(Offset, 2, SDescs) of
     false ->
       fix_sdescs(Rest, SDescs);
-    {?SDESC, Offset, SDesc}->
+    {?SDESC, Offset, SDesc} ->
       {ExnHandler, FrameSize, StkArity, Roots} = SDesc,
       DecRoot = fun(X) -> X-Arity end,
       NewRootsList = lists:map(DecRoot, tuple_to_list(Roots)),
@@ -540,7 +471,7 @@ fix_sdescs([{Offset, Arity} | Rest], SDescs) ->
 
 %% @doc A function that opens a file as binary. The function takes as argument
 %%      the name of the file and returns an Erlang binary.
--spec open_object_file( string() ) -> binary().
+-spec open_object_file(string()) -> binary().
 open_object_file(ObjFile) ->
   case file:read_file(ObjFile) of
     {ok, Binary} ->

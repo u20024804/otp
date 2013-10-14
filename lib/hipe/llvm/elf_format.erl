@@ -1,65 +1,70 @@
 %% -*- erlang-indent-level: 2 -*-
 
-%%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
+%%% @copyright 2011-2013 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
 %%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
+%%%                      Kostis Sagonas <kostis@cs.ntua.gr>
 %%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
 %%%    [http://www.softlab.ntua.gr/~gtsiour/]
 
-%%% @doc This module contains functions for extracting various information from
-%%%      an ELF formated Object file. To fully understand the ELF format
-%%%      and the use of these functions please read
-%%%      "[http://www.linuxjournal.com/article/1060?page=0,0]" carefully. I
-%%%      warned you! :)
+%%% @doc This module contains functions for extracting various pieces of
+%%%      information from an ELF formated Object file. To fully understand
+%%%      the ELF format and the use of these functions please read
+%%%      "[http://www.linuxjournal.com/article/1060?page=0,0]" carefully.
+
 -module(elf_format).
 
--export([
+-export([get_tab_entries/1,
          %% File Header
-         extract_header/1,
-         get_header_field/2,
+          extract_header/1,
          %% Section Header Table
-         extract_shdrtab/1,
-         get_shdrtab_entry/2,
-         get_shdrtab_entry_field/2,
+          extract_shdrtab/1,
          %% Section Header String Table
-         extract_shstrtab/1,
+          extract_shstrtab/1,
          %% Symbol Table
          extract_symtab/1,
-         get_symtab_entry/2,
-         get_symtab_entry_field/2,
          %% String Table
          extract_strtab/1,
-         get_strtab_entry/2,
          %% Relocations
+	 get_rodata_relocs/1,
+	 get_text_relocs/1,
          extract_rela/2,
-         get_rela_entry/2,
-         get_rela_entry_field/2,
+         get_rela_addends/1,
          %% Note
          extract_note/2,
          %% Executable code
          extract_text/1,
          %% GCC Exception Table
-         extract_gccexntab/1,
-         get_gccexntab_field/2,
-         %% Read-only data
-         extract_rodata/1,
+	 get_exn_handlers/1,
          %% Misc.
          set_architecture_flag/1,
          is64bit/0
         ]).
 
 -include("elf_format.hrl").
--include("elf_datatypes.hrl").
 
 %%------------------------------------------------------------------------------
-%% Functions to manipulate ELF File Header
+%% Types
 %%------------------------------------------------------------------------------
 
-%% @doc Extracts the File Header from an ELF formated Object file. Also sets the
-%%      ELF class variable in the process dictionary (used by many functions in
-%%      this and hipe_llvm_main modules).
+-type elf()    :: binary().
+-type name()   :: string().
+-type offset() :: non_neg_integer().
+-type size()   :: non_neg_integer().
+
+-type name_size()  :: {name(), size()}.
+-type name_sizes() :: [name_size()].
+
+%%------------------------------------------------------------------------------
+%% Functions to manipulate the ELF File Header
+%%------------------------------------------------------------------------------
+
+%% @doc Extracts the File Header from an ELF formatted object file. Also sets
+%%      the ELF class variable in the process dictionary (used by many functions
+%%      in this and hipe_llvm_main modules).
+-spec extract_header(elf()) -> elf_datatypes:elf_ehdr().
 extract_header(Elf) ->
-  Ehdr_bin = get_binary_segment(Elf, {0, ?ELF_EHDR_SIZE}),
-  << %% Structural patern-matching on fields.
+  Ehdr_bin = get_binary_segment(Elf, 0, ?ELF_EHDR_SIZE),
+  << %% Structural pattern matching on fields.
      Ident_bin:?E_IDENT_SIZE/binary,
      Type:?bits(?E_TYPE_SIZE)/integer-little,
      Machine:?bits(?E_MACHINE_SIZE)/integer-little,
@@ -84,47 +89,41 @@ extract_header(Elf) ->
                         Flags, Ehsize, Phentsize, Phnum, Shentsize, Shnum,
                         Shstrndx).
 
-%% @doc Extracts information from an ELF File Header. This function takes
-%%      as arguments: a `FileHeader' record and a valid `Field' and returns the
-%%      value of that field.
-get_header_field(Ehdr, Field) ->
-  elf_datatypes:ehdr_field(Ehdr, Field).
-
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Section Header Entries
 %%------------------------------------------------------------------------------
 
 %% @doc Extracts the Section Header Table from an ELF formated Object File.
 extract_shdrtab(Elf) ->
-  %% Extract File Header binary (to gain info from)
+  %% Extract File Header (to gain info from)
   FileHeader = extract_header(Elf),
   %% Get Section Header Offset (in bytes), Entry Size (in bytes) and Number of
   %% entries
-  ShOff     = get_header_field(FileHeader, e_shoff),
-  ShEntsize = get_header_field(FileHeader, e_shentsize),
-  ShNum     = get_header_field(FileHeader, e_shnum),
+  ShOff     = elf_datatypes:ehdr_shoff(FileHeader),
+  ShEntsize = elf_datatypes:ehdr_shentsize(FileHeader),
+  ShNum     = elf_datatypes:ehdr_shnum(FileHeader),
   %% Get actual Section header table (binary)
-  Shdr_bin  = get_binary_segment(Elf, {ShOff,  ShNum * ShEntsize}),
+  Shdr_bin  = get_binary_segment(Elf, ShOff,  ShNum * ShEntsize),
   get_shdrtab_entries(Shdr_bin, []).
 
 get_shdrtab_entries(<<>>, Acc) ->
   lists:reverse(Acc);
 get_shdrtab_entries(Shdr_bin, Acc) ->
-  << %% Structural patern-matching on fields.
-     Name:?bits(?SH_NAME_SIZE)/integer-little,
-     Type:?bits(?SH_TYPE_SIZE)/integer-little,
-     Flags:?bits(?SH_FLAGS_SIZE)/integer-little,
-     Addr:?bits(?SH_ADDR_SIZE)/integer-little,
-     Offset:?bits(?SH_OFFSET_SIZE)/integer-little,
-     Size:?bits(?SH_SIZE_SIZE)/integer-little,
-     Link:?bits(?SH_LINK_SIZE)/integer-little,
-     Info:?bits(?SH_INFO_SIZE)/integer-little,
-     Addralign:?bits(?SH_ADDRALIGN_SIZE)/integer-little,
-     Entsize:?bits(?SH_ENTSIZE_SIZE)/integer-little,
-     MoreShdrE/binary
+  <<%% Structural pattern matching on fields.
+    Name:?bits(?SH_NAME_SIZE)/integer-little,
+    Type:?bits(?SH_TYPE_SIZE)/integer-little,
+    Flags:?bits(?SH_FLAGS_SIZE)/integer-little,
+    Addr:?bits(?SH_ADDR_SIZE)/integer-little,
+    Offset:?bits(?SH_OFFSET_SIZE)/integer-little,
+    Size:?bits(?SH_SIZE_SIZE)/integer-little,
+    Link:?bits(?SH_LINK_SIZE)/integer-little,
+    Info:?bits(?SH_INFO_SIZE)/integer-little,
+    Addralign:?bits(?SH_ADDRALIGN_SIZE)/integer-little,
+    Entsize:?bits(?SH_ENTSIZE_SIZE)/integer-little,
+    MoreShdrE/binary
   >> = Shdr_bin,
   ShdrE = elf_datatypes:mk_shdr(Name, Type, Flags, Addr, Offset,
-                      Size, Link, Info, Addralign, Entsize),
+				Size, Link, Info, Addralign, Entsize),
   get_shdrtab_entries(MoreShdrE, [ShdrE | Acc]).
 
 %% @doc Extracts a specific Entry of a Section Header Table. This function
@@ -133,12 +132,6 @@ get_shdrtab_entries(Shdr_bin, Acc) ->
 get_shdrtab_entry(SHdrTab, EntryNum) ->
   lists:nth(EntryNum + 1, SHdrTab).
 
-%% @doc Extracts information from a Section header entry. The function takes as
-%%      arguments the Section header entry and the name of the wanted field
-%%      (`atom').
-get_shdrtab_entry_field(Shdr, Field) ->
-  elf_datatypes:shdr_field(Shdr, Field).
-
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Section Header String Table
 %%------------------------------------------------------------------------------
@@ -146,22 +139,41 @@ get_shdrtab_entry_field(Shdr, Field) ->
 %% @doc Extracts the Section Header String Table. This section is not a known
 %%      ELF Object File section. It is just a "hidden" table storing the
 %%      names of all sections that exist in current object file.
+-spec extract_shstrtab(elf()) -> [name()].
 extract_shstrtab(Elf) ->
   %% Extract Section Name String Table index
   FileHeader = extract_header(Elf),
-  ShStrNdx   = get_header_field(FileHeader, e_shstrndx),
+  ShStrNdx   = elf_datatypes:ehdr_shstrndx(FileHeader),
   ShHdrTab   = extract_shdrtab(Elf),
   %% Extract Section header entry
   Shdr       = get_shdrtab_entry(ShHdrTab, ShStrNdx),
   %% Get actual Section-header String Table
-  ShStrOffset = get_shdrtab_entry_field(Shdr, sh_offset),
-  ShStrSize   = get_shdrtab_entry_field(Shdr, sh_size),
-  case get_binary_segment(Elf, {ShStrOffset, ShStrSize}) of
+  ShStrOffset = elf_datatypes:shdr_offset(Shdr),
+  ShStrSize   = elf_datatypes:shdr_size(Shdr),
+  case get_binary_segment(Elf, ShStrOffset, ShStrSize) of
     <<>> -> %% Segment empty
       [];
     ShStrTab -> %% Convert to string table
       [Name || {Name, _Size} <- get_names(ShStrTab)]
   end.
+
+%%------------------------------------------------------------------------------
+
+%%-spec extract_tab_entries(elf()) -> [{name(), valueoff(), size()}].
+get_tab_entries(Elf) ->
+  SymtabTemp = [{elf_datatypes:sym_name(SymtabE),
+                 elf_datatypes:sym_value(SymtabE),
+                 elf_datatypes:sym_size(SymtabE) div ?ELF_XWORD_SIZE}
+                || SymtabE <- extract_symtab(Elf)],
+  SymtabTemp2 = [T || T={Name, _, _} <- SymtabTemp, Name =/= 0],
+  {NameIndices, ValueOffs, Sizes} = lists:unzip3(SymtabTemp2),
+  %% Find the names of the symbols.
+  %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
+  %% relevant entries:
+  Strtab = extract_strtab(Elf),
+  Relevant = [get_strtab_entry(Strtab, Off) || Off <- NameIndices],
+  %% Zip back to {Name, ValueOff, Size}
+  lists:zip3(Relevant, ValueOffs, Sizes).
 
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Symbol Table
@@ -180,13 +192,13 @@ get_symtab_entries(Symtab_bin, Acc) ->
   >> = Symtab_bin,
   case is64bit() of
     true ->
-      << %% Structural patern-matching on fields.
-         Name:?bits(?ST_NAME_SIZE)/integer-little,
-         Info:?bits(?ST_INFO_SIZE)/integer-little,
-         Other:?bits(?ST_OTHER_SIZE)/integer-little,
-         Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
-         Value:?bits(?ST_VALUE_SIZE)/integer-little,
-         Size:?bits(?ST_SIZE_SIZE)/integer-little
+      <<%% Structural pattern matching on fields.
+	Name:?bits(?ST_NAME_SIZE)/integer-little,
+	Info:?bits(?ST_INFO_SIZE)/integer-little,
+	Other:?bits(?ST_OTHER_SIZE)/integer-little,
+	Shndx:?bits(?ST_SHNDX_SIZE)/integer-little,
+	Value:?bits(?ST_VALUE_SIZE)/integer-little,
+	Size:?bits(?ST_SIZE_SIZE)/integer-little
       >> = SymE_bin;
     false ->
       << %% Same fields in different order:
@@ -201,24 +213,18 @@ get_symtab_entries(Symtab_bin, Acc) ->
   SymE = elf_datatypes:mk_sym(Name, Info, Other, Shndx, Value, Size),
   get_symtab_entries(MoreSymE, [SymE | Acc]).
 
-%% @doc Extracts a specific entry from the Symbol Table (as binary). This
-%%      function takes as arguments the Symbol Table (`SymTab') and the entry's
-%%      serial number and returns that entry (`sym').
+%% @doc Extracts a specific entry from the Symbol Table (as binary).
+%%      This function takes as arguments the Symbol Table (`SymTab')
+%%      and the entry's serial number and returns that entry (`sym').
 get_symtab_entry(SymTab, EntryNum) ->
   lists:nth(EntryNum + 1, SymTab).
-
-%% @doc Extracts specific field from a Symbol Table entry binary. The function
-%%      takes as its arguments a Symbol Table entry (`sym') and the name of the
-%%      wanted field (`atom') and returns that field's value.
-get_symtab_entry_field(Sym, Field) ->
-  elf_datatypes:sym_field(Sym, Field).
 
 %%------------------------------------------------------------------------------
 %% Functions to manipulate String Table
 %%------------------------------------------------------------------------------
 
 %% @doc Extracts String Table from an ELF formated Object File.
--spec extract_strtab(binary()) -> [{string(), integer()}].
+-spec extract_strtab(elf()) -> [{string(), offset()}].
 extract_strtab(Elf) ->
   Strtab_bin = extract_segment_by_name(Elf, ?STRTAB),
   NamesSizes = get_names(Strtab_bin),
@@ -239,6 +245,51 @@ get_strtab_entry(Strtab, Offset) ->
 %% Functions to manipulate Relocations
 %%------------------------------------------------------------------------------
 
+%% @doc This function gets as argument an ELF binary file and returns a list
+%%      with all .rela.rodata labels (i.e. constants and literals in code)
+%%      or an empty list if no ".rela.rodata" section exists in code.
+-spec get_rodata_relocs(elf()) -> [offset()].
+get_rodata_relocs(Elf) ->
+  case is64bit() of
+    true ->
+      %% Only care about the addends (== offsets):
+      get_rela_addends(extract_rela(Elf, ?RODATA));
+    false ->
+      %% Find offsets hardcoded in ".rodata" entry
+      %%XXX: Treat all 0s as padding and skip them!
+      [SkipPadding || SkipPadding <- extract_rodata(Elf), SkipPadding =/= 0]
+  end.
+
+-spec get_rela_addends([elf_datatypes:elf_rela()]) -> [offset()].
+get_rela_addends(RelaEntries) ->
+  [elf_datatypes:rela_addend(E) || E <- RelaEntries].
+
+%% @doc Extract a list of the form `[{SymbolName, Offset}]' with all relocatable
+%%      symbols and their offsets in the code from the ".text" section.
+-spec get_text_relocs(elf()) -> [{name(), offset()}].
+get_text_relocs(Elf) ->
+  %% Only care about the symbol table index and the offset:
+  NameOffsetTemp = [{?ELF_R_SYM(elf_datatypes:r_info(E)),
+                     elf_datatypes:r_offset(E)}
+                    || E <- extract_rela(Elf, ?TEXT)],
+  {NameIndices, ActualOffsets} = lists:unzip(NameOffsetTemp),
+  %% Find the names of the symbols:
+  %%
+  %% Get those symbol table entries that are related to Text relocs:
+  Symtab = extract_symtab(Elf),
+  SymtabEs = [get_symtab_entry(Symtab, Index) || Index <- NameIndices],
+                                                %XXX: not zero-indexed!
+  %% Symbol table entries contain the offset of the name of the symbol in
+  %% String Table:
+  SymtabEs2 = [elf_datatypes:sym_name(SymE)
+               || SymE <- SymtabEs], %XXX: Do we need to sort SymtabE?
+  %% Get string table entries ([{Name, Offset in strtab section}]). Keep only
+  %% relevant entries:
+  Strtab = extract_strtab(Elf),
+  Relevant = [get_strtab_entry(Strtab, Off) || Off <- SymtabEs2],
+  %% Zip back with actual offsets:
+  lists:zip(Relevant, ActualOffsets).
+
 %% @doc Extract the Relocations segment for section `Name' (that is passed as
 %%      second argument) from an ELF formated Object file binary.
 extract_rela(Elf, Name) ->
@@ -252,38 +303,29 @@ extract_rela(Elf, Name) ->
 
 get_rela_entries(<<>>, Acc) ->
   lists:reverse(Acc);
-get_rela_entries(Rela_bin, Acc) ->
-  RelaE = case is64bit() of
-            true ->
-              <<%% Structural patern-matching on fields of a Rela Entry.
-                Offset:?bits(?R_OFFSET_SIZE)/integer-little,
-                Info:?bits(?R_INFO_SIZE)/integer-little,
-                Addend:?bits(?R_ADDEND_SIZE)/integer-little,
-                MoreRelaE/binary
-              >> = Rela_bin,
-              elf_datatypes:mk_rela(Offset, Info, Addend);
-            false ->
-              <<%% Structural patern-matching on fields of a Rel Entry.
-                Offset:?bits(?R_OFFSET_SIZE)/integer-little,
-                Info:?bits(?R_INFO_SIZE)/integer-little,
-                MoreRelaE/binary
-              >> = Rela_bin,
-              elf_datatypes:mk_rel(Offset, Info)
-          end,
-  get_rela_entries(MoreRelaE, [RelaE | Acc]).
+get_rela_entries(Bin, Acc) ->
+  E = case is64bit() of
+	true ->
+	  <<%% Structural pattern matching on fields of a Rela Entry.
+	    Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+	    Info:?bits(?R_INFO_SIZE)/integer-little,
+	    Addend:?bits(?R_ADDEND_SIZE)/integer-little,
+	    Rest/binary
+	  >> = Bin,
+	  elf_datatypes:mk_rela(Offset, Info, Addend);
+	false ->
+	  <<%% Structural pattern matching on fields of a Rel Entry.
+	    Offset:?bits(?R_OFFSET_SIZE)/integer-little,
+	    Info:?bits(?R_INFO_SIZE)/integer-little,
+	    Rest/binary
+	  >> = Bin,
+	  elf_datatypes:mk_rel(Offset, Info)
+      end,
+  get_rela_entries(Rest, [E | Acc]).
 
-%% @doc Extract the `EntryNum' (serial number) Reloacation Entry.
-get_rela_entry(Rela, EntryNum) ->
-  lists:nth(EntryNum + 1, Rela).
-
-%% @ doc Extract a specific field (name is `atom') of a `Relocation' entry.
-get_rela_entry_field(RelaE, Field) ->
-  case is64bit() of %% Use appropriate accessor:
-    true ->
-      elf_datatypes:rela_field(RelaE, Field);
-    false ->
-      elf_datatypes:rel_field(RelaE, Field)
-  end.
+%% %% @doc Extract the `EntryNum' (serial number) Relocation Entry.
+%% get_rela_entry(Rela, EntryNum) ->
+%%   lists:nth(EntryNum + 1, Rela).
 
 %%------------------------------------------------------------------------------
 %% Functions to manipulate Executable Code segment
@@ -292,7 +334,7 @@ get_rela_entry_field(RelaE, Field) ->
 %% @doc This function gets as arguments an ELF formated binary file and
 %%      returns the Executable Code (".text" segment) or an empty binary if it
 %%      is not found.
--spec extract_text(binary()) -> binary().
+-spec extract_text(elf()) -> binary().
 extract_text(Elf) ->
   extract_segment_by_name(Elf, ?TEXT).
 
@@ -305,7 +347,7 @@ extract_text(Elf) ->
 %%      wanted Note Section (<b>without</b> the ".note" prefix!). It returns
 %%      the specified binary segment or an empty binary if no such section
 %%      exists.
--spec extract_note(binary(), string()) -> binary().
+-spec extract_note(elf(), string()) -> binary().
 extract_note(Elf, Name) ->
   extract_segment_by_name(Elf, ?NOTE(Name)).
 
@@ -316,21 +358,35 @@ extract_note(Elf, Name) ->
 %% A description for the C++ exception table formats can be found at Exception
 %% Handling Tables (http://www.codesourcery.com/cxx-abi/exceptions.pdf).
 
-%% @doc This function gets as argument an ELF binary file and returns the
-%%      GCC Exception Table (".gcc_except_table") section or an empty list if
-%%      it is not found.
-%%      XXX: Assumes there is *no* Action Record Table.
-extract_gccexntab(Elf) ->
+%% A list with `{Start, End, HandlerOffset}' for all Call Sites in the code
+%% -spec get_enx_handlers(elf()) -> [{_, _, _}].
+get_exn_handlers(Elf) ->
+  case extract_gccexntab_callsites(Elf) of
+    [] -> [];
+    CallSites ->
+      [{elf_datatypes:gccexntab_callsite_start(CallSite),
+	elf_datatypes:gccexntab_callsite_start(CallSite)
+	+ elf_datatypes:gccexntab_callsite_size(CallSite),
+	elf_datatypes:gccexntab_callsite_lp(CallSite)}
+       || CallSite <- CallSites]
+  end.
+
+%% @doc This function gets as argument an ELF binary file and returns
+%%      the table (list) of call sites which is stored in GCC
+%%      Exception Table (".gcc_except_table") section.
+%%      It returns an empty list if the Exception Table is not found.
+%%      XXX: Assumes there is *no*  Action Record Table.
+extract_gccexntab_callsites(Elf) ->
   case extract_segment_by_name(Elf, ?GCC_EXN_TAB) of
     <<>> ->
       [];
-    Exntab_bin ->
+    ExnTab ->
       %% First byte of LSDA is Landing Pad base encoding.
-      <<LBenc:8, More/binary>> = Exntab_bin,
-      %% Second byte is the Landing Pad base (if it's encoding is not
+      <<LBenc:8, More/binary>> = ExnTab,
+      %% Second byte is the Landing Pad base (if its encoding is not
       %% DW_EH_PE_omit) (optional).
-      {LPBase, LSDACont} =
-        case LBenc == ?DW_EH_PE_omit of
+      {_LPBase, LSDACont} =
+        case LBenc =:= ?DW_EH_PE_omit of
           true ->  % No landing pad base byte. (-1 denotes that)
             {-1, More};
           false -> % Landing pad base.
@@ -340,8 +396,8 @@ extract_gccexntab(Elf) ->
       %% Next byte of LSDA is the encoding of the Type Table.
       <<TTenc:8, More3/binary>> = LSDACont,
       %% Next byte is the Types Table offset encoded in U-LEB128 (optional).
-      {TTOff, LSDACont2} =
-        case TTenc == ?DW_EH_PE_omit of
+      {_TTOff, LSDACont2} =
+        case TTenc =:= ?DW_EH_PE_omit of
           true ->  % There is no Types Table pointer. (-1 denotes that)
             {-1, More3};
           false -> % The byte offset from this field to the start of the Types
@@ -349,32 +405,26 @@ extract_gccexntab(Elf) ->
             leb128_decode(More3)
         end,
       %% Next byte of LSDA is the encoding of the fields in the Call-site Table.
-      <<CSenc:8, More4/binary>> = LSDACont2,
+      <<_CSenc:8, More4/binary>> = LSDACont2,
       %% Sixth byte is the size (in bytes) of the Call-site Table encoded in
       %% U-LEB128.
-      {CSTabSize, CSTable} = leb128_decode(More4),
-      %% Extract all call-site information
-      GccCallSites = get_gccexntab_callsites(CSTable, []),
-      elf_datatypes:mk_gccexntab(LBenc, LPBase, TTenc, TTOff, CSenc, CSTabSize,
-                                 GccCallSites)
+      {_CSTabSize, CSTab} = leb128_decode(More4),
+      %% Extract all call site information
+      get_gccexntab_callsites(CSTab, [])
   end.
 
 get_gccexntab_callsites(<<>>, Acc) ->
   lists:reverse(Acc);
 get_gccexntab_callsites(CSTab, Acc) ->
-  %% We are only interested in the Landing pad of every entry.
+  %% We are only interested in the Landing Pad of every entry.
   <<Start:32/integer-little, Size:32/integer-little,
     LP:32/integer-little, OnAction:8, More/binary
   >> = CSTab,
   GccCS = elf_datatypes:mk_gccexntab_callsite(Start, Size, LP, OnAction),
   get_gccexntab_callsites(More, [GccCS | Acc]).
 
-%% @ doc Extract a specific field (name is `atom') of a GCC Exception Table.
-get_gccexntab_field(Ge, Field) ->
-  elf_datatypes:gccexntab_field(Ge, Field).
-
 %%------------------------------------------------------------------------------
-%% Functions to manipulate read-only data (.rodata)
+%% Functions to manipulate Read-only Data (.rodata)
 %%------------------------------------------------------------------------------
 extract_rodata(Elf) ->
   Rodata_bin = extract_segment_by_name(Elf, ?RODATA),
@@ -393,19 +443,19 @@ get_rodata_entries(Rodata_bin, Acc) ->
 %% @doc Returns the binary segment starting at `Offset' with length `Size'
 %%      (bytes) from a binary file. If `Offset' is bigger than the byte size of
 %%      the binary, an empty binary (`<<>>') is returned.
--spec get_binary_segment(binary(), {integer(), integer()}) -> binary().
-get_binary_segment(Bin, {Offset, _Size}) when Offset > byte_size(Bin) ->
+-spec get_binary_segment(binary(), offset(), size()) -> binary().
+get_binary_segment(Bin, Offset, _Size) when Offset > byte_size(Bin) ->
   <<>>;
-get_binary_segment(Bin, {Offset, Size}) ->
+get_binary_segment(Bin, Offset, Size) ->
   <<_Hdr:Offset/binary, BinSeg:Size/binary, _More/binary>> = Bin,
   BinSeg.
 
 %% @doc This function gets as arguments an ELF formated binary object and
 %%      a string with the segments' name and returns the specified segment or
 %%      an empty binary (`<<>>') if there exists no segment with that name.
-%%      There are handy macros defined in elf_format.hrl for all Standar
+%%      There are handy macros defined in elf_format.hrl for all Standard
 %%      Section Names.
--spec extract_segment_by_name(binary(), string()) -> binary().
+-spec extract_segment_by_name(elf(), string()) -> binary().
 extract_segment_by_name(Elf, SectionName) ->
   %% Extract Section Header Table and Section Header String Table from binary
   SHdrTable = extract_shdrtab(Elf),
@@ -416,9 +466,9 @@ extract_segment_by_name(Elf, SectionName) ->
   %% Find Section Header Table entry by name
   case lists:keyfind(SectionName, 1, L) of
     {SectionName, ShdrE} -> %% Note: Same name.
-      Off  = get_shdrtab_entry_field(ShdrE, sh_offset),
-      Size = get_shdrtab_entry_field(ShdrE, sh_size),
-      get_binary_segment(Elf, {Off, Size});
+      Off  = elf_datatypes:shdr_offset(ShdrE),
+      Size = elf_datatypes:shdr_size(ShdrE),
+      get_binary_segment(Elf, Off, Size);
     false -> %% Not found.
       <<>>
   end.
@@ -426,7 +476,6 @@ extract_segment_by_name(Elf, SectionName) ->
 %% @doc Extracts a list of strings with (zero-separated) names from a binary.
 %%      Returns tuples of `{Name, Size}'.
 %%      XXX: Skip trailing 0.
--type name_sizes() :: [{string(), non_neg_integer()}].
 -spec get_names(<<_:8,_:_*8>>) -> name_sizes().
 get_names(<<0, Bin/binary>>) ->
   NamesSizes = get_names(Bin, []),
@@ -534,15 +583,16 @@ leb128_decode(LebNum, NoOfBits, Acc) ->
 
 %% @doc Extract ELF Class from ELF header and export symbol to process
 %%      dictionary.
--spec set_architecture_flag(binary()) -> ok.
+-spec set_architecture_flag(elf()) -> 'ok'.
 set_architecture_flag(Elf) ->
   %% Extract information about ELF Class from ELF Header
   <<16#7f, $E, $L, $F, EI_Class, _MoreHeader/binary>>
-    = get_binary_segment(Elf, {0, ?ELF_EHDR_SIZE}),
+    = get_binary_segment(Elf, 0, ?ELF_EHDR_SIZE),
   put(elf_class, EI_Class),
   ok.
 
 %% @doc Read from object file header if the file class is ELF32 or ELF64.
+-spec is64bit() -> boolean().
 is64bit() ->
   case get(elf_class) of
     ?ELFCLASS64 -> true;
