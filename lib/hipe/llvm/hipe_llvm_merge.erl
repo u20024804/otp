@@ -9,13 +9,14 @@
 -include("../main/hipe.hrl").
 
 -undef(ASSERT).
--define(ASSERT(G), if G -> [] ; true ->
-                       exit({assertion_failed,?MODULE,?LINE,??G}) end).
+-define(ASSERT(G), if G -> ok;
+		      true -> exit({assertion_failed,?MODULE,?LINE,??G})
+		   end).
 
 finalize(CompiledCode, Closures, Exports) ->
-  CompiledCode1 = [ CodePack || {_, CodePack} <- CompiledCode],
-  Code = [ {MFA, [], ConstTab} ||
-           {MFA, _, _ , ConstTab, _, _} <- CompiledCode1],
+  CompiledCode1 = [CodePack || {_, CodePack} <- CompiledCode],
+  Code = [{MFA, [], ConstTab}
+	  || {MFA, _, _ , ConstTab, _, _} <- CompiledCode1],
   {ConstAlign, ConstSize, ConstMap, RefsFromConsts} =
     hipe_pack_constants:pack_constants(Code, ?ARCH_REGISTERS:alignment()),
   %% Compute total code size separately as a sanity check for alignment
@@ -26,26 +27,26 @@ finalize(CompiledCode, Closures, Exports) ->
   ?ASSERT(CodeSize =:= byte_size(CodeBinary)),
   AccRefs = merge_refs(CompiledCode1, ConstMap, 0, []),
   %% Bring CompiledCode to a combine_label_maps-acceptable form.
-  LabelMap   = combine_label_maps(CompiledCode1, 0, gb_trees:empty()),
-  SC         = hipe_pack_constants:slim_constmap(ConstMap),
+  LabelMap = combine_label_maps(CompiledCode1, 0, gb_trees:empty()),
+  SC = hipe_pack_constants:slim_constmap(ConstMap),
   DataRelocs = hipe_pack_constants:mk_data_relocs(RefsFromConsts, LabelMap),
-  SSE        = hipe_pack_constants:slim_sorted_exportmap(ExportMap,
-                                                         Closures, Exports),
-  SlimRefs   = hipe_pack_constants:slim_refs(AccRefs),
+  SSE = hipe_pack_constants:slim_sorted_exportmap(ExportMap, Closures, Exports),
+  SlimRefs = hipe_pack_constants:slim_refs(AccRefs),
   term_to_binary([{?VERSION_STRING(),?HIPE_SYSTEM_CRC},
-      ConstAlign, ConstSize,
-      SC,  % ConstMap
-      DataRelocs, % LabelMap
-      SSE, % ExportMap
-      CodeSize, CodeBinary, SlimRefs,
-      0,[] % ColdCodeSize, SlimColdRefs
-  ]).
+		  ConstAlign, ConstSize,
+		  SC,  % ConstMap
+		  DataRelocs, % LabelMap
+		  SSE, % ExportMap
+		  CodeSize, CodeBinary, SlimRefs,
+		  0,[] % ColdCodeSize, SlimColdRefs
+		 ]).
 
 %% Copied from hipe_x86_assemble.erl
 nr_pad_bytes(Address) ->
   (4 - (Address rem 4)) rem 4. % XXX: 16 or 32 instead?
 
-align_entry(Address) -> Address + nr_pad_bytes(Address).
+align_entry(Address) ->
+  Address + nr_pad_bytes(Address).
 
 compute_code_size([{_MFA, _BinaryCode, CodeSize, _, _, _}|Code], Size) ->
   compute_code_size(Code, align_entry(Size+CodeSize));
@@ -109,9 +110,9 @@ label_to_constno(Other, _MFA, _ConstMap) ->
 update_ref({?SDESC, Offset, SDesc}, CodeAddr) ->
   NewRefAddr = Offset+CodeAddr,
   case SDesc of
-    {[], _, _, _} -> %% No handler. Only update offset
+    {[], _, _, _} -> % No handler; only update offset
       {?SDESC, NewRefAddr, SDesc};
-    {ExnHandler, FrameSize, StackArity, Roots} -> %% Also update exception handler
+    {ExnHandler, FrameSize, StackArity, Roots} -> % Update exception handler
       {?SDESC, NewRefAddr, {ExnHandler+CodeAddr, FrameSize, StackArity, Roots}}
   end;
 update_ref({Type, Offset, Term}, CodeAddr) ->
