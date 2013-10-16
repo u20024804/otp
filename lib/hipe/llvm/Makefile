@@ -41,7 +41,6 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 ifdef HIPE_ENABLED
 HIPE_MODULES = hipe_rtl2llvm \
 	hipe_llvm \
-	elf_datatypes \
 	elf_format \
 	hipe_llvm_main \
 	hipe_llvm_merge	\
