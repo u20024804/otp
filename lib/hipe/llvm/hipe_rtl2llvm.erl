@@ -7,7 +7,6 @@
 
 -include("../rtl/hipe_rtl.hrl").
 -include("../rtl/hipe_literals.hrl").
--include("hipe_llvm.hrl").
 -include("hipe_llvm_arch.hrl").
 
 -define(WORD_TYPE, #llvm_int{width=?WORD_WIDTH}).

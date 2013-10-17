@@ -1,4 +1,5 @@
 %% -*- erlang-indent-level: 2 -*-
+
 -module(hipe_llvm).
 
 -export([
@@ -231,28 +232,167 @@
 
 
 %%-----------------------------------------------------------------------------
-
--include("hipe_llvm.hrl").
-
+%% Abstract Data Types for LLVM Assembly.
 %%-----------------------------------------------------------------------------
 
+%% Terminator Instructions
+-record(llvm_ret, {ret_list=[]}).
+-type llvm_ret() :: #llvm_ret{}.
 
-%%
+-record(llvm_br, {dst}).
+-type llvm_br() :: #llvm_br{}.
+
+-record(llvm_br_cond, {'cond', true_label, false_label, meta=[]}).
+-type llvm_br_cond() :: #llvm_br_cond{}.
+
+-record(llvm_indirectbr, {type, address, label_list}).
+-type llvm_indirectbr() :: #llvm_indirectbr{}.
+
+-record(llvm_switch, {type, value, default_label, value_label_list=[]}).
+-type llvm_switch() :: #llvm_switch{}.
+
+-record(llvm_invoke, {dst, cconv=[], ret_attrs=[], type, fnptrval, arglist=[],
+                      fn_attrs=[], to_label, unwind_label}).
+-type llvm_invoke() :: #llvm_invoke{}.
+
+%% Binary Operations
+-record(llvm_operation, {dst, op, type, src1, src2, options=[]}).
+-type llvm_operation() :: #llvm_operation{}.
+
+%% Aggregate Operations
+-record(llvm_extractvalue, {dst, type, val, idx, idxs=[]}).
+-type llvm_extractvalue() :: #llvm_extractvalue{}.
+
+-record(llvm_insertvalue, {dst, val_type, val, elem_type, elem, idx, idxs=[]}).
+-type llvm_insertvalue() :: #llvm_insertvalue{}.
+
+%% Memory Access and Addressing Operations
+-record(llvm_alloca, {dst, type, num=[], align=[]}).
+-type llvm_alloca() :: #llvm_alloca{}.
+
+-record(llvm_load, {dst, p_type, pointer, alignment=[], nontemporal=[],
+                    volatile=false}).
+-type llvm_load() :: #llvm_load{}.
+
+-record(llvm_store, {type, value, p_type, pointer, alignment=[],
+                     nontemporal=[], volatile=false}).
+-type llvm_store() :: #llvm_store{}.
+
+-record(llvm_getelementptr, {dst, p_type, value, typed_idxs, inbounds}).
+-type llvm_getelementptr() :: #llvm_getelementptr{}.
+
+%% Conversion Operations
+-record(llvm_conversion, {dst, op, src_type, src, dst_type}).
+-type llvm_conversion() :: #llvm_conversion{}.
+
+-record(llvm_sitofp, {dst, src_type, src, dst_type}).
+-type llvm_sitofp() :: #llvm_sitofp{}.
+
+-record(llvm_ptrtoint, {dst, src_type, src, dst_type}).
+-type llvm_ptrtoint() :: #llvm_ptrtoint{}.
+
+-record(llvm_inttoptr, {dst, src_type, src, dst_type}).
+-type llvm_inttoptr() :: #llvm_inttoptr{}.
+
+%% Other Operations
+-record(llvm_icmp, {dst, 'cond', type, src1, src2}).
+-type llvm_icmp() :: #llvm_icmp{}.
+
+-record(llvm_fcmp, {dst, 'cond', type, src1, src2}).
+-type llvm_fcmp() :: #llvm_fcmp{}.
+
+-record(llvm_phi, {dst, type, value_label_list}).
+-type llvm_phi() :: #llvm_phi{}.
+
+-record(llvm_select, {dst, 'cond', typ1, val1, typ2, val2}).
+-type llvm_select() :: #llvm_select{}.
+
+-record(llvm_call, {dst=[], is_tail = false, cconv = [], ret_attrs = [], type,
+                    fnptrval, arglist = [], fn_attrs = []}).
+-type llvm_call() :: #llvm_call{}.
+
+-record(llvm_fun_def, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
+    type, 'name', arglist=[], fn_attrs=[], align=[], body=[]}).
+-type llvm_fun_def() :: #llvm_fun_def{}.
+
+-record(llvm_fun_decl, {linkage=[], visibility=[], cconv=[], ret_attrs=[],
+    type, 'name', arglist=[],  align=[]}).
+-type llvm_fun_decl() :: #llvm_fun_decl{}.
+
+-record(llvm_landingpad, {}).
+-type llvm_landingpad() :: #llvm_landingpad{}.
+
+-record(llvm_comment, {text}).
+-type llvm_comment() :: #llvm_comment{}.
+
+-record(llvm_label, {label}).
+-type llvm_label() :: #llvm_label{}.
+
+-record(llvm_const_decl, {dst, decl_type, type, value}).
+-type llvm_const_decl() :: #llvm_const_decl{}.
+
+-record(llvm_asm, {instruction}).
+-type llvm_asm() :: #llvm_asm{}.
+
+-record(llvm_adj_stack, {offset, 'register', type}).
+-type llvm_adj_stack() :: #llvm_adj_stack{}.
+
+-record(llvm_branch_meta, {id, true_weight, false_weight}).
+-type llvm_branch_meta() :: #llvm_branch_meta{}.
+
+%% Types
+-record(llvm_void, {}).
+-type llvm_void() :: #llvm_void{}.
+
+-record(llvm_label_type, {}).
+-type llvm_label_type() :: #llvm_label_type{}.
+
+-record(llvm_int, {width}).
+-type llvm_int() :: #llvm_int{}.
+
+-record(llvm_float, {}).
+-type llvm_float() :: #llvm_float{}.
+
+-record(llvm_double, {}).
+-type llvm_double() :: #llvm_double{}.
+
+-record(llvm_fp80, {}).
+-type llvm_fp80() :: #llvm_fp80{}.
+
+-record(llvm_fp128, {}).
+-type llvm_fp128() :: #llvm_fp128{}.
+
+-record(llvm_ppc_fp128, {}).
+-type llvm_ppc_fp128() :: #llvm_ppc_fp128{}.
+
+-record(llvm_pointer, {type}).
+-type llvm_pointer() :: #llvm_pointer{}.
+
+-record(llvm_vector, {'size', type}).
+-type llvm_vector() :: #llvm_vector{}.
+
+-record(llvm_struct, {type_list}).
+-type llvm_struct() :: #llvm_struct{}.
+
+-record(llvm_array, {'size', type}).
+-type llvm_array() :: #llvm_array{}.
+
+-record(llvm_fun, {ret_type, arg_type_list}).
+-type llvm_fun() :: #llvm_fun{}.
+
+%%-----------------------------------------------------------------------------
+%% Accessor Functions
+%%-----------------------------------------------------------------------------
+
 %% ret
-%%
 mk_ret(Ret_list) -> #llvm_ret{ret_list=Ret_list}.
 ret_ret_list(#llvm_ret{ret_list=Ret_list}) -> Ret_list.
 
-%%
 %% br
-%%
 mk_br(Dst) -> #llvm_br{dst=Dst}.
 br_dst(#llvm_br{dst=Dst}) -> Dst.
 
-
-%%
 %% br_cond
-%%
 mk_br_cond(Cond, True_label, False_label) ->
   #llvm_br_cond{'cond'=Cond, true_label=True_label, false_label=False_label}.
 mk_br_cond(Cond, True_label, False_label, Metadata) ->
@@ -264,17 +404,13 @@ br_cond_false_label(#llvm_br_cond{false_label=False_label}) ->
   False_label.
 br_cond_meta(#llvm_br_cond{meta=Metadata}) -> Metadata.
 
-%%
 %% indirectbr
-%%
 mk_indirectbr(Type, Address, Label_list) -> #llvm_indirectbr{type=Type, address=Address, label_list=Label_list}.
 indirectbr_type(#llvm_indirectbr{type=Type}) -> Type.
 indirectbr_address(#llvm_indirectbr{address=Address}) -> Address.
 indirectbr_label_list(#llvm_indirectbr{label_list=Label_list}) -> Label_list.
 
-%%
 %% invoke
-%%
 mk_invoke(Dst, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs, To_label, Unwind_label) ->
   #llvm_invoke{dst=Dst, cconv=Cconv, ret_attrs=Ret_attrs, type=Type,
     fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs, to_label=To_label,
@@ -289,9 +425,7 @@ invoke_fn_attrs(#llvm_invoke{fn_attrs=Fn_attrs}) -> Fn_attrs.
 invoke_to_label(#llvm_invoke{to_label=To_label}) -> To_label.
 invoke_unwind_label(#llvm_invoke{unwind_label=Unwind_label}) -> Unwind_label.
 
-%%
 %% switch
-%%
 mk_switch(Type, Value, Default_label, Value_label_list) ->
   #llvm_switch{type=Type, value=Value, default_label=Default_label,
               value_label_list=Value_label_list}.
@@ -302,9 +436,7 @@ switch_default_label(#llvm_switch{default_label=Default_label}) ->
 switch_value_label_list(#llvm_switch{value_label_list=Value_label_list}) ->
   Value_label_list.
 
-%%
 %% operation
-%%
 mk_operation(Dst, Op, Type, Src1, Src2, Options) ->
   #llvm_operation{dst=Dst, op=Op, type=Type, src1=Src1, src2=Src2,
     options=Options}.
@@ -315,9 +447,7 @@ operation_src1(#llvm_operation{src1=Src1}) -> Src1.
 operation_src2(#llvm_operation{src2=Src2}) -> Src2.
 operation_options(#llvm_operation{options=Options}) -> Options.
 
-%%
 %% extractvalue
-%%
 mk_extractvalue(Dst, Type, Val, Idx, Idxs) ->
   #llvm_extractvalue{dst=Dst,type=Type,val=Val,idx=Idx,idxs=Idxs}.
 extractvalue_dst(#llvm_extractvalue{dst=Dst}) -> Dst.
@@ -326,9 +456,7 @@ extractvalue_val(#llvm_extractvalue{val=Val}) -> Val.
 extractvalue_idx(#llvm_extractvalue{idx=Idx}) -> Idx.
 extractvalue_idxs(#llvm_extractvalue{idxs=Idxs}) -> Idxs.
 
-%%
 %% insertvalue
-%%
 mk_insertvalue(Dst, Val_type, Val, Elem_type, Elem, Idx, Idxs) ->
   #llvm_insertvalue{dst=Dst, val_type=Val_type, val=Val, elem_type=Elem_type,
                     elem=Elem, idx=Idx, idxs=Idxs}.
@@ -340,9 +468,7 @@ insertvalue_elem(#llvm_insertvalue{elem=Elem}) -> Elem.
 insertvalue_idx(#llvm_insertvalue{idx=Idx}) -> Idx.
 insertvalue_idxs(#llvm_insertvalue{idxs=Idxs}) -> Idxs.
 
-%%
 %% alloca
-%%
 mk_alloca(Dst, Type, Num, Align) ->
   #llvm_alloca{dst=Dst, type=Type, num=Num, align=Align}.
 alloca_dst(#llvm_alloca{dst=Dst}) -> Dst.
@@ -350,9 +476,7 @@ alloca_type(#llvm_alloca{type=Type}) -> Type.
 alloca_num(#llvm_alloca{num=Num}) -> Num.
 alloca_align(#llvm_alloca{align=Align}) -> Align.
 
-%%
 %% load
-%%
 mk_load(Dst, Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_load{dst=Dst, p_type=Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
@@ -363,9 +487,7 @@ load_alignment(#llvm_load{alignment=Alignment}) -> Alignment.
 load_nontemporal(#llvm_load{nontemporal=Nontemporal}) -> Nontemporal.
 load_volatile(#llvm_load{volatile=Volatile}) -> Volatile.
 
-%%
 %% store
-%%
 mk_store(Type, Value, P_Type, Pointer, Alignment, Nontemporal, Volatile) ->
   #llvm_store{type=Type, value=Value, p_type=P_Type, pointer=Pointer, alignment=Alignment,
     nontemporal=Nontemporal, volatile=Volatile}.
@@ -377,9 +499,7 @@ store_alignment(#llvm_store{alignment=Alignment}) -> Alignment.
 store_nontemporal(#llvm_store{nontemporal=Nontemporal}) -> Nontemporal.
 store_volatile(#llvm_store{volatile=Volatile}) -> Volatile.
 
-%%
 %% getelementptr
-%%
 mk_getelementptr(Dst, P_Type, Value, Typed_Idxs, Inbounds) ->
   #llvm_getelementptr{dst=Dst,p_type=P_Type, value=Value,
                       typed_idxs=Typed_Idxs, inbounds=Inbounds}.
@@ -389,9 +509,7 @@ getelementptr_value(#llvm_getelementptr{value=Value}) -> Value.
 getelementptr_typed_idxs(#llvm_getelementptr{typed_idxs=Typed_Idxs}) -> Typed_Idxs.
 getelementptr_inbounds(#llvm_getelementptr{inbounds=Inbounds}) -> Inbounds.
 
-%%
 %% conversion
-%%
 mk_conversion(Dst, Op, Src_type, Src, Dst_type) ->
   #llvm_conversion{dst=Dst, op=Op, src_type=Src_type, src=Src, dst_type=Dst_type}.
 conversion_dst(#llvm_conversion{dst=Dst}) -> Dst.
@@ -400,9 +518,7 @@ conversion_src_type(#llvm_conversion{src_type=Src_type}) -> Src_type.
 conversion_src(#llvm_conversion{src=Src}) -> Src.
 conversion_dst_type(#llvm_conversion{dst_type=Dst_type}) -> Dst_type.
 
-%%
 %% sitofp
-%%
 mk_sitofp(Dst, Src_type, Src, Dst_type) ->
   #llvm_sitofp{dst=Dst, src_type=Src_type, src=Src, dst_type=Dst_type}.
 sitofp_dst(#llvm_sitofp{dst=Dst}) -> Dst.
@@ -410,9 +526,7 @@ sitofp_src_type(#llvm_sitofp{src_type=Src_type}) -> Src_type.
 sitofp_src(#llvm_sitofp{src=Src}) -> Src.
 sitofp_dst_type(#llvm_sitofp{dst_type=Dst_type}) -> Dst_type.
 
-%%
 %% ptrtoint
-%%
 mk_ptrtoint(Dst, Src_Type, Src, Dst_Type) ->
   #llvm_ptrtoint{dst=Dst, src_type=Src_Type, src=Src, dst_type=Dst_Type}.
 ptrtoint_dst(#llvm_ptrtoint{dst=Dst}) -> Dst.
@@ -420,9 +534,7 @@ ptrtoint_src_type(#llvm_ptrtoint{src_type=Src_Type}) -> Src_Type.
 ptrtoint_src(#llvm_ptrtoint{src=Src}) -> Src.
 ptrtoint_dst_type(#llvm_ptrtoint{dst_type=Dst_Type}) -> Dst_Type .
 
-%%
 %% inttoptr
-%%
 mk_inttoptr(Dst, Src_Type, Src, Dst_Type) ->
   #llvm_inttoptr{dst=Dst, src_type=Src_Type, src=Src, dst_type=Dst_Type}.
 inttoptr_dst(#llvm_inttoptr{dst=Dst}) -> Dst.
@@ -430,9 +542,7 @@ inttoptr_src_type(#llvm_inttoptr{src_type=Src_Type}) -> Src_Type.
 inttoptr_src(#llvm_inttoptr{src=Src}) -> Src.
 inttoptr_dst_type(#llvm_inttoptr{dst_type=Dst_Type}) -> Dst_Type .
 
-%%
 %% icmp
-%%
 mk_icmp(Dst, Cond, Type, Src1, Src2) ->
   #llvm_icmp{dst=Dst,'cond'=Cond,type=Type,src1=Src1,src2=Src2}.
 icmp_dst(#llvm_icmp{dst=Dst}) -> Dst.
@@ -441,9 +551,7 @@ icmp_type(#llvm_icmp{type=Type}) -> Type.
 icmp_src1(#llvm_icmp{src1=Src1}) -> Src1.
 icmp_src2(#llvm_icmp{src2=Src2}) -> Src2.
 
-%%
 %% fcmp
-%%
 mk_fcmp(Dst, Cond, Type, Src1, Src2) ->
   #llvm_fcmp{dst=Dst,'cond'=Cond,type=Type,src1=Src1,src2=Src2}.
 fcmp_dst(#llvm_fcmp{dst=Dst}) -> Dst.
@@ -452,9 +560,7 @@ fcmp_type(#llvm_fcmp{type=Type}) -> Type.
 fcmp_src1(#llvm_fcmp{src1=Src1}) -> Src1.
 fcmp_src2(#llvm_fcmp{src2=Src2}) -> Src2.
 
-%%
 %% phi
-%%
 mk_phi(Dst, Type, Value_label_list) ->
   #llvm_phi{dst=Dst, type=Type,value_label_list=Value_label_list}.
 phi_dst(#llvm_phi{dst=Dst}) -> Dst.
@@ -462,9 +568,7 @@ phi_type(#llvm_phi{type=Type}) -> Type.
 phi_value_label_list(#llvm_phi{value_label_list=Value_label_list}) ->
   Value_label_list.
 
-%%
 %% select
-%%
 mk_select(Dst, Cond, Typ1, Val1, Typ2, Val2) ->
   #llvm_select{dst=Dst, 'cond'=Cond, typ1=Typ1, val1=Val1, typ2=Typ2, val2=Val2}.
 select_dst(#llvm_select{dst=Dst}) -> Dst.
@@ -474,9 +578,7 @@ select_val1(#llvm_select{val1=Val1}) -> Val1.
 select_typ2(#llvm_select{typ2=Typ2}) -> Typ2.
 select_val2(#llvm_select{val2=Val2}) -> Val2.
 
-%%
 %% call
-%%
 mk_call(Dst, Is_tail, Cconv, Ret_attrs, Type, Fnptrval, Arglist, Fn_attrs) ->
   #llvm_call{dst=Dst, is_tail=Is_tail, cconv=Cconv, ret_attrs=Ret_attrs,
     type=Type, fnptrval=Fnptrval, arglist=Arglist, fn_attrs=Fn_attrs}.
@@ -489,9 +591,7 @@ call_fnptrval(#llvm_call{fnptrval=Fnptrval}) -> Fnptrval.
 call_arglist(#llvm_call{arglist=Arglist}) -> Arglist.
 call_fn_attrs(#llvm_call{fn_attrs=Fn_attrs}) -> Fn_attrs.
 
-%%
 %% fun_def
-%%
 mk_fun_def(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist,
            Fn_attrs, Align, Body) ->
   #llvm_fun_def{
@@ -518,9 +618,7 @@ fun_def_fn_attrs(#llvm_fun_def{fn_attrs=Fn_attrs}) -> Fn_attrs.
 fun_def_align(#llvm_fun_def{align=Align}) -> Align.
 fun_def_body(#llvm_fun_def{body=Body}) -> Body.
 
-%%
 %% fun_decl
-%%
 mk_fun_decl(Linkage, Visibility, Cconv, Ret_attrs, Type, Name, Arglist, Align)->
   #llvm_fun_decl{
     linkage=Linkage,
@@ -542,21 +640,15 @@ fun_decl_name(#llvm_fun_decl{'name'=Name}) -> Name.
 fun_decl_arglist(#llvm_fun_decl{arglist=Arglist}) -> Arglist.
 fun_decl_align(#llvm_fun_decl{align=Align}) -> Align.
 
-%%
 %% comment
-%%
 mk_comment(Text) -> #llvm_comment{text=Text}.
 comment_text(#llvm_comment{text=Text}) -> Text.
 
-%%
 %% label
-%%
 mk_label(Label) -> #llvm_label{label=Label}.
 label_label(#llvm_label{label=Label}) -> Label.
 
-%%
-%% constant declaration
-%%
+%% const_decl
 mk_const_decl(Dst, Decl_type, Type, Value) ->
   #llvm_const_decl{dst=Dst, decl_type=Decl_type, type=Type, value=Value}.
 const_decl_dst(#llvm_const_decl{dst=Dst}) -> Dst.
@@ -564,30 +656,27 @@ const_decl_decl_type(#llvm_const_decl{decl_type=Decl_type}) -> Decl_type.
 const_decl_type(#llvm_const_decl{type=Type}) -> Type.
 const_decl_value(#llvm_const_decl{value=Value}) -> Value.
 
+%% asm
 mk_asm(Instruction) -> #llvm_asm{instruction=Instruction}.
 asm_instruction(#llvm_asm{instruction=Instruction}) -> Instruction.
 
+%% adj_stack
 mk_adj_stack(Offset, Register, Type) ->
   #llvm_adj_stack{offset=Offset, 'register'=Register, type=Type}.
 adj_stack_offset(#llvm_adj_stack{offset=Offset}) -> Offset.
 adj_stack_register(#llvm_adj_stack{'register'=Register}) -> Register.
 adj_stack_type(#llvm_adj_stack{type=Type}) -> Type.
 
-%%
-%% Branch Metadata
-%%
+%% branch meta-data
 mk_branch_meta(Id, True_weight, False_weight) ->
   #llvm_branch_meta{id=Id, true_weight=True_weight, false_weight=False_weight}.
 branch_meta_id(#llvm_branch_meta{id=Id}) -> Id.
-branch_meta_true_weight(#llvm_branch_meta{true_weight=True_weight}) -> True_weight.
-branch_meta_false_weight(#llvm_branch_meta{false_weight=False_weight}) -> False_weight.
+branch_meta_true_weight(#llvm_branch_meta{true_weight=True_weight}) ->
+  True_weight.
+branch_meta_false_weight(#llvm_branch_meta{false_weight=False_weight}) ->
+  False_weight.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%%
-%% Types
-%%
-
+%% types
 mk_int(Width) -> #llvm_int{width=Width}.
 int_width(#llvm_int{width=Width}) -> Width.
 
@@ -611,7 +700,9 @@ function_ret_type(#llvm_fun{ret_type=Ret_type}) -> Ret_type.
 function_arg_type_list(#llvm_fun{arg_type_list=Arg_type_list}) ->
   Arg_type_list.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%----------------------------------------------------------------------------
+%% Pretty-printer Functions
+%%----------------------------------------------------------------------------
 
 %% @doc Pretty-print a list of LLVM instructions to a Device.
 pp_ins_list(_Dev, []) -> ok;
@@ -853,7 +944,8 @@ pp_ins(Dev, I) ->
       write(Dev, ["!", branch_meta_id(I), " = metadata !{metadata !\"branch_weights\",
           i32 ", branch_meta_true_weight(I), ", i32 ",
           branch_meta_false_weight(I), "}\n"]);
-    Other -> exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
+    Other ->
+      exit({?MODULE, pp_ins, {"Unknown LLVM instruction", Other}})
   end.
 
 %% @doc Pretty-print a list of types
@@ -910,14 +1002,6 @@ pp_type(Dev, Type) ->
       write(Dev, "}")
   end.
 
-op_has_options(Op) ->
-  case Op of
-    'and' -> false;
-    'or' -> false;
-    'xor' -> false;
-    _ -> true
-  end.
-
 %% @doc Pretty-print a list of typed arguments
 pp_args(_Dev, []) -> ok;
 pp_args(Dev, [{Type, Arg} | []]) ->
@@ -958,6 +1042,10 @@ pp_switch_value_label_list(Dev, Type, [{Value, Label} | VLs]) ->
   write(Dev, [" ", Value, ", label ", Label, "\n"]),
   pp_switch_value_label_list(Dev, Type, VLs).
 
+%%----------------------------------------------------------------------------
+%% Auxiliary Functions
+%%----------------------------------------------------------------------------
+
 %% @doc Returns if an instruction needs to be intended
 indent(I) ->
   case I of
@@ -966,6 +1054,14 @@ indent(I) ->
     #llvm_fun_decl{} -> false;
     #llvm_const_decl{} -> false;
     #llvm_branch_meta{} -> false;
+    _ -> true
+  end.
+
+op_has_options(Op) ->
+  case Op of
+    'and' -> false;
+    'or' -> false;
+    'xor' -> false;
     _ -> true
   end.
 
