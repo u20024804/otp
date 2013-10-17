@@ -1,8 +1,8 @@
 %% -*- erlang-indent-level: 2 -*-
 
-%%% @copyright 2011-2012 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
+%%% @copyright 2011-2013 Yiannis Tsiouris <gtsiour@softlab.ntua.gr>,
 %%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
-%%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
+%%% @author Yiannis Tsiouris <gtsiour@softlab.ntua.gr>
 %%%    [http://www.softlab.ntua.gr/~gtsiour/]
 
 %%------------------------------------------------------------------------------

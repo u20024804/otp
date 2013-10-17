@@ -1,9 +1,9 @@
 %% -*- erlang-indent-level: 2 -*-
 
-%%% @copyright 2011-2013 Yiannis Tsiouris <yiannis.tsiouris@gmail.com>,
-%%%                      Chris Stavrakakis <hydralisk.r@gmail.com>
+%%% @copyright 2011-2013 Yiannis Tsiouris <gtsiour@softlab.ntua.gr>,
+%%%                      Chris Stavrakakis <hydralisk.r@gmail.com>,
 %%%                      Kostis Sagonas <kostis@cs.ntua.gr>
-%%% @author Yiannis Tsiouris <yiannis.tsiouris@gmail.com>
+%%% @author Yiannis Tsiouris <gtsiour@softlab.ntua.gr>
 %%%    [http://www.softlab.ntua.gr/~gtsiour/]
 
 %%% @doc This module contains functions for extracting various pieces of
