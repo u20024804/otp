@@ -2,7 +2,8 @@
 -module(hipe_rtl2llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 
--export([translate/2, fix_mfa_name/1]).
+-export([translate/2]).    % the main function of this module
+-export([fix_mfa_name/1]). % a help function used in hipe_llvm_main
 
 -include("../rtl/hipe_rtl.hrl").
 -include("../rtl/hipe_literals.hrl").
@@ -680,9 +681,9 @@ trans_load_address(I, Relocs) ->
         {"%DL" ++ integer_to_list(RtlAddr) ++ "_var", Relocs};
       closure  ->
         {{_, ClosureName, _}, _, _} = RtlAddr,
-        FixedClosurename = atom_to_list(fix_closure_name(ClosureName)),
-        Relocs1 = relocs_store(FixedClosurename, {closure, RtlAddr}, Relocs),
-        {"%" ++ FixedClosurename ++ "_var", Relocs1};
+        FixedClosureName = fix_closure_name(ClosureName),
+        Relocs1 = relocs_store(FixedClosureName, {closure, RtlAddr}, Relocs),
+        {"%" ++ FixedClosureName ++ "_var", Relocs1};
       type ->
         exit({?MODULE, trans_load_address,
 	      {"Type not implemented in load_address", RtlAddr}})
@@ -978,6 +979,16 @@ store_fixed_regs(RegList, Name) ->
 %% Translation of Names
 %%------------------------------------------------------------------------------
 
+%% @doc Fix F in MFA tuple to acceptable LLVM identifier (case of closure).
+-spec fix_mfa_name(mfa()) -> mfa().
+fix_mfa_name({Mod_Name, Closure_Name, Arity}) ->
+  Fun_Name = list_to_atom(fix_closure_name(Closure_Name)),
+  {Mod_Name, Fun_Name, Arity}.
+
+%% @doc Make an acceptable LLVM identifier for a closure name
+fix_closure_name(ClosureName) ->
+  make_llvm_id(atom_to_list(ClosureName)).
+
 %% @doc create an acceptable LLVM identifier
 make_llvm_id(Name) ->
   case Name of
@@ -997,19 +1008,8 @@ trans_mfa_name({M,F,A}) ->
   N = atom_to_list(M)++"."++atom_to_list(F)++"."++integer_to_list(A),
   make_llvm_id(N).
 
-%% @doc Fix F in MFA tuple to acceptable LLVM identifier (case of closure).
--spec fix_mfa_name(mfa()) -> mfa().
-fix_mfa_name({Mod_Name, Closure_Name, Arity}) ->
-  Fun_Name = fix_closure_name(Closure_Name),
-  {Mod_Name, Fun_Name, Arity}.
-
-%% @doc Make an acceptable LLVM identifier for a closure name
-fix_closure_name(ClosureName) ->
-  CN = atom_to_list(ClosureName),
-  list_to_atom(make_llvm_id(CN)).
-
 %%------------------------------------------------------------------------------
-%% Creation of Labels And Temporaries
+%% Creation of Labels and Temporaries
 %%------------------------------------------------------------------------------
 mk_label(N) ->
   "L" ++ integer_to_list(N).
