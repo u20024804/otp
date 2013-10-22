@@ -176,11 +176,14 @@
     fun_decl_arglist/1,
     fun_decl_align/1,
 
+    mk_landingpad/0,
+
     mk_comment/1,
     comment_text/1,
 
     mk_label/1,
     label_label/1,
+    is_label/1,
 
     mk_const_decl/4,
     const_decl_dst/1,
@@ -200,14 +203,17 @@
     branch_meta_id/1,
     branch_meta_true_weight/1,
     branch_meta_false_weight/1
-
   ]).
 
-
-%% Types
 -export([
+    mk_void/0,
+
+    mk_label_type/0,
+
     mk_int/1,
     int_width/1,
+
+    mk_double/0,
 
     mk_pointer/1,
     pointer_type/1,
@@ -340,45 +346,58 @@
 -record(llvm_branch_meta, {id, true_weight, false_weight}).
 -type llvm_branch_meta() :: #llvm_branch_meta{}.
 
+%% A type for any LLVM instruction
+-type llvm_instr() :: llvm_ret() | llvm_br() | llvm_br_cond()
+                    | llvm_indirectbr() | llvm_switch() | llvm_invoke()
+                    | llvm_operation() | llvm_extractvalue()
+                    | llvm_insertvalue() | llvm_alloca() | llvm_load()
+                    | llvm_store() | llvm_getelementptr() | llvm_conversion()
+                    | llvm_sitofp() | llvm_ptrtoint() | llvm_inttoptr()
+                    | llvm_icmp() | llvm_fcmp() | llvm_phi() | llvm_select()
+                    | llvm_call() | llvm_fun_def() | llvm_fun_decl()
+                    | llvm_landingpad() | llvm_comment() | llvm_label()
+                    | llvm_const_decl() | llvm_asm() | llvm_adj_stack()
+                    | llvm_branch_meta().
+
 %% Types
 -record(llvm_void, {}).
--type llvm_void() :: #llvm_void{}.
+%-type llvm_void() :: #llvm_void{}.
 
 -record(llvm_label_type, {}).
--type llvm_label_type() :: #llvm_label_type{}.
+%-type llvm_label_type() :: #llvm_label_type{}.
 
 -record(llvm_int, {width}).
--type llvm_int() :: #llvm_int{}.
+%-type llvm_int() :: #llvm_int{}.
 
 -record(llvm_float, {}).
--type llvm_float() :: #llvm_float{}.
+%-type llvm_float() :: #llvm_float{}.
 
 -record(llvm_double, {}).
--type llvm_double() :: #llvm_double{}.
+%-type llvm_double() :: #llvm_double{}.
 
 -record(llvm_fp80, {}).
--type llvm_fp80() :: #llvm_fp80{}.
+%-type llvm_fp80() :: #llvm_fp80{}.
 
 -record(llvm_fp128, {}).
--type llvm_fp128() :: #llvm_fp128{}.
+%-type llvm_fp128() :: #llvm_fp128{}.
 
 -record(llvm_ppc_fp128, {}).
--type llvm_ppc_fp128() :: #llvm_ppc_fp128{}.
+%-type llvm_ppc_fp128() :: #llvm_ppc_fp128{}.
 
 -record(llvm_pointer, {type}).
--type llvm_pointer() :: #llvm_pointer{}.
+%-type llvm_pointer() :: #llvm_pointer{}.
 
 -record(llvm_vector, {'size', type}).
--type llvm_vector() :: #llvm_vector{}.
+%-type llvm_vector() :: #llvm_vector{}.
 
 -record(llvm_struct, {type_list}).
--type llvm_struct() :: #llvm_struct{}.
+%-type llvm_struct() :: #llvm_struct{}.
 
 -record(llvm_array, {'size', type}).
--type llvm_array() :: #llvm_array{}.
+%-type llvm_array() :: #llvm_array{}.
 
 -record(llvm_fun, {ret_type, arg_type_list}).
--type llvm_fun() :: #llvm_fun{}.
+%-type llvm_fun() :: #llvm_fun{}.
 
 %%-----------------------------------------------------------------------------
 %% Accessor Functions
@@ -640,6 +659,9 @@ fun_decl_name(#llvm_fun_decl{'name'=Name}) -> Name.
 fun_decl_arglist(#llvm_fun_decl{arglist=Arglist}) -> Arglist.
 fun_decl_align(#llvm_fun_decl{align=Align}) -> Align.
 
+%% landingpad
+mk_landingpad() -> #llvm_landingpad{}.
+
 %% comment
 mk_comment(Text) -> #llvm_comment{text=Text}.
 comment_text(#llvm_comment{text=Text}) -> Text.
@@ -647,6 +669,39 @@ comment_text(#llvm_comment{text=Text}) -> Text.
 %% label
 mk_label(Label) -> #llvm_label{label=Label}.
 label_label(#llvm_label{label=Label}) -> Label.
+
+-spec is_label(llvm_instr()) -> boolean().
+is_label(#llvm_label{}) -> true;
+is_label(#llvm_ret{}) -> false;
+is_label(#llvm_br{}) -> false;
+is_label(#llvm_br_cond{}) -> false;
+is_label(#llvm_indirectbr{}) -> false;
+is_label(#llvm_switch{}) -> false;
+is_label(#llvm_invoke{}) -> false;
+is_label(#llvm_operation{}) -> false;
+is_label(#llvm_extractvalue{}) -> false;
+is_label(#llvm_insertvalue{}) -> false;
+is_label(#llvm_alloca{}) -> false;
+is_label(#llvm_load{}) -> false;
+is_label(#llvm_store{}) -> false;
+is_label(#llvm_getelementptr{}) -> false;
+is_label(#llvm_conversion{}) -> false;
+is_label(#llvm_sitofp{}) -> false;
+is_label(#llvm_ptrtoint{}) -> false;
+is_label(#llvm_inttoptr{}) -> false;
+is_label(#llvm_icmp{}) -> false;
+is_label(#llvm_fcmp{}) -> false;
+is_label(#llvm_phi{}) -> false;
+is_label(#llvm_select{}) -> false;
+is_label(#llvm_call{}) -> false;
+is_label(#llvm_fun_def{}) -> false;
+is_label(#llvm_fun_decl{}) -> false;
+is_label(#llvm_landingpad{}) -> false;
+is_label(#llvm_comment{}) -> false;
+is_label(#llvm_const_decl{}) -> false;
+is_label(#llvm_asm{}) -> false;
+is_label(#llvm_adj_stack{}) -> false;
+is_label(#llvm_branch_meta{}) -> false.
 
 %% const_decl
 mk_const_decl(Dst, Decl_type, Type, Value) ->
@@ -677,8 +732,14 @@ branch_meta_false_weight(#llvm_branch_meta{false_weight=False_weight}) ->
   False_weight.
 
 %% types
+mk_void() -> #llvm_void{}.
+
+mk_label_type() -> #llvm_label_type{}.
+
 mk_int(Width) -> #llvm_int{width=Width}.
 int_width(#llvm_int{width=Width}) -> Width.
+
+mk_double() -> #llvm_double{}.
 
 mk_pointer(Type) -> #llvm_pointer{type=Type}.
 pointer_type(#llvm_pointer{type=Type}) -> Type.

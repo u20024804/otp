@@ -9,14 +9,14 @@
 -include("../rtl/hipe_literals.hrl").
 -include("hipe_llvm_arch.hrl").
 
--define(WORD_TYPE, #llvm_int{width=?WORD_WIDTH}).
--define(WORD_TYPE_P, #llvm_pointer{type=?WORD_TYPE}).
--define(FLOAT_TYPE, #llvm_double{}).
--define(FLOAT_TYPE_P, #llvm_pointer{type=?FLOAT_TYPE}).
--define(BYTE_TYPE, #llvm_int{width=8}).
--define(BYTE_TYPE_P, #llvm_pointer{type=?BYTE_TYPE}).
+-define(WORD_TYPE, hipe_llvm:mk_int(?WORD_WIDTH)).
+-define(WORD_TYPE_P, hipe_llvm:mk_pointer(?WORD_TYPE)).
+-define(FLOAT_TYPE, hipe_llvm:mk_double()).
+-define(FLOAT_TYPE_P, hipe_llvm:mk_pointer(?FLOAT_TYPE)).
+-define(BYTE_TYPE, hipe_llvm:mk_int(8)).
+-define(BYTE_TYPE_P, hipe_llvm:mk_pointer(?BYTE_TYPE)).
 -define(FUN_RETURN_TYPE,
-        #llvm_struct{type_list=lists:duplicate(?NR_PINNED_REGS+1, ?WORD_TYPE)}).
+        hipe_llvm:mk_struct(lists:duplicate(?NR_PINNED_REGS+1, ?WORD_TYPE))).
 
 -define(BRANCH_META_TAKEN, "0").
 -define(BRANCH_META_NOT_TAKEN, "1").
@@ -111,7 +111,7 @@ do_alloca_stack([D|Ds], Params, Roots, Acc) ->
           I2 = hipe_llvm:mk_conversion(T1, bitcast, ?WORD_TYPE_P, Name,
                                        BYTE_TYPE_PP),
           GcRootArgs = [{BYTE_TYPE_PP, T1}, {?BYTE_TYPE_P, "@gc_metadata"}],
-          I3 = hipe_llvm:mk_call([], false, [], [], #llvm_void{},
+          I3 = hipe_llvm:mk_call([], false, [], [], hipe_llvm:mk_void(),
                                  "@llvm.gcroot", GcRootArgs, []),
           I4 = case lists:member(D, Params) of
                  false ->
@@ -300,9 +300,9 @@ trans_alub_op(I, Sign) ->
         end
     end,
   Type =
-    case ?WORD_TYPE of
-      #llvm_int{width=32} -> "i32";
-      #llvm_int{width=64} -> "i64"
+    case hipe_llvm:int_width(?WORD_TYPE) of
+      32 -> "i32";
+      64 -> "i64"
       %% Other -> exit({?MODULE, trans_alub_op, {"Unknown type", Other}})
     end,
   Name ++ Type.
@@ -648,7 +648,7 @@ trans_load(I, Relocs) ->
            II2 = hipe_llvm:mk_load(TmpDst, ?WORD_TYPE_P, T2, [], [], false),
            [II2, II1];
          Size ->
-           LoadType = type_from_size(Size),
+           LoadType = llvm_type_from_size(Size),
            LoadTypeP = hipe_llvm:mk_pointer(LoadType),
            T2 = mk_temp(),
            II1 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1,
@@ -766,7 +766,7 @@ trans_store(I, Relocs) ->
 	[II2, II1];
       Size ->
 	%% XXX: Is always trunc correct ?
-	LoadType = type_from_size(Size),
+	LoadType = llvm_type_from_size(Size),
 	LoadTypePointer = hipe_llvm:mk_pointer(LoadType),
 	T2 = mk_temp(),
 	II1 = hipe_llvm:mk_conversion(T2, inttoptr, ?WORD_TYPE, T1,
@@ -790,7 +790,7 @@ trans_switch(I, Relocs, Data) ->
   NrLabels = length(Labels),
   TableType = hipe_llvm:mk_array(NrLabels, ?BYTE_TYPE_P),
   TableTypeP = hipe_llvm:mk_pointer(TableType),
-  TypedJumpLabels = [{#llvm_label_type{}, X} || X <- JumpLabels],
+  TypedJumpLabels = [{hipe_llvm:mk_label_type(), X} || X <- JumpLabels],
   T1 = mk_temp(),
   {Src2, []} = trans_dst(RtlSrc),
   TableName = "table_"++tl(Src2),
@@ -887,12 +887,12 @@ add_landingpads(LLVM_Code, FailLabels) ->
 add_landingpads([], _, Acc) ->
   lists:reverse(Acc);
 add_landingpads([I|Is], FailLabels, Acc) ->
-  case I of
-    #llvm_label{} ->
+  case hipe_llvm:is_label(I) of
+    true ->
       Label = hipe_llvm:label_label(I),
       Ins = create_fail_blocks(Label, FailLabels),
       add_landingpads(Is, FailLabels, [I|Ins] ++ Acc);
-    _ ->
+    false ->
       add_landingpads(Is, FailLabels, [I|Acc])
   end.
 
@@ -910,7 +910,7 @@ create_fail_blocks(Label, FailLabels, Acc) ->
       Acc;
     {value, {Label, FailLabel, SpAdj}, RestFailLabels} ->
       I1 = hipe_llvm:mk_label(FailLabel),
-      LP = #llvm_landingpad{},
+      LP = hipe_llvm:mk_landingpad(),
       I2 =
         case SpAdj > 0 of
           true ->
@@ -1268,12 +1268,12 @@ insn_dst(I) ->
     _ -> []
   end.
 
-type_from_size(Size) ->
+llvm_type_from_size(Size) ->
   case Size of
-    byte -> #llvm_int{width=8};
-    int16 -> #llvm_int{width=16};
-    int32 -> #llvm_int{width=32};
-    word -> #llvm_int{width=64}
+    byte  -> hipe_llvm:mk_int(8);
+    int16 -> hipe_llvm:mk_int(16);
+    int32 -> hipe_llvm:mk_int(32);
+    word  -> hipe_llvm:mk_int(64)
   end.
 
 %% @doc Create definition for the compiled function. The parameters that are
@@ -1499,10 +1499,10 @@ call_to_decl({Name, {call, MFA}}) ->
 
 %% @doc This functions are always declared, even if not used
 fixed_fun_decl() ->
-  LandPad = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_int{width=32},
-    "@__gcc_personality_v0", [#llvm_int{width=32}, #llvm_int{width=64},
+  LandPad = hipe_llvm:mk_fun_decl([], [], [], [], hipe_llvm:mk_int(32),
+    "@__gcc_personality_v0", [hipe_llvm:mk_int(32), hipe_llvm:mk_int(64),
 			      ?BYTE_TYPE_P, ?BYTE_TYPE_P], []),
-  GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], #llvm_void{},
+  GCROOTDecl = hipe_llvm:mk_fun_decl([], [], [], [], hipe_llvm:mk_void(),
     "@llvm.gcroot", [hipe_llvm:mk_pointer(?BYTE_TYPE_P), ?BYTE_TYPE_P], []),
   FixPinnedRegs = hipe_llvm:mk_fun_decl([], [], [], [], ?FUN_RETURN_TYPE,
 					"@hipe_bifs.llvm_fix_pinned_regs.0",
