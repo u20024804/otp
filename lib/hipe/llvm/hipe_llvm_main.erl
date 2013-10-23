@@ -31,7 +31,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   {Switches, Closures} = get_tables(ObjBin),
   %% Associate Labels with Switches and Closures with stack args
   {SwitchInfos, ExposedClosures} =
-    correlate_labels(Switches++Closures, Labels),
+    correlate_labels(Switches ++ Closures, Labels),
   %% SwitchInfos:     [{"table_50", [Labels]}]
   %% ExposedClosures: [{"table_closures", [Labels]}]
   
@@ -49,7 +49,7 @@ rtl_to_native(MFA, RTL, Roots, Options) ->
   %% arguments in the stack
   FixedSDescs =
     fix_stack_descriptors(RelocsDict, AccRefs, SDescs, ExposedClosures),
-  Refs = AccRefs++FixedSDescs,
+  Refs = AccRefs ++ FixedSDescs,
   %% Get binary code from object file
   BinCode = elf_format:extract_text(ObjBin),
   %% Remove temp files (if needed)
@@ -138,7 +138,7 @@ compile(Dir, Fun_Name, Compiler) ->
   Source  = Dir ++ Fun_Name ++ ".s",
   Dest    = Dir ++ Fun_Name ++ ".o",
   Command = Compiler ++ " -c " ++ Source ++ " -o " ++ Dest,
-  %% io:format("~s: ~s~n", [Compiler,Command]),
+  %% io:format("~s: ~s~n", [Compiler, Command]),
   case os:cmd(Command) of
     "" -> ok;
     Error -> exit({?MODULE, cc, Error})
@@ -152,11 +152,11 @@ find_stack_alignment() ->
     _ -> exit({?MODULE, find_stack_alignment, "Unimplemented architecture"})
   end.
 
-%% Join options
+%% @doc Join options.
 fix_opts(Opts) ->
   string:join(Opts, " ").
 
-%% Translate optimization-level flag (default is "O2")
+%% @doc Translate optimization-level flag (default is "O2").
 trans_optlev_flag(Tool, Options) ->
   Flag = case Tool of
 	   opt -> llvm_opt;
@@ -178,8 +178,8 @@ trans_optlev_flag(Tool, Options) ->
 get_tables(Elf) ->
   %% Search Symbol Table for an entry with name prefixed with "table_":
   Triples = elf_format:get_tab_entries(Elf),
-  Switches = [T || T={"table_"++_, _, _} <- Triples],
-  Closures = [T || T={"table_closures"++_, _, _} <- Switches],
+  Switches = [T || T={"table_" ++ _, _, _} <- Triples],
+  Closures = [T || T={"table_closures" ++ _, _, _} <- Switches],
   {Switches, Closures}.
 
 %% @doc This function associates symbols who point to some table of labels with
@@ -217,10 +217,10 @@ create_labelmap(MFA, [{Name, Offsets} | Rest], RelocsDict, LabelMap) ->
       NewLabelMap = insert_to_labelmap(KVDict, LabelMap),
       create_labelmap(MFA, Rest, RelocsDict, NewLabelMap);
     _ ->
-      exit({?MODULE, create_labelmap, "Not a jump table!~n"})
+      exit({?MODULE, create_labelmap, "Not a jump table!"})
   end.
 
-%% Insert a list of [{Key,Value}] to a LabelMap (gb_tree)
+%% @doc Insert a list of [{Key,Value}] to a LabelMap (gb_tree).
 insert_to_labelmap([], LabelMap) -> LabelMap;
 insert_to_labelmap([{Key, Value}|Rest], LabelMap) ->
   case gb_trees:lookup(Key, LabelMap) of
@@ -263,7 +263,7 @@ fix_relocs([{Name, Offset}|Rs], RelocsDict, {ModName,_,_}=MFA,  RelocAcc) ->
                  [{?CALL_REMOTE, Offset, CallMFA}|RelocAcc]);
     Other ->
       exit({?MODULE, fix_relocs,
-	    {"Relocation not in Relocation Dictionary", Other}})
+           {"Relocation not in relocation dictionary", Other}})
   end.
 
 %%------------------------------------------------------------------------------
@@ -371,15 +371,18 @@ fix_stack_descriptors(RelocsDict, Relocs, SDescs, ExposedClosures) ->
     case dict:is_key("table_closures", RelocsDict) of
       true -> %% A Table with closures exists
         {table_closures, ArityList} = dict:fetch("table_closures", RelocsDict),
-            case ExposedClosures of
-              {_,  Offsets} -> lists:zip(Offsets, ArityList);
-              _ -> exit({?MODULE, fix_stack_descriptors,
-			 {"Wrong exposed closures", ExposedClosures}})
-            end;
-      false -> []
+        case ExposedClosures of
+          {_,  Offsets} ->
+            lists:zip(Offsets, ArityList);
+          _ ->
+            exit({?MODULE, fix_stack_descriptors,
+                 {"Wrong exposed closures", ExposedClosures}})
+        end;
+      false ->
+        []
     end,
   ClosuresOffs = closures_offsets_arity(ExposedClosures1, SDescs),
-  fix_sdescs(NamedCallsOffs++ClosuresOffs, SDescs).
+  fix_sdescs(NamedCallsOffs ++ ClosuresOffs, SDescs).
 
 %% @doc This function takes as argument the relocation dictionary as produced by
 %%      the translation of RTL code to LLVM and finds the names of the calls
@@ -415,7 +418,7 @@ calls_offsets_arity([{Type, Offset, Term} | Rest], CallsWithStackArgs, Acc)
           {_F, A} -> A
         end,
       calls_offsets_arity(Rest, CallsWithStackArgs,
-                          [{Offset + 4, Arity - ?NR_ARG_REGS}|Acc]);
+                          [{Offset + 4, Arity - ?NR_ARG_REGS} | Acc]);
     false ->
       calls_offsets_arity(Rest, CallsWithStackArgs, Acc)
   end;
@@ -515,7 +518,7 @@ dir_exists(Filename) ->
 %% @doc Function that takes as arguments a list of integers and a list with
 %%      numbers indicating how many items should each tuple have and splits
 %%      the original list to a list of lists of integers (with the specified
-%%      number of elements), e.g. [ [...], [...] ].
+%%      number of elements), i.e. [ [...], [...] ].
 -spec split_list([integer()], [integer()]) -> [ [integer()] ].
 split_list(List, ElemsPerTuple) ->
   split_list(List, ElemsPerTuple, []).
