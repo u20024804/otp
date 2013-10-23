@@ -1,5 +1,6 @@
 %% -*- erlang-indent-level: 2 -*-
--module(hipe_rtl2llvm).
+
+-module(hipe_rtl_to_llvm).
 -author("Chris Stavrakakis, Yiannis Tsiouris").
 
 -export([translate/2]).    % the main function of this module

@@ -8,15 +8,15 @@
 -include("elf_format.hrl").
 
 %% @doc Translation of RTL to a loadable object. This function takes the RTL
-%%      code and calls hipe_rtl2llvm:translate/2 to translate the RTL code to
+%%      code and calls hipe_rtl_to_llvm:translate/2 to translate the RTL code to
 %%      LLVM code. After this, LLVM asm is printed to a file and the LLVM tool
 %%      chain is invoked in order to produce an object file.
 rtl_to_native(MFA, RTL, Roots, Options) ->
   %% Compile to LLVM and get Instruction List (along with infos)
   {LLVMCode, RelocsDict, ConstTab} =
-    hipe_rtl2llvm:translate(RTL, Roots),
+    hipe_rtl_to_llvm:translate(RTL, Roots),
   %% Fix function name to an acceptable LLVM identifier (needed for closures)
-  {_Module, Fun, Arity} = hipe_rtl2llvm:fix_mfa_name(MFA),
+  {_Module, Fun, Arity} = hipe_rtl_to_llvm:fix_mfa_name(MFA),
   %% Write LLVM Assembly to intermediate file (on disk)
   {ok, Dir, ObjectFile} =
     compile_with_llvm(Fun, Arity, LLVMCode, Options, false),

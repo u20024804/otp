@@ -39,7 +39,7 @@ RELSYSDIR = $(RELEASE_PATH)/lib/hipe-$(VSN)
 # Target Specs
 # ----------------------------------------------------
 ifdef HIPE_ENABLED
-HIPE_MODULES = hipe_rtl2llvm \
+HIPE_MODULES = hipe_rtl_to_llvm \
 	hipe_llvm \
 	elf_format \
 	hipe_llvm_main \
