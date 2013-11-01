@@ -10,6 +10,7 @@
 -include("../rtl/hipe_literals.hrl").
 -include("hipe_llvm_arch.hrl").
 
+-define(WORD_WIDTH, (?bytes_to_bits(hipe_rtl_arch:word_size()))).
 -define(BRANCH_META_TAKEN, "0").
 -define(BRANCH_META_NOT_TAKEN, "1").
 
@@ -297,9 +298,9 @@ trans_alub_op(I, Sign) ->
         end
     end,
   Type =
-    case ?WORD_WIDTH of
-      32 -> "i32";
-      64 -> "i64"
+    case hipe_rtl_arch:word_size() of
+      4 -> "i32";
+      8 -> "i64"
       %% Other -> exit({?MODULE, trans_alub_op, {"Unknown type", Other}})
     end,
   Name ++ Type.
@@ -892,7 +893,7 @@ find_sp_adj(ArgList) ->
   NrArgs = length(ArgList),
   case NrArgs > ?NR_ARG_REGS of
     true ->
-      (NrArgs - ?NR_ARG_REGS) * (?WORD_WIDTH div 8);
+      (NrArgs - ?NR_ARG_REGS) * hipe_rtl_arch:word_size();
     false ->
       0
   end.
@@ -1222,7 +1223,7 @@ pointer_from_reg(RegName, Type, Offset) ->
   T3 = mk_temp(),
   %% XXX: Offsets should be a power of 2.
   I3 = hipe_llvm:mk_getelementptr(T3, PointerType, T2,
-				  [{Type, integer_to_list(Offset div (?WORD_WIDTH div 8))}], true),
+    [{Type, integer_to_list(Offset div hipe_rtl_arch:word_size())}], true),
   {T3, [I3, I2, I1]}.
 
 isPrecoloured(X) ->
