@@ -194,12 +194,10 @@
 	 c/2,
  	 f/1,
  	 f/2,
-	 compile/1,
-	 compile/2,
-	 compile/4,
 	 compile_core/4,
  	 file/1,
  	 file/2,
+        llvm_support_available/0,
 	 load/1,
 	 help/0,
 	 help_hiper/0,
@@ -324,14 +322,38 @@ c(Name, Options) ->
 
 c(Name, File, Opts) ->
   Opts1 = user_compile_opts(Opts),
-  case compile(Name, File, Opts1) of
+  Opts2 =
+    case proplists:get_bool(to_llvm, Opts1) andalso
+        not llvm_support_available() of
+      true ->
+        io:format("Ignoring 'to_llvm' because there is no LLVM 3.4 or " ++
+                  "greater installed in the system.~n", []),
+        proplists:delete(to_llvm, Opts1);
+      false ->
+        Opts1
+    end,
+  case compile(Name, File, Opts2) of
     {ok, Res} ->
-      case proplists:get_bool(to_rtl, Opts1) of
+      case proplists:get_bool(to_rtl, Opts2) of
 	true -> {ok, Name, Res};
 	false -> {ok, Name}
       end;
     Other ->
       Other
+  end.
+
+llvm_support_available() ->
+  get_llvm_version() >= 3.4.
+
+get_llvm_version() ->
+  OptStr = os:cmd("opt -version"),
+  SubStr = "LLVM version ", N = length(SubStr),
+  case string:str(OptStr, SubStr) of
+     0 -> 0; % No opt available
+     S ->
+       P = S + N,
+       {Version, _} = string:to_float(string:sub_string(OptStr, P, P + 2)),
+       Version
   end.
 
 %% @spec f(File) -> {ok, Name} | {error, Reason}
